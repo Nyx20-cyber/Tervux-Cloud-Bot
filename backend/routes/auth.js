@@ -91,7 +91,7 @@ router.post("/login", async (req, res) => {
  */
 router.get("/me", authenticate, async (req, res) => {
     try {
-        const user = await User.findById(req.user._id).populate("subscription.planId");
+        const user = await User.findById(req.user._id);
         res.json({ user: user.toJSON() });
     } catch (error) {
         console.error("Profile error:", error);

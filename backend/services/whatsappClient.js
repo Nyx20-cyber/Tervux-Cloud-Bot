@@ -1,11 +1,11 @@
-import { default as makeWASocket, DisconnectReason, Browsers, useMultiFileAuthState } from "@whiskeysockets/baileys";
+import { default as makeWASocket, DisconnectReason, Browsers } from "@whiskeysockets/baileys";
 import pino from "pino";
-import { existsSync, mkdirSync, rmSync, readFileSync } from "fs";
-import { join } from "path";
 import { commands } from "../commands/index.js";
 import { handleGroupParticipantsUpdate, handleGroupMessage } from "./groupEventHandler.js";
 import { addAutoReaction, getRandomEmoji } from "../utils/reactionUtils.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
+import WhatsAppAuth from "../models/WhatsAppAuth.js";
+import { useMongoDBAuthState } from "./mongoAuthState.js";
 
 /**
  * Multi-Tenant WhatsApp Session Manager
@@ -89,12 +89,7 @@ class SessionManager {
             return null;
         }
 
-        const authDir = dbSession.authDir;
-        if (!existsSync(authDir)) {
-            mkdirSync(authDir, { recursive: true });
-        }
-
-        const { state, saveCreds } = await useMultiFileAuthState(authDir);
+        const { state, saveCreds } = await useMongoDBAuthState(sessionId);
 
         console.log(`🔌 [${sessionId}] Creating WhatsApp socket...`);
 
@@ -171,15 +166,16 @@ class SessionManager {
                 const statusCode = error?.output?.statusCode;
                 const errorMessage = error?.message || "";
 
-                const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+                const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 405;
                 const isConflict = errorMessage.includes("conflict") ||
                     statusCode === DisconnectReason.connectionReplaced;
 
                 console.log(`❌ [${sessionId}] Connection closed. Code: ${statusCode}`);
 
                 if (isLoggedOut) {
-                    console.log(`🔓 [${sessionId}] Logged out.`);
+                    console.log(`🔓 [${sessionId}] Logged out or Invalid Session. Destorying auth directory.`);
                     await WhatsAppSession.findByIdAndUpdate(sessionId, { status: "disconnected" });
+                    await WhatsAppAuth.deleteMany({ sessionId });
                     this.sessions.delete(sessionId);
                 } else if (isConflict) {
                     console.log(`⚠️ [${sessionId}] Session conflict.`);
@@ -469,15 +465,13 @@ ${text}
     /**
      * Destroy a session completely (disconnect + delete auth files)
      */
-    async destroySession(sessionId, authDir) {
+    async destroySession(sessionId) {
         await this.disconnectSession(sessionId);
-        if (authDir && existsSync(authDir)) {
-            try {
-                rmSync(authDir, { recursive: true, force: true });
-                console.log(`🧹 [${sessionId}] Auth files deleted.`);
-            } catch (e) {
-                console.error(`[${sessionId}] Failed to delete auth files:`, e.message);
-            }
+        try {
+            await WhatsAppAuth.deleteMany({ sessionId });
+            console.log(`🧹 [${sessionId}] Mongo Auth records deleted.`);
+        } catch (e) {
+            console.error(`[${sessionId}] Failed to delete auth records:`, e.message);
         }
     }
 
@@ -495,7 +489,8 @@ ${text}
     async resumeSession(sessionId) {
         console.log(`▶️ [${sessionId}] Session resuming...`);
         const dbSession = await WhatsAppSession.findById(sessionId);
-        if (dbSession && existsSync(dbSession.authDir) && existsSync(join(dbSession.authDir, "creds.json"))) {
+        const hasAuth = await WhatsAppAuth.findOne({ sessionId, type: "creds" });
+        if (dbSession && hasAuth) {
             await this.connectSession(sessionId);
         }
     }
@@ -532,8 +527,9 @@ ${text}
                 }
 
                 // Check auth directory exists
-                if (!existsSync(session.authDir) || !existsSync(join(session.authDir, "creds.json"))) {
-                    console.log(`⏭️ [${session._id}] Skipping — no auth files found.`);
+                const hasAuth = await WhatsAppAuth.findOne({ sessionId: session._id, type: "creds" });
+                if (!hasAuth) {
+                    console.log(`⏭️ [${session._id}] Skipping — no Mongo Auth creds found.`);
                     session.status = "disconnected";
                     await session.save();
                     continue;
@@ -558,27 +554,21 @@ ${text}
      * Start pairing for a user
      */
     async startPairing(userId, phoneNumber, method, socketId) {
-        const { default: makeWASocket2, useMultiFileAuthState: useAuth2, Browsers: B2 } = await import("@whiskeysockets/baileys");
+        const { default: makeWASocket2, Browsers: B2 } = await import("@whiskeysockets/baileys");
         const { delay } = await import("@whiskeysockets/baileys");
         const { emitUpdate, getIO } = await import("./socketService.js");
-
-        const authDir = join(process.cwd(), "auth_sessions", userId + "_" + Date.now());
-        if (!existsSync(authDir)) {
-            mkdirSync(authDir, { recursive: true });
-        }
 
         // Create DB record
         const dbSession = await WhatsAppSession.create({
             userId,
             phone: phoneNumber,
-            authDir,
             status: "pairing",
             pairingStartedAt: new Date()
         });
 
         const sessionId = dbSession._id.toString();
 
-        const { state, saveCreds } = await useAuth2(authDir);
+        const { state, saveCreds } = await useMongoDBAuthState(sessionId);
 
         const sock = makeWASocket2({
             logger: pino({ level: "silent" }),
@@ -642,21 +632,20 @@ ${text}
                 console.log(`✅ [${sessionId}] Pairing successful!`);
                 await delay(2000);
 
-                // Build session ID for user
-                let sessionData = "";
-                try {
-                    const credsPath = join(authDir, "creds.json");
-                    const creds = JSON.parse(readFileSync(credsPath).toString());
-                    sessionData = "Tervux-" + Buffer.from(JSON.stringify({ creds })).toString("base64");
-                } catch (e) {
-                    console.error(`[${sessionId}] Failed to read creds:`, e);
-                }
-
-                // Send session ID to user's WhatsApp DM
+                // Send Welcome Message to user's WhatsApp DM
                 try {
                     const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
-                    await sock.sendMessage(userJid, { text: sessionData });
-                    console.log(`[${sessionId}] Session ID sent to user DM.`);
+                    const welcomeMsg = `╔══════════════════════════════════╗
+║ 🟢 *𝕋𝔼ℝ𝕍𝕌𝕏 ℂ𝕃𝕆𝕌𝔻 𝔹𝕆𝕋 𝕃𝕀ℕ𝕂𝔼𝔻* 🟢 ║
+╚══════════════════════════════════╝
+
+Welcome! Your WhatsApp is now securely paired with Tervux Core.
+
+To activate 24/7 cloud features like Auto-Reply and Anti-Delete, please return to your Dashboard and select a Subscription Protocol.
+
+✨ *tervux.com/dashboard/billing*`;
+                    await sock.sendMessage(userJid, { text: welcomeMsg });
+                    console.log(`[${sessionId}] Welcome message sent to user DM.`);
                 } catch (msgErr) {
                     console.error(`[${sessionId}] Failed to send DM:`, msgErr);
                 }
@@ -709,7 +698,7 @@ ${text}
             const dbSess = await WhatsAppSession.findById(sessionId);
             if (dbSess && dbSess.status === "pairing") {
                 console.log(`[${sessionId}] Pairing timed out.`);
-                await this.destroySession(sessionId, authDir);
+                await this.destroySession(sessionId);
                 await WhatsAppSession.deleteOne({ _id: sessionId });
             }
         }, 120 * 1000);

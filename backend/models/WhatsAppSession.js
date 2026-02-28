@@ -11,10 +11,6 @@ const whatsAppSessionSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
-    authDir: {
-        type: String,
-        required: true
-    },
     status: {
         type: String,
         enum: ["pairing", "active", "disconnected", "paused", "expired"],

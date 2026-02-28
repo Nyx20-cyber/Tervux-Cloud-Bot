@@ -1,7 +1,6 @@
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import User from "../models/User.js";
-import { existsSync, readdirSync, rmSync } from "fs";
-import { join } from "path";
+import WhatsAppAuth from "../models/WhatsAppAuth.js";
 import { sessionManager } from "./whatsappService.js";
 
 /**
@@ -19,7 +18,7 @@ export async function runCleanup() {
         await cleanGhostSessions();
         await cleanExpiredSubscriptions();
         await cleanStaleDisconnected();
-        await cleanOrphanedDirs();
+        await cleanOrphanedMongoAuth();
         console.log("✅ [Cleanup] Maintenance cycle complete.");
     } catch (error) {
         console.error("❌ [Cleanup] Maintenance failed:", error.message);
@@ -39,7 +38,7 @@ async function cleanGhostSessions() {
 
     for (const ghost of ghosts) {
         console.log(`   👻 [Ghost] Cleaning pairing session ${ghost._id} (${ghost.phone || "unknown"})`);
-        await sessionManager.destroySession(ghost._id.toString(), ghost.authDir);
+        await sessionManager.destroySession(ghost._id.toString());
         await WhatsAppSession.deleteOne({ _id: ghost._id });
     }
 
@@ -87,12 +86,10 @@ async function cleanStaleDisconnected() {
 
     for (const session of stale) {
         console.log(`   🗑️ [Stale] Cleaning up session ${session._id}`);
-        if (session.authDir && existsSync(session.authDir)) {
-            try {
-                rmSync(session.authDir, { recursive: true, force: true });
-            } catch (e) {
-                console.error(`   Failed to delete auth dir:`, e.message);
-            }
+        try {
+            await WhatsAppAuth.deleteMany({ sessionId: session._id });
+        } catch (e) {
+            console.error(`   Failed to delete auth records:`, e.message);
         }
         await WhatsAppSession.deleteOne({ _id: session._id });
     }
@@ -103,25 +100,20 @@ async function cleanStaleDisconnected() {
 }
 
 /**
- * Orphaned auth directories: exist on disk but no DB record
+ * Orphaned Mongo Auth docs: exist in WhatsAppAuth but no WhatsAppSession record
  */
-async function cleanOrphanedDirs() {
-    const authSessionsDir = join(process.cwd(), "auth_sessions");
-    if (!existsSync(authSessionsDir)) return;
-
+async function cleanOrphanedMongoAuth() {
     try {
-        const dirs = readdirSync(authSessionsDir);
+        // Find all unique sessionIds currently in the auth collection
+        const authSessionIds = await WhatsAppAuth.distinct("sessionId");
         let deletedCount = 0;
 
-        for (const dir of dirs) {
-            const fullPath = join(authSessionsDir, dir);
-
-            // Check if any session in DB references this path
-            const session = await WhatsAppSession.findOne({ authDir: fullPath });
-            if (!session) {
-                console.log(`   🗂️ [Orphan] Deleting orphaned dir: ${dir}`);
+        for (const authId of authSessionIds) {
+            const sessionExists = await WhatsAppSession.exists({ _id: authId });
+            if (!sessionExists) {
+                console.log(`   🗂️ [Orphan] Deleting orphaned auth records for session: ${authId}`);
                 try {
-                    rmSync(fullPath, { recursive: true, force: true });
+                    await WhatsAppAuth.deleteMany({ sessionId: authId });
                     deletedCount++;
                 } catch (e) {
                     console.error(`   Failed to delete orphan:`, e.message);
@@ -130,33 +122,9 @@ async function cleanOrphanedDirs() {
         }
 
         if (deletedCount > 0) {
-            console.log(`   🧹 Deleted ${deletedCount} orphaned director(ies).`);
+            console.log(`   🧹 Deleted orphaned auth records for ${deletedCount} session(s).`);
         }
     } catch (error) {
         console.error("   Orphan cleanup error:", error.message);
     }
-}
-
-// Also clean legacy sessions/ directory
-export function cleanLegacySessions() {
-    const sessionsDir = join(process.cwd(), "sessions");
-    if (!existsSync(sessionsDir)) return;
-
-    try {
-        const files = readdirSync(sessionsDir);
-        let deletedCount = 0;
-
-        files.forEach((file) => {
-            if (!file.startsWith("Tervux-")) return;
-            const filePath = join(sessionsDir, file);
-            try {
-                rmSync(filePath, { recursive: true, force: true });
-                deletedCount++;
-            } catch (err) { }
-        });
-
-        if (deletedCount > 0) {
-            console.log(`🧹 [Legacy] Cleaned ${deletedCount} old session folder(s).`);
-        }
-    } catch (error) { }
 }

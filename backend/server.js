@@ -4,7 +4,7 @@ import { createServer } from "http";
 import { initSocket } from "./services/socketService.js";
 import { connectDB } from "./lib/db.js";
 import { initWhatsAppService, shutdownWhatsAppService } from "./services/whatsappService.js";
-import { runCleanup, cleanLegacySessions } from "./services/cleanupService.js";
+import { runCleanup } from "./services/cleanupService.js";
 import { verifyPendingPayments } from "./services/paymentVerifier.js";
 import cron from "node-cron";
 
@@ -29,9 +29,6 @@ async function start() {
             ]);
             console.log("✅ Plans seeded successfully.");
         }
-
-        // 3. Clean legacy session folders
-        cleanLegacySessions();
 
         // 4. Start HTTP server
         httpServer.listen(PORT, () => {

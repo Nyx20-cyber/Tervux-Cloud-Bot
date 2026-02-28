@@ -239,7 +239,7 @@ router.delete("/:id", authenticate, async (req, res) => {
         }
 
         // Disconnect if active
-        await sessionManager.destroySession(session._id.toString(), session.authDir);
+        await sessionManager.destroySession(session._id.toString());
 
         // Remove from DB
         await WhatsAppSession.deleteOne({ _id: session._id });
