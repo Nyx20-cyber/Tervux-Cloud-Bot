@@ -1,0 +1,20 @@
+export const owner = async (sock, m, args) => {
+    const ownerId = sock.user.id.split("@")[0].split(":")[0].replace(/\D/g, "");
+    const ownerName = sock.user.name || "Tervux User";
+
+    return `╔══════════════════════════════════╗
+║   👑 *𝔹𝕆𝕋 𝕆𝕎ℕ𝔼ℝ 𝕀ℕ𝔽𝕆* 👑        ║
+╚══════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 *𝕆𝕎ℕ𝔼ℝ 𝔻𝔼𝕋𝔸𝕀𝕃𝕊*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👤 *ℕ𝕒𝕞𝕖:* ${ownerName}
+📱 *ℕ𝕦𝕞𝕓𝕖𝕣:* @${ownerId}
+🔐 *𝕊𝕥𝕒𝕥𝕦𝕤:* Authorized Admin
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+_This bot is running under this_
+_authorized session only._`;
+};
