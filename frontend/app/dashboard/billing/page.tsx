@@ -41,6 +41,9 @@ function BillingContent() {
         if (!selectedSessionId && sessions.length > 0) {
             setSelectedSessionId(sessions[0]._id);
         }
+        if (selectedSessionId) {
+            document.getElementById("plans-section")?.scrollIntoView({ behavior: "smooth" });
+        }
     }, [sessions, selectedSessionId]);
 
     const handleCheckout = async () => {
@@ -135,7 +138,7 @@ function BillingContent() {
             </div>
 
             {/* Plans Grid */}
-            <div className="grid md:grid-cols-3 gap-6">
+            <div id="plans-section" className="grid md:grid-cols-3 gap-6">
                 {isLoading ? (
                     <div className="col-span-3 flex justify-center py-12">
                         <Loader2 className="w-8 h-8 text-primary animate-spin" />

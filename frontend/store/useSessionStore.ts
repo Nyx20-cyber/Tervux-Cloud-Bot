@@ -6,6 +6,7 @@ interface SessionState {
   isLoading: boolean;
   fetchSessions: () => Promise<void>;
   createPairingReq: (phone: string, method: "qr" | "code") => Promise<any>;
+  updateSessionLocally: (sessionId: string, updates: any) => void;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -16,27 +17,21 @@ export const useSessionStore = create<SessionState>((set) => ({
     try {
       set({ isLoading: true });
       const res = await api.get("/sessions");
-
-      let subRes;
-      try {
-        subRes = await api.get("/subscription");
-      } catch (subErr) {
-        console.error("Failed to fetch subscriptions:", subErr);
-        subRes = { data: { subscriptions: [] } };
-      }
-
-      const merged = res.data.sessions.map((s: any) => {
-        const subInfo = subRes.data.subscriptions?.find((sub: any) => sub.sessionId === s._id);
-        return { ...s, subscriptionInfo: subInfo };
-      });
-
-      set({ sessions: merged, isLoading: false });
+      set({ sessions: res.data.sessions, isLoading: false });
     } catch (error: any) {
       if (error.response?.status !== 401) {
         console.error("Fetch sessions failed:", error);
       }
       set({ isLoading: false, sessions: [] });
     }
+  },
+
+  updateSessionLocally: (sessionId: string, updates: any) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s._id === sessionId ? { ...s, ...updates } : s
+      ),
+    }));
   },
 
   createPairingReq: async (phoneNumber, method) => {

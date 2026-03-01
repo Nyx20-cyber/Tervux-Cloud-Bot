@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
+import Subscription from "../models/Subscription.js";
 import { sessionManager } from "../services/whatsappService.js";
 
 const router = Router();
@@ -11,14 +12,16 @@ const router = Router();
  */
 router.get("/", authenticate, async (req, res) => {
     try {
-        const sessions = await WhatsAppSession.find({ userId: req.user._id })
-            .sort({ createdAt: -1 });
+        const subscriptions = await Subscription.find({ userId: req.user._id });
 
         const enriched = sessions.map(session => {
             const isLive = sessionManager?.isConnected(session._id.toString());
+            const subInfo = subscriptions.find(sub => sub.sessionId?.toString() === session._id.toString());
+
             return {
                 ...session.toJSON(),
-                isLive: !!isLive
+                isLive: !!isLive,
+                subscriptionInfo: subInfo || null
             };
         });
 
@@ -184,6 +187,14 @@ router.post("/:id/pause", authenticate, async (req, res) => {
         await session.save();
 
         res.json({ success: true, message: "Session paused successfully" });
+
+        // Notify client via socket
+        import("./socketService.js").then(({ emitToUser }) => {
+            emitToUser(req.user._id.toString(), "session_update", {
+                sessionId: session._id,
+                status: "paused"
+            });
+        });
     } catch (error) {
         console.error("Pause session error:", error);
         res.status(500).json({ error: "Failed to pause session" });
@@ -217,6 +228,14 @@ router.post("/:id/resume", authenticate, async (req, res) => {
         await sessionManager.resumeSession(session._id.toString());
 
         res.json({ success: true, message: "Session resumed successfully" });
+
+        // Notify client via socket
+        import("./socketService.js").then(({ emitToUser }) => {
+            emitToUser(req.user._id.toString(), "session_update", {
+                sessionId: session._id,
+                status: "active"
+            });
+        });
     } catch (error) {
         console.error("Resume session error:", error);
         res.status(500).json({ error: "Failed to resume session" });

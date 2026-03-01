@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Activity, ShieldCheck, RefreshCcw, Network, PauseCircle, PlayCircle, Trash2 } from "lucide-react";
 import { useSessionStore } from "@/store/useSessionStore";
+import { io } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import { format } from "date-fns";
 import Link from "next/link";
@@ -11,13 +12,23 @@ import { toast } from "sonner";
 import { api } from "@/store/useAuthStore";
 
 export default function DashboardPage() {
-    const { sessions, isLoading, fetchSessions } = useSessionStore();
+    const { sessions, isLoading, fetchSessions, updateSessionLocally } = useSessionStore();
 
     useEffect(() => {
         fetchSessions();
-        const interval = setInterval(fetchSessions, 10000); // Polling every 10s
-        return () => clearInterval(interval);
-    }, [fetchSessions]);
+
+        const socket = io({
+            auth: { token: localStorage.getItem("token") }
+        });
+
+        socket.on("session_update", (data) => {
+            updateSessionLocally(data.sessionId, { status: data.status });
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [fetchSessions, updateSessionLocally]);
 
     const activeSessionsCount = sessions.filter(s => s.status === "active").length;
 
@@ -76,7 +87,7 @@ export default function DashboardPage() {
                     ) : (
                         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                             {sessions.map(session => (
-                                <SessionCard key={session._id} session={session} onUpdate={fetchSessions} />
+                                <SessionCard key={session._id} session={session} />
                             ))}
                         </div>
                     )}
@@ -86,7 +97,8 @@ export default function DashboardPage() {
     );
 }
 
-function SessionCard({ session, onUpdate }: { session: any, onUpdate: () => void }) {
+function SessionCard({ session }: { session: any }) {
+    const { updateSessionLocally, fetchSessions } = useSessionStore();
     const isPaused = session.status === "paused";
     const isActive = session.status === "active";
     const isError = ["disconnected", "expired", "failed"].includes(session.status);
@@ -99,13 +111,19 @@ function SessionCard({ session, onUpdate }: { session: any, onUpdate: () => void
     const isSubExpired = (session.subscriptionInfo?.isExpired) || (session.subscription?.status === "expired") || !planName;
 
     const handlePauseResume = async () => {
+        const action = isPaused ? "resume" : "pause";
+        const targetStatus = isPaused ? "active" : "paused";
+
+        // Optimistic update
+        updateSessionLocally(session._id, { status: targetStatus });
+
         try {
-            const action = isPaused ? "resume" : "pause";
             await api.post(`/sessions/${session._id}/${action}`);
-            toast.success("Connection updated successfully");
-            onUpdate();
+            toast.success(`Connection ${action}d`);
         } catch (error: any) {
-            toast.error(error.response?.data?.error || "Failed to pause/resume");
+            // Rollback on error
+            updateSessionLocally(session._id, { status: session.status });
+            toast.error(error.response?.data?.error || "Action failed");
         }
     };
 
@@ -114,7 +132,7 @@ function SessionCard({ session, onUpdate }: { session: any, onUpdate: () => void
         try {
             await api.delete(`/sessions/${session._id}`);
             toast.success("Device disconnected");
-            onUpdate();
+            fetchSessions();
         } catch (error: any) {
             toast.error("Failed to delete session");
         }
