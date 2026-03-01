@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
-import Subscription from "../models/Subscription.js";
 import { sessionManager } from "../services/whatsappService.js";
 
 const router = Router();
@@ -12,16 +11,15 @@ const router = Router();
  */
 router.get("/", authenticate, async (req, res) => {
     try {
-        const subscriptions = await Subscription.find({ userId: req.user._id });
+        const sessions = await WhatsAppSession.find({ userId: req.user._id }).populate("subscription.planId");
 
         const enriched = sessions.map(session => {
             const isLive = sessionManager?.isConnected(session._id.toString());
-            const subInfo = subscriptions.find(sub => sub.sessionId?.toString() === session._id.toString());
 
             return {
                 ...session.toJSON(),
                 isLive: !!isLive,
-                subscriptionInfo: subInfo || null
+                subscriptionInfo: session.subscription || null
             };
         });
 

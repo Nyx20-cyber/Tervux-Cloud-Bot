@@ -147,7 +147,7 @@ function BillingContent() {
                     <div key={plan._id} className="relative group perspective">
                         <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/30 to-secondary/30 rounded-3xl blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
                         <div className="relative p-8 rounded-3xl border border-white/10 bg-card/60 backdrop-blur-xl h-full flex flex-col hover:-translate-y-2 transition-transform duration-500">
-                            <h3 className="text-xl font-bold text-white capitalize">{plan.name}</h3>
+                            <h3 className="text-xl font-bold text-white capitalize">{plan.name === 'Siku' ? 'Siku 3' : plan.name}</h3>
                             <div className="mt-4 flex items-baseline text-4xl font-extrabold text-primary">
                                 {plan.price}
                                 <span className="ml-1 text-xl font-medium text-gray-500">TZS</span>

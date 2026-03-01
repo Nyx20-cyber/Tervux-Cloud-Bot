@@ -9,16 +9,16 @@ const plans = [
     {
         name: "Siku",
         slug: "siku",
-        price: 200,
+        price: 1000,
         currency: "TZS",
-        durationDays: 1,
+        durationDays: 3,
         maxSessions: 1,
-        description: "Siku 1 — Bot yako ya WhatsApp kwa siku moja"
+        description: "Siku 3 — Bot yako ya WhatsApp kwa siku tatu"
     },
     {
         name: "Wiki",
         slug: "wiki",
-        price: 700,
+        price: 2000,
         currency: "TZS",
         durationDays: 7,
         maxSessions: 1,
@@ -27,7 +27,7 @@ const plans = [
     {
         name: "Mwezi",
         slug: "mwezi",
-        price: 1200,
+        price: 3000,
         currency: "TZS",
         durationDays: 30,
         maxSessions: 1,

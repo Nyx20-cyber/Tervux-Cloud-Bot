@@ -19,9 +19,32 @@ export async function runCleanup() {
         await cleanExpiredSubscriptions();
         await cleanStaleDisconnected();
         await cleanOrphanedMongoAuth();
+        await cleanUnpaidSessions();
         console.log("✅ [Cleanup] Maintenance cycle complete.");
     } catch (error) {
         console.error("❌ [Cleanup] Maintenance failed:", error.message);
+    }
+}
+
+/**
+ * Unpaid sessions: sessions created > 24 hours ago with no active subscription
+ */
+async function cleanUnpaidSessions() {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const unpaidSessions = await WhatsAppSession.find({
+        createdAt: { $lt: twentyFourHoursAgo },
+        "subscription.status": { $ne: "active" }
+    });
+
+    for (const session of unpaidSessions) {
+        console.log(`   ⏳ [Unpaid] Deleting unpaid session ${session._id} (${session.phone || "unknown"})`);
+        await sessionManager.destroySession(session._id.toString());
+        await WhatsAppSession.deleteOne({ _id: session._id });
+    }
+
+    if (unpaidSessions.length > 0) {
+        console.log(`   🧹 Cleaned ${unpaidSessions.length} unpaid session(s).`);
     }
 }
 

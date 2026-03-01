@@ -23,9 +23,9 @@ async function start() {
         if (planCount === 0) {
             console.log("🌱 No plans found. Seeding...");
             await Plan.insertMany([
-                { name: "Siku", slug: "siku", price: 200, currency: "TZS", durationDays: 1, maxSessions: 1, description: "Bot yako ya WhatsApp kwa siku moja" },
-                { name: "Wiki", slug: "wiki", price: 700, currency: "TZS", durationDays: 7, maxSessions: 1, description: "Bot yako ya WhatsApp kwa wiki moja" },
-                { name: "Mwezi", slug: "mwezi", price: 1200, currency: "TZS", durationDays: 30, maxSessions: 1, description: "Bot yako ya WhatsApp kwa mwezi mzima" }
+                { name: "Siku", slug: "siku", price: 1000, currency: "TZS", durationDays: 3, maxSessions: 1, description: "Bot yako ya WhatsApp kwa siku tatu" },
+                { name: "Wiki", slug: "wiki", price: 2000, currency: "TZS", durationDays: 7, maxSessions: 1, description: "Bot yako ya WhatsApp kwa wiki moja" },
+                { name: "Mwezi", slug: "mwezi", price: 3000, currency: "TZS", durationDays: 30, maxSessions: 1, description: "Bot yako ya WhatsApp kwa mwezi mzima" }
             ]);
             console.log("✅ Plans seeded successfully.");
         }

@@ -347,7 +347,7 @@ class SessionManager {
 ⚠️ *𝕆𝕠𝕡𝕤!* This is a private Tervux Bot instance.
 Only the owner can execute commands here.
 
-✨ Get your own bot at tervux.com
+✨ Get your own bot at bot.tervux.com
 
 ╔══════════════════════════════════╗
 ║    💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏* 💠    ║
@@ -361,6 +361,28 @@ Only the owner can execute commands here.
                 const commandName = args.shift().toLowerCase();
 
                 if (commands[commandName]) {
+                    // Subscription Check
+                    const dbSession = await WhatsAppSession.findById(sessionId).populate("subscription.planId");
+                    if (dbSession?.subscription?.status !== "active") {
+                        await sock.sendMessage(m.key.remoteJid, {
+                            text: `╔══════════════════════════════════╗
+║  ⚠️ *𝕊𝕌𝔹𝕊ℂℝ𝕀ℙ𝕋𝕀𝕆ℕ ℝ𝔼ℚ𝕌𝕀ℝ𝔼𝔻* ⚠️  ║
+╚══════════════════════════════════╝
+
+Hi! Your WhatsApp is connected, but you need an active plan to use bot commands.
+
+⏳ *Notice:* Unpaid sessions are automatically deleted after 24 hours after its creation to save server resources.
+
+✨ Please visit your dashboard to activate a plan:
+*bot.tervux.com/dashboard/billing*
+
+╔══════════════════════════════════╗
+║    💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏* 💠    ║
+╚══════════════════════════════════╝`
+                        }, { quoted: m });
+                        continue;
+                    }
+
                     try {
                         console.log(`⚡ [${sessionId}] Command: ${commandName}`);
                         const result = await commands[commandName](sock, m, args);
