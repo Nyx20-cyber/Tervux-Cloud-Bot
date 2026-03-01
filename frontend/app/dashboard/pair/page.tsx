@@ -49,7 +49,7 @@ export default function PairPage() {
 
         // Backend event names
         newSocket.on("pairing_success", (data) => {
-            toast.success(data.message || "Node physically linked!");
+            toast.success(data.message || "Device connected successfully!");
             setStatus("linked");
             setSessionId(data.sessionId);
             fetchSessions();
@@ -61,9 +61,9 @@ export default function PairPage() {
         });
 
         newSocket.on("pairing_error", (err) => {
-            setErrorMsg(err.error || "Uplink Error");
+            setErrorMsg(err.error || "Connection Error");
             setStatus("error");
-            toast.error(err.error || "Failed to establish uplink");
+            toast.error(err.error || "Failed to connect device");
             setTimeout(() => setStatus("idle"), 5000);
         });
 
@@ -114,10 +114,10 @@ export default function PairPage() {
                                 <div className="space-y-1">
                                     <h2 className="text-base sm:text-lg lg:text-xl font-semibold tracking-tight text-white flex items-center gap-3">
                                         <Terminal className="h-5 w-5 text-primary" />
-                                        UPLINK_TERMINAL
+                                        Connect Your Device
                                     </h2>
                                     <p className="text-[9px] sm:text-[10px] font-semibold text-gray-500 uppercase tracking-widest">
-                                        Secure Handshake Protocol
+                                        Link your WhatsApp account
                                     </p>
                                 </div>
                                 <div className="flex gap-1.5 opacity-30">
@@ -134,14 +134,14 @@ export default function PairPage() {
                                     className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all duration-300 ${method === 'qr' ? 'bg-primary text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
                                     disabled={status === "loading" || status === "waiting"}
                                 >
-                                    Optical Scan
+                                    QR Code
                                 </button>
                                 <button
                                     onClick={() => setMethod("code")}
                                     className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all duration-300 ${method === 'code' ? 'bg-primary text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
                                     disabled={status === "loading" || status === "waiting"}
                                 >
-                                    Neural Code
+                                    Pairing Code
                                 </button>
                             </div>
 
@@ -152,9 +152,9 @@ export default function PairPage() {
                                         <div className="space-y-4">
                                             <div className="flex justify-between px-1">
                                                 <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2">
-                                                    International_Uplink_Node
+                                                    Phone Number
                                                 </label>
-                                                <span className="text-[10px] font-bold text-primary/70 uppercase">Input: Phone_Num</span>
+                                                <span className="text-[10px] font-bold text-primary/70 uppercase">Format: 255...</span>
                                             </div>
                                             <Input
                                                 type="tel"
@@ -172,7 +172,7 @@ export default function PairPage() {
                                             onClick={handlePair}
                                             className="w-full h-14 rounded-xl bg-primary hover:bg-primary/90 text-black font-bold uppercase tracking-widest text-[11px] shadow-lg shadow-primary/20 transition-all flex items-center justify-center gap-2 group mt-4 hover:scale-[1.01]"
                                         >
-                                            {method === "qr" ? "GENERATE_OPTICAL_KEY" : "GENERATE_NEURAL_KEY"}
+                                            {method === "qr" ? "Generate QR Code" : "Get Pairing Code"}
                                             <Zap className="h-3.5 w-3.5 group-hover:translate-x-1 transition-transform" />
                                         </Button>
                                     </div>
@@ -182,7 +182,7 @@ export default function PairPage() {
                                     <div className="flex flex-col items-center justify-center gap-4 text-primary animate-fade-in py-12 flex-1">
                                         <Loader2 className="h-12 w-12 animate-spin" />
                                         <p className="text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">
-                                            Generating Digital Signature...
+                                            Preparing connection...
                                         </p>
                                     </div>
                                 )}
@@ -191,7 +191,7 @@ export default function PairPage() {
                                     <div className="flex flex-col items-center text-center space-y-8 animate-fade-in flex-1">
                                         <div className="space-y-2">
                                             <h3 className="text-xl font-bold tracking-tight text-primary flex items-center justify-center gap-2">
-                                                <span className="animate-pulse">AUTHORIZATION_PENDING</span>
+                                                <span className="animate-pulse">Waiting for connection...</span>
                                             </h3>
                                         </div>
 
@@ -234,7 +234,7 @@ export default function PairPage() {
                                             onClick={() => { setStatus("idle"); setQrCode(""); setPairingCode(""); }}
                                             className="w-full h-12 rounded-xl text-gray-400 hover:text-white hover:bg-white/5 font-bold text-xs tracking-widest uppercase transition-all"
                                         >
-                                            Abort Uplink
+                                            Cancel
                                         </Button>
                                     </div>
                                 )}
@@ -245,7 +245,7 @@ export default function PairPage() {
                                             <Check className="h-8 w-8" />
                                         </div>
                                         <p className="text-[12px] font-bold uppercase tracking-[0.3em]">
-                                            Uplink Established
+                                            Device Connected
                                         </p>
                                     </div>
                                 )}
@@ -257,7 +257,7 @@ export default function PairPage() {
                                             {errorMsg}
                                         </p>
                                         <Button variant="outline" onClick={() => setStatus("idle")} className="mt-4 border-white/10 text-white hover:bg-white/10 uppercase tracking-widest text-[10px]">
-                                            Retry Protocol
+                                            Try Again
                                         </Button>
                                     </div>
                                 )}
@@ -270,19 +270,19 @@ export default function PairPage() {
                 <div className="lg:col-span-5 space-y-6 animate-slide-right hidden lg:block">
                     <div className="p-8 rounded-3xl border border-border bg-card/50 backdrop-blur-md h-full">
                         <div className="space-y-1 mb-8">
-                            <h2 className="text-lg font-semibold text-white tracking-tight uppercase">Security_Disclaimer</h2>
-                            <p className="text-[10px] font-semibold text-amber-500 tracking-widest uppercase">Official Safety Protocol</p>
+                            <h2 className="text-lg font-semibold text-white tracking-tight uppercase">Security Information</h2>
+                            <p className="text-[10px] font-semibold text-amber-500 tracking-widest uppercase">Safe Connection Guide</p>
                         </div>
 
                         <div className="space-y-6">
                             <div className="space-y-3 p-6 rounded-2xl bg-white/5 border border-white/10">
                                 <div className="flex items-center gap-2 text-amber-500">
                                     <Zap className="w-4 h-4" />
-                                    <span className="text-[10px] font-bold uppercase tracking-widest">Zero_Cost_Neural_Link</span>
+                                    <span className="text-[10px] font-bold uppercase tracking-widest">Free Connection</span>
                                 </div>
                                 <p className="text-xs text-gray-400 leading-relaxed font-medium">
                                     Tervux WhatsApp modules are <span className="text-white font-bold">100% FREE</span> to pair.
-                                    If any entity requests currency for this uplink, terminate the connection immediately.
+                                    If anyone asks for money to connect, stop immediately.
                                     You only pay for server hosting via subscriptions.
                                 </p>
                             </div>
@@ -290,7 +290,7 @@ export default function PairPage() {
                             <div className="space-y-3 p-6 rounded-2xl bg-primary/5 border border-primary/10">
                                 <div className="flex items-center gap-2 text-primary">
                                     <ShieldCheck className="w-4 h-4" />
-                                    <span className="text-[10px] font-bold uppercase tracking-widest">End_to_End_Encryption</span>
+                                    <span className="text-[10px] font-bold uppercase tracking-widest">Secure Encryption</span>
                                 </div>
                                 <p className="text-xs text-gray-400 leading-relaxed font-medium">
                                     Your session tokens are stored securely. Tervux does not read your messages or store your private data.

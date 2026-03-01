@@ -13,8 +13,8 @@ const outfit = Outfit({
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export const metadata: Metadata = {
-  title: "Tervux Cloud Bot | UPLINK V2.0",
-  description: "Establish a high-bandwidth neural connection to your WhatsApp instance. Encrypted. Autonomous.",
+  title: "Tervux Cloud Bot | Easy WhatsApp Automation",
+  description: "Connect and automate your WhatsApp with ease. Fast. Secure. Professional.",
 };
 
 export default function RootLayout({

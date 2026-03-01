@@ -15,7 +15,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span>
                     </div>
-                    <span className="text-[9px] font-bold tracking-[0.2em] uppercase text-primary">Node Connected</span>
+                    <span className="text-[9px] font-bold tracking-[0.2em] uppercase text-primary">Service Online</span>
                 </div>
             </div>
 
@@ -26,7 +26,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => logout()} className="text-gray-400 hover:text-white hover:bg-white/10 group h-8 rounded-full border border-transparent hover:border-white/10">
                     <LogOut className="h-3 w-3 mr-2 group-hover:text-destructive transition-colors" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest group-hover:text-destructive transition-colors">Terminate</span>
+                    <span className="text-[10px] font-bold uppercase tracking-widest group-hover:text-destructive transition-colors">Logout</span>
                 </Button>
             </div>
         </header>

@@ -103,14 +103,14 @@ function BillingContent() {
             <div>
                 <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
                     <CircleDollarSign className="h-8 w-8 text-primary" />
-                    Subscription_Protocols
+                    Subscription Plans
                 </h1>
-                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Select Node capabilities</p>
+                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Choose the best plan for your needs</p>
             </div>
 
             {/* Session Selection */}
             <div className="p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-4">
-                <h2 className="text-sm font-bold text-white uppercase tracking-widest">Target Node</h2>
+                <h2 className="text-sm font-bold text-white uppercase tracking-widest">Select Device</h2>
                 {sessions.length === 0 ? (
                     <p className="text-xs text-gray-400">No active nodes available. Pair a device first.</p>
                 ) : (
@@ -171,7 +171,7 @@ function BillingContent() {
                                 disabled={!selectedSessionId}
                                 className="mt-8 w-full bg-white/5 border border-white/10 hover:border-primary text-white hover:text-black transition-all hover:bg-primary font-bold uppercase tracking-widest text-xs h-12"
                             >
-                                Select Protocol
+                                Select Plan
                                 <ChevronRight className="w-4 h-4 ml-2" />
                             </Button>
                         </div>
@@ -183,9 +183,9 @@ function BillingContent() {
             <Dialog open={isCheckoutOpen} onOpenChange={setIsCheckoutOpen}>
                 <DialogContent className="sm:max-w-md bg-card/90 border-white/10 backdrop-blur-2xl">
                     <DialogHeader>
-                        <DialogTitle className="text-xl font-bold text-white uppercase tracking-widest">Authorize Payment</DialogTitle>
+                        <DialogTitle className="text-xl font-bold text-white uppercase tracking-widest">Confirm Payment</DialogTitle>
                         <DialogDescription className="text-gray-400">
-                            You are about to upgrade node <span className="text-primary font-bold">{sessions.find(s => s._id === selectedSessionId)?.phone}</span> to <span className="text-white font-bold">{selectedPlan?.name}</span> plan for <span className="text-white font-bold">{selectedPlan?.price} TZS</span>.
+                            You are about to upgrade device <span className="text-primary font-bold">{sessions.find(s => s._id === selectedSessionId)?.phone}</span> to <span className="text-white font-bold">{selectedPlan?.name}</span> plan for <span className="text-white font-bold">{selectedPlan?.price} TZS</span>.
                         </DialogDescription>
                     </DialogHeader>
 

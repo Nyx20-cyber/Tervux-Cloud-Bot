@@ -27,9 +27,9 @@ export default function DashboardPage() {
                 <div>
                     <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
                         <Activity className="h-8 w-8 text-primary" />
-                        COMMAND_CORE
+                        Dashboard Overview
                     </h1>
-                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Centralized Control Interface</p>
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Manage your WhatsApp connections</p>
                 </div>
 
                 {/* Stats Grid */}
@@ -51,7 +51,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col items-center text-center space-y-1 hover:bg-primary/10 transition-colors cursor-default backdrop-blur-md">
                         <Network className="h-4 w-4 text-primary mb-1 animate-pulse" />
-                        <p className="text-[8px] font-bold uppercase tracking-widest text-primary/70">Active Nodes</p>
+                        <p className="text-[8px] font-bold uppercase tracking-widest text-primary/70">Connected Devices</p>
                         <p className="text-xs font-bold text-primary tracking-widest">{activeSessionsCount}</p>
                     </div>
                 </div>
@@ -59,18 +59,18 @@ export default function DashboardPage() {
                 {/* Sessions List */}
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Active_Uplinks</h2>
+                        <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Active Connections</h2>
                     </div>
 
                     {isLoading && sessions.length === 0 ? (
                         <div className="p-8 text-center text-gray-500 text-xs font-bold uppercase tracking-widest border border-white/10 border-dashed rounded-xl bg-white/5">
-                            Scanning Network...
+                            Loading connections...
                         </div>
                     ) : sessions.length === 0 ? (
                         <div className="p-8 text-center border border-white/10 border-dashed rounded-xl bg-white/5 flex flex-col items-center space-y-3">
                             <p className="text-gray-500 text-xs font-bold uppercase tracking-widest">No Active Connections</p>
                             <Button asChild variant="outline" className="border-primary/50 text-white hover:text-black hover:bg-primary uppercase tracking-widest text-[10px]">
-                                <Link href="/dashboard/pair">Establish Uplink</Link>
+                                <Link href="/dashboard/pair">Connect New Device</Link>
                             </Button>
                         </div>
                     ) : (
@@ -82,7 +82,7 @@ export default function DashboardPage() {
                     )}
                 </div>
             </div>
-        </DashboardLayout>
+        </DashboardLayout >
     );
 }
 
@@ -102,7 +102,7 @@ function SessionCard({ session, onUpdate }: { session: any, onUpdate: () => void
         try {
             const action = isPaused ? "resume" : "pause";
             await api.post(`/sessions/${session._id}/${action}`);
-            toast.success(`Session ${action}d successfully`);
+            toast.success("Connection updated successfully");
             onUpdate();
         } catch (error: any) {
             toast.error(error.response?.data?.error || "Failed to pause/resume");
@@ -110,10 +110,10 @@ function SessionCard({ session, onUpdate }: { session: any, onUpdate: () => void
     };
 
     const handleDelete = async () => {
-        if (!confirm("Are you sure you want to terminate this node forever?")) return;
+        if (!confirm("Are you sure you want to disconnect this device?")) return;
         try {
             await api.delete(`/sessions/${session._id}`);
-            toast.success("Node Terminated");
+            toast.success("Device disconnected");
             onUpdate();
         } catch (error: any) {
             toast.error("Failed to delete session");

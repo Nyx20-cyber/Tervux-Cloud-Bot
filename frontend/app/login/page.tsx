@@ -23,7 +23,7 @@ export default function LoginPage() {
         try {
             const res = await api.post("/auth/login", { email, password });
             login(res.data.token, res.data.user);
-            toast.success("Authentication successful");
+            toast.success("Login successful");
             router.push("/dashboard");
         } catch (error: any) {
             toast.error(error.response?.data?.error || "Invalid credentials");
@@ -42,15 +42,15 @@ export default function LoginPage() {
                         <div className="flex justify-center mb-6">
                             <ShieldCheck className="h-12 w-12 text-primary" />
                         </div>
-                        <h1 className="text-2xl font-bold text-white uppercase tracking-widest">TERVUX_CORE</h1>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Authorized Personnel Only</p>
+                        <h1 className="text-2xl font-bold text-white uppercase tracking-widest">Tervux Cloud Bot</h1>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Sign in to your account</p>
                     </div>
 
                     <form onSubmit={handleLogin} className="space-y-4">
                         <div className="space-y-4">
                             <Input
                                 type="email"
-                                placeholder="IDENTIFIER (EMAIL)"
+                                placeholder="EMAIL ADDRESS"
                                 value={email}
                                 onChange={e => setEmail(e.target.value)}
                                 className="h-12 bg-black/50 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-primary uppercase text-xs tracking-widest"
@@ -59,7 +59,7 @@ export default function LoginPage() {
                             <div className="relative">
                                 <Input
                                     type={showPassword ? "text" : "password"}
-                                    placeholder="ACCESS KEY (PASSWORD)"
+                                    placeholder="PASSWORD"
                                     value={password}
                                     onChange={e => setPassword(e.target.value)}
                                     className="h-12 bg-black/50 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-primary text-xs tracking-widest pr-10"
@@ -77,13 +77,13 @@ export default function LoginPage() {
 
                         <Button type="submit" disabled={isLoading} className="w-full h-12 bg-primary hover:bg-primary/90 text-black font-bold uppercase tracking-widest mt-6">
                             {isLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                            {isLoading ? "Authenticating..." : "Initialize Link"}
+                            {isLoading ? "Signing in..." : "Sign In"}
                         </Button>
                     </form>
 
                     <div className="text-center pt-2">
                         <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
-                            No credentials? <Link href="/register" className="text-primary hover:underline ml-1">Request Access</Link>
+                            No account? <Link href="/register" className="text-primary hover:underline ml-1">Create one</Link>
                         </p>
                     </div>
                 </div>

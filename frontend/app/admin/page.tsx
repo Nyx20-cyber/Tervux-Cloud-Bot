@@ -39,9 +39,9 @@ export default function AdminDashboard() {
                 <div>
                     <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
                         <AlertTriangle className="h-8 w-8 text-destructive" />
-                        OVERSEER_TERMINAL
+                        Admin Dashboard
                     </h1>
-                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Classified Administrative Access</p>
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">System management and statistics</p>
                 </div>
 
                 {isLoading ? (
@@ -57,7 +57,7 @@ export default function AdminDashboard() {
                             </div>
                             <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 backdrop-blur-md">
                                 <Network className="h-4 w-4 text-gray-400 mb-1" />
-                                <p className="text-[8px] font-bold uppercase tracking-widest text-gray-500">Active Nodes</p>
+                                <p className="text-[8px] font-bold uppercase tracking-widest text-gray-500">Connected Devices</p>
                                 <p className="text-xs font-semibold text-white tracking-widest">{stats?.activeSessions || 0}</p>
                             </div>
                             <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col items-center text-center space-y-1 backdrop-blur-md">
@@ -69,13 +69,13 @@ export default function AdminDashboard() {
 
                         {/* Recent Payments Table */}
                         <div className="space-y-4">
-                            <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Recent_Transactions</h2>
+                            <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Recent History</h2>
                             <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden backdrop-blur-sm">
                                 <table className="w-full text-sm text-left text-gray-400">
                                     <thead className="text-[10px] text-gray-500 uppercase tracking-widest bg-white/5 border-b border-white/10">
                                         <tr>
                                             <th className="px-6 py-4 font-bold">Ref ID</th>
-                                            <th className="px-6 py-4 font-bold">Node</th>
+                                            <th className="px-6 py-4 font-bold">Device</th>
                                             <th className="px-6 py-4 font-bold">Amount</th>
                                             <th className="px-6 py-4 font-bold">Status</th>
                                             <th className="px-6 py-4 font-bold">Date</th>

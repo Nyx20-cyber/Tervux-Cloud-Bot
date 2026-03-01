@@ -24,7 +24,7 @@ export default function RegisterPage() {
         try {
             const res = await api.post("/auth/register", { name, email, password });
             login(res.data.token, res.data.user);
-            toast.success("Registration successful. Uplink initialized.");
+            toast.success("Account created successfully.");
             router.push("/dashboard");
         } catch (error: any) {
             toast.error(error.response?.data?.error || "Registration failed");
@@ -43,15 +43,15 @@ export default function RegisterPage() {
                         <div className="flex justify-center mb-6">
                             <ShieldCheck className="h-12 w-12 text-primary" />
                         </div>
-                        <h1 className="text-2xl font-bold text-white uppercase tracking-widest">TERVUX_CORE</h1>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Initial System Setup</p>
+                        <h1 className="text-2xl font-bold text-white uppercase tracking-widest">Tervux Cloud Bot</h1>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Create your account</p>
                     </div>
 
                     <form onSubmit={handleRegister} className="space-y-4">
                         <div className="space-y-4">
                             <Input
                                 type="text"
-                                placeholder="OPERATOR_ALIAS (NAME)"
+                                placeholder="FULL NAME"
                                 value={name}
                                 onChange={e => setName(e.target.value)}
                                 className="h-12 bg-black/50 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-primary uppercase text-xs tracking-widest"
@@ -59,7 +59,7 @@ export default function RegisterPage() {
                             />
                             <Input
                                 type="email"
-                                placeholder="IDENTIFIER (EMAIL)"
+                                placeholder="EMAIL ADDRESS"
                                 value={email}
                                 onChange={e => setEmail(e.target.value)}
                                 className="h-12 bg-black/50 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-primary uppercase text-xs tracking-widest"
@@ -68,7 +68,7 @@ export default function RegisterPage() {
                             <div className="relative">
                                 <Input
                                     type={showPassword ? "text" : "password"}
-                                    placeholder="ACCESS KEY (PASSWORD)"
+                                    placeholder="PASSWORD"
                                     value={password}
                                     onChange={e => setPassword(e.target.value)}
                                     className="h-12 bg-black/50 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-primary text-xs tracking-widest pr-10"
@@ -87,13 +87,13 @@ export default function RegisterPage() {
 
                         <Button type="submit" disabled={isLoading} className="w-full h-12 bg-primary hover:bg-primary/90 text-black font-bold uppercase tracking-widest mt-6">
                             {isLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                            {isLoading ? "Provisioning..." : "Create Node Identity"}
+                            {isLoading ? "Creating account..." : "Get Started"}
                         </Button>
                     </form>
 
                     <div className="text-center pt-2">
                         <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
-                            System recognized? <Link href="/login" className="text-primary hover:underline ml-1">Authenticate</Link>
+                            Already have an account? <Link href="/login" className="text-primary hover:underline ml-1">Sign in</Link>
                         </p>
                     </div>
                 </div>
