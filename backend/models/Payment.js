@@ -10,7 +10,8 @@ const paymentSchema = new mongoose.Schema({
     sessionId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "WhatsAppSession",
-        required: true
+        required: false,
+        default: null
     },
     planId: {
         type: mongoose.Schema.Types.ObjectId,

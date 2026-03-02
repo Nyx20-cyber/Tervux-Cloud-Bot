@@ -7,31 +7,34 @@ import User from "../models/User.js";
 
 const plans = [
     {
-        name: "Siku",
-        slug: "siku",
-        price: 1000,
+        name: "50 Coins",
+        slug: "50-coins",
+        price: 1500,
         currency: "TZS",
-        durationDays: 3,
+        durationDays: 0,
+        coinsAmount: 50,
         maxSessions: 1,
-        description: "Siku 3 — Bot yako ya WhatsApp kwa siku tatu"
+        description: "50 Coins — Deploy 1 Bot"
     },
     {
-        name: "Wiki",
-        slug: "wiki",
+        name: "100 Coins",
+        slug: "100-coins",
         price: 2000,
         currency: "TZS",
-        durationDays: 7,
+        durationDays: 0,
+        coinsAmount: 100,
         maxSessions: 1,
-        description: "Wiki 1 — Bot yako ya WhatsApp kwa wiki moja"
+        description: "100 Coins — Deploy 2 Bots"
     },
     {
-        name: "Mwezi",
-        slug: "mwezi",
+        name: "250 Coins",
+        slug: "250-coins",
         price: 3000,
         currency: "TZS",
-        durationDays: 30,
+        durationDays: 0,
+        coinsAmount: 250,
         maxSessions: 1,
-        description: "Mwezi 1 — Bot yako ya WhatsApp kwa mwezi mzima"
+        description: "250 Coins — Deploy 5 Bots"
     }
 ];
 
@@ -40,14 +43,20 @@ async function seed() {
         await connectDB();
         console.log("🌱 Seeding database...");
 
-        // Upsert plans
+        // Disable old legacy plans
+        await Plan.updateMany(
+            { slug: { $in: ["siku", "wiki", "mwezi"] } },
+            { $set: { isActive: false } }
+        );
+
+        // Upsert new coin plans
         for (const plan of plans) {
             await Plan.findOneAndUpdate(
                 { slug: plan.slug },
                 plan,
                 { upsert: true, new: true }
             );
-            console.log(`  ✅ Plan: ${plan.name} (${plan.price} TZS / ${plan.durationDays} days)`);
+            console.log(`  ✅ Plan: ${plan.name} (${plan.price} TZS / ${plan.coinsAmount} Coins)`);
         }
 
         // Create admin user if ADMIN_EMAIL is set

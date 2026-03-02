@@ -20,6 +20,7 @@ interface AuthState {
   isAuthenticated: boolean;
   login: (token: string, user: any) => void;
   logout: () => void;
+  updateCoins: (coins: number) => void;
   checkAuth: () => Promise<void>;
 }
 
@@ -39,6 +40,12 @@ export const useAuthStore = create<AuthState>()(
         localStorage.removeItem("token");
         set({ token: null, user: null, isAuthenticated: false });
         window.location.href = "/login";
+      },
+
+      updateCoins: (coins) => {
+        set((state) => ({
+          user: state.user ? { ...state.user, coins } : null
+        }));
       },
 
       checkAuth: async () => {

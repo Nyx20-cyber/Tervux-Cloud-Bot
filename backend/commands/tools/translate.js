@@ -19,7 +19,7 @@ export const translate = async (sock, m, args) => {
         textToTranslate = quoted.conversation || quoted.extendedTextMessage?.text || quoted.imageMessage?.caption || quoted.videoMessage?.caption;
     }
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     if (!textToTranslate) {

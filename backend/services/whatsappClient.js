@@ -6,6 +6,7 @@ import { addAutoReaction, getRandomEmoji } from "../utils/reactionUtils.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import WhatsAppAuth from "../models/WhatsAppAuth.js";
 import { useMongoDBAuthState } from "./mongoAuthState.js";
+import { queueService } from "./queueService.js";
 
 /**
  * Multi-Tenant WhatsApp Session Manager
@@ -109,6 +110,9 @@ class SessionManager {
                 return entry?.messageCache?.get(key.id)?.message;
             }
         });
+
+        // Store sessionId on the socket for downstream command usage
+        sock.sessionId = sessionId;
 
         // Auto reactions
         addAutoReaction(sock);
@@ -291,7 +295,7 @@ class SessionManager {
                         const isGroup = chatJid?.endsWith("@g.us");
                         if (isGroup) {
                             const { loadGroupSettings } = await import("./groupSettingsService.js");
-                            const groupSettings = loadGroupSettings(chatJid);
+                            const groupSettings = await loadGroupSettings(sessionId, chatJid);
                             if (!groupSettings.groupAntiDelete?.enabled) continue;
                         } else {
                             if (!config?.antiDelete) continue;
@@ -591,18 +595,18 @@ ${text}
         const sessionId = dbSession._id.toString();
 
         const { state, saveCreds } = await useMongoDBAuthState(sessionId);
+        console.log(`[MongoAuth] Loading State keys: ${Object.keys(state.creds).length} config items.`);
 
         const sock = makeWASocket2({
             logger: pino({ level: "silent" }),
             auth: state,
-            browser: B2.ubuntu("Chrome"),
             printQRInTerminal: false,
             markOnlineOnConnect: false,
             generateHighQualityLinkPreview: false,
             syncFullHistory: false,
-            connectTimeoutMs: 60000,
+            connectTimeoutMs: 30000,
             defaultQueryTimeoutMs: 0,
-            keepAliveIntervalMs: 10000
+            keepAliveIntervalMs: 15000
         });
 
         this.sessions.set(sessionId, {
@@ -611,32 +615,41 @@ ${text}
             messageCache: new Map()
         });
 
-        // Request pairing code
+        // Request pairing code flow
         if (method === "code" && phoneNumber) {
             (async () => {
                 try {
-                    let attempts = 0;
-                    const maxAttempts = 5;
-                    while (attempts < maxAttempts) {
-                        attempts++;
-                        const waitTime = attempts === 1 ? 6000 : 3000;
-                        await delay(waitTime);
-                        if (!sock.authState.creds.me && !sock.authState.creds.registered) {
-                            console.log(`[${sessionId}] Requesting pairing code (attempt ${attempts})...`);
-                            const code = await sock.requestPairingCode(phoneNumber.replace(/\D/g, ""));
-                            console.log(`[${sessionId}] ✅ Pairing Code: ${code}`);
-                            this._emitToSocket(socketId, "pairing_code", { code, sessionId });
-                            break;
-                        } else {
-                            break;
-                        }
+                    console.log(`[${sessionId}] 🛠️ Initializing Pairing Code flow for ${phoneNumber}...`);
+
+                    // Wait for the socket to stabilize a bit
+                    await delay(3000);
+
+                    if (sock.ws.readyState === 3 || sock.ws.readyState === 2) {
+                        throw new Error("Socket closed before pairing code request.");
+                    }
+
+                    if (!sock.authState.creds.me && !sock.authState.creds.registered) {
+                        console.log(`[${sessionId}] 📡 Requesting pairing code now...`);
+                        const code = await sock.requestPairingCode(phoneNumber.replace(/\D/g, ""));
+                        console.log(`[${sessionId}] ✅ Pairing Code Received: ${code}`);
+                        this._emitToUser(userId, "pairing_code", { code, sessionId });
+                    } else {
+                        console.warn(`[${sessionId}] ⚠️ Socket already registered, skipping pairing code.`);
                     }
                 } catch (error) {
-                    console.error(`[${sessionId}] ❌ Pairing code failed:`, error.message);
-                    this._emitToSocket(socketId, "pairing_error", {
-                        error: "Failed to generate pairing code. Please try again.",
-                        sessionId
-                    });
+                    console.error(`[${sessionId}] ❌ Pairing code error:`, error.message);
+
+                    // Only emit if not already handled by connection.update
+                    const dbSess = await WhatsAppSession.findById(sessionId);
+                    if (dbSess && dbSess.status === "pairing") {
+                        this._emitToUser(userId, "pairing_error", {
+                            error: `Failed to generate pairing code: ${error.message}`,
+                            sessionId
+                        });
+                        queueService.finishPairing(userId);
+                        try { sock.end(); } catch (e) { }
+                        this.sessions.delete(sessionId);
+                    }
                 }
             })();
         }
@@ -647,7 +660,7 @@ ${text}
             const { connection, lastDisconnect, qr } = update;
 
             if (qr && method === "qr") {
-                this._emitToSocket(socketId, "qr_update", { qr, sessionId });
+                this._emitToUser(userId, "qr_update", { qr, sessionId });
             }
 
             if (connection === "open") {
@@ -681,7 +694,7 @@ To activate 24/7 cloud features like Auto-Reply and Anti-Delete, please return t
                     lastConnected: new Date()
                 });
 
-                this._emitToSocket(socketId, "pairing_success", {
+                this._emitToUser(userId, "pairing_success", {
                     sessionId,
                     message: "Pairing Successful! Your bot is now active."
                 });
@@ -689,6 +702,7 @@ To activate 24/7 cloud features like Auto-Reply and Anti-Delete, please return t
                 // Now disconnect the pairing socket and reconnect with full handler
                 await delay(3000);
                 sock.end();
+                queueService.finishPairing(userId);
                 this.sessions.delete(sessionId);
                 await this.connectSession(sessionId);
             }
@@ -705,12 +719,19 @@ To activate 24/7 cloud features like Auto-Reply and Anti-Delete, please return t
                 // If still in pairing status, it was a failure
                 const dbSess = await WhatsAppSession.findById(sessionId);
                 if (dbSess && dbSess.status === "pairing") {
-                    this._emitToSocket(socketId, "pairing_error", {
-                        error: "Connection closed. Please try again.",
+                    let errMsg = "Connection closed. Please try again.";
+                    if (code === 408) errMsg = "Request timed out. Please click Try Again.";
+                    if (code === 401) errMsg = "Session logged out by WhatsApp.";
+                    if (code === 405) errMsg = "WhatsApp rejected the pairing request. Are you using a valid, registered phone number?";
+
+                    this._emitToUser(userId, "pairing_error", {
+                        error: errMsg,
                         sessionId, statusCode: code
                     });
+                    queueService.finishPairing(userId);
                     // Don't delete yet — ghost cleanup will handle it
                 }
+                try { sock.end(); } catch (e) { }
                 this.sessions.delete(sessionId);
             }
         });
@@ -723,17 +744,16 @@ To activate 24/7 cloud features like Auto-Reply and Anti-Delete, please return t
                 await this.destroySession(sessionId);
                 await WhatsAppSession.deleteOne({ _id: sessionId });
             }
+            queueService.finishPairing(userId);
         }, 120 * 1000);
 
         return { sessionId };
     }
 
-    _emitToSocket(socketId, event, data) {
-        import("./socketService.js").then(({ getIO }) => {
+    _emitToUser(userId, event, data) {
+        import("./socketService.js").then(({ emitToUser }) => {
             try {
-                const io = getIO();
-                io.emit(event, data);
-                console.log(`📡 EMIT: ${event}`);
+                emitToUser(userId, event, data);
             } catch (e) {
                 console.error("Socket emit error:", e.message);
             }

@@ -50,7 +50,7 @@ export const crush = async (sock, m, args) => {
     const stage = args[0]?.toLowerCase();
     const validStages = Object.keys(stages);
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     if (!stage || !validStages.includes(stage)) {

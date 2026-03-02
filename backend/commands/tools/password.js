@@ -27,7 +27,7 @@ export const password = async (sock, m, args) => {
     // Shuffle
     pass = pass.split("").sort(() => Math.random() - 0.5).join("");
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     const strength = length >= 20 ? "🟢 *VERY STRONG*" :

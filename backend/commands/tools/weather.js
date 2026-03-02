@@ -2,7 +2,7 @@ import { getCachedConfig } from "../../services/configService.js";
 import axios from "axios";
 
 export const weather = async (sock, m, args) => {
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     const city = args.join(" ");
     if (!city) {

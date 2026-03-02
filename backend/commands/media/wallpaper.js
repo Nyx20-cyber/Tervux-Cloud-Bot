@@ -7,7 +7,7 @@ const categories = [
 ];
 
 export const wallpaper = async (sock, m, args) => {
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     const chatJid = m.key.remoteJid;
     const query = args.join(" ") || categories[Math.floor(Math.random() * categories.length)];

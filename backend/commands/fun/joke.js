@@ -1,7 +1,7 @@
 import { getCachedConfig } from "../../services/configService.js";
 
 export const joke = async (sock, m, args) => {
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     const jokes = [
         "Why don't scientists trust atoms? Because they make up everything!",

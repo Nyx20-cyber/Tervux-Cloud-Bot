@@ -24,7 +24,7 @@ const verdicts = [
 export const compatibility = async (sock, m, args) => {
     const input = args.join(" ");
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     if (!input || !input.includes("&") && !input.includes("+") && !input.includes("and")) {

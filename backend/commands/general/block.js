@@ -3,7 +3,7 @@ import { getCachedConfig } from "../../services/configService.js";
 export const block = async (sock, m, args) => {
     let target = m.key.remoteJid;
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     if (m.key.remoteJid.endsWith("@g.us")) {

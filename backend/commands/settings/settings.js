@@ -1,7 +1,7 @@
 import { getCachedConfig, updateConfig, invalidateConfigCache } from "../../services/configService.js";
 
 export const settings = async (sock, m, args) => {
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     return `╔══════════════════════════════════╗

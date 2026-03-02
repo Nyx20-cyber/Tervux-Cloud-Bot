@@ -16,7 +16,7 @@ export const dare = async (sock, m, args) => {
 
     const randomDare = dares[Math.floor(Math.random() * dares.length)];
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     return `╔══════════════════════════════════╗

@@ -105,7 +105,7 @@ export async function kick(sock, m, args) {
     const target = mentioned || quoted;
 
     if (!target) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  🦶 *𝕂𝕀ℂ𝕂 𝕄𝔼𝕄𝔹𝔼ℝ* 🦶  ║
@@ -139,7 +139,7 @@ export async function add(sock, m, args) {
     }
 
     if (!args[0]) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  ➕ *𝔸𝔻𝔻 𝕄𝔼𝕄𝔹𝔼ℝ* ➕  ║
@@ -183,7 +183,7 @@ export async function promote(sock, m, args) {
     const target = mentioned || quoted;
 
     if (!target) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  👑 *ℙℝ𝕆𝕄𝕆𝕋𝔼 𝕋𝕆 𝔸𝔻𝕄𝕀ℕ* 👑  ║
@@ -221,7 +221,7 @@ export async function demote(sock, m, args) {
     const target = mentioned || quoted;
 
     if (!target) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  📉 *𝔻𝔼𝕄𝕆𝕋𝔼 𝔸𝔻𝕄𝕀ℕ* 📉  ║
@@ -254,7 +254,7 @@ export async function mute(sock, m, args) {
         return `⚠️ Bot must be an admin to mute the group.`;
     }
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     try {
@@ -427,7 +427,7 @@ export async function leave(sock, m, args) {
 
         // If the message is fromMe, it means the user's personal account is leaving
         if (m.key.fromMe) {
-            const config = getCachedConfig();
+            const config = await getCachedConfig(sock.sessionId);
             const p = config.prefix || "!";
             await sock.sendMessage(remoteJid, {
                 text: `⚠️ *Warning:* You are using your personal WhatsApp account as the bot. 
@@ -517,7 +517,7 @@ export async function setgroupname(sock, m, args) {
 
     const newName = args.join(" ");
     if (!newName) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `*Usage:* ${p}setgroupname <new name>`;
     }
@@ -546,7 +546,7 @@ export async function setdesc(sock, m, args) {
 
     const newDesc = args.join(" ");
     if (!newDesc) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `*Usage:* ${p}setdesc <new description>`;
     }
@@ -579,7 +579,7 @@ export async function welcome(sock, m, args) {
     if (action === "on") {
         settings.welcome.enabled = true;
         saveGroupSettings(remoteJid, settings);
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `✅ *Welcome Enabled!* New members will now be greeted.
 💡 Use *${p}setwelcome <message>* to change it.`;
@@ -595,7 +595,7 @@ export async function welcome(sock, m, args) {
 Welcome messages have been turned off.`;
     }
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     return `╔══════════════════════════════════╗
 ║  👋 *𝕎𝔼𝕃ℂ𝕆𝕄𝔼 𝕊𝕐𝕊𝕋𝔼𝕄* 👋  ║
@@ -627,7 +627,7 @@ export async function setwelcome(sock, m, args) {
 
     const message = args.join(" ");
     if (!message) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  ✏️ *𝕊𝔼𝕋 𝕎𝔼𝕃ℂ𝕆𝕄𝔼* ✏️  ║
@@ -672,7 +672,7 @@ export async function goodbye(sock, m, args) {
     if (action === "on") {
         settings.goodbye.enabled = true;
         saveGroupSettings(remoteJid, settings);
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  ✅ *𝔾𝕆𝕆𝔻𝔹𝕐𝔼 𝔼ℕ𝔸𝔹𝕃𝔼𝔻* ✅  ║
@@ -696,7 +696,7 @@ ${settings.goodbye.message}
 Goodbye messages have been turned off.`;
     }
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     return `╔══════════════════════════════════╗
 ║  👋 *𝔾𝕆𝕆𝔻𝔹𝕐𝔼 𝕊𝕐𝕊𝕋𝔼𝕄* 👋  ║
@@ -728,7 +728,7 @@ export async function setgoodbye(sock, m, args) {
 
     const message = args.join(" ");
     if (!message) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  ✏️ *𝕊𝔼𝕋 𝔾𝕆𝕆𝔻𝔹𝕐𝔼* ✏️  ║
@@ -809,7 +809,7 @@ Links will be deleted and user will be removed!`;
 Members can now share links freely.`;
     }
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     return `╔══════════════════════════════════╗
 ║  🔗 *𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 𝕊𝕐𝕊𝕋𝔼𝕄* 🔗  ║
@@ -840,7 +840,7 @@ export async function poll(sock, m, args) {
     const parts = fullText.split("|").map(p => p.trim());
 
     if (parts.length < 3) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  📊 *ℂℝ𝔼𝔸𝕋𝔼 ℙ𝕆𝕃𝕃* 📊  ║
@@ -892,7 +892,7 @@ export async function warn(sock, m, args) {
     const target = mentioned || quoted;
 
     if (!target) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  ⚠️ *𝕎𝔸ℝℕ 𝕌𝕊𝔼ℝ* ⚠️  ║
@@ -950,7 +950,7 @@ export async function resetwarn(sock, m, args) {
     const target = mentioned || quoted;
 
     if (!target) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `*Usage:* ${p}resetwarn @user`;
     }
@@ -971,7 +971,7 @@ export async function botToggle(sock, m, args) {
 
     const status = args[0]?.toLowerCase();
     const settings = loadGroupSettings(remoteJid);
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     if (status === "on") {

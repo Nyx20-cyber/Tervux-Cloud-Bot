@@ -9,7 +9,8 @@ export function Sidebar({ isMobile }: { isMobile?: boolean }) {
     const links = [
         { href: '/dashboard', label: 'Overview', icon: Activity },
         { href: '/dashboard/pair', label: 'Connect Device', icon: Network },
-        { href: '/dashboard/billing', label: 'Subscriptions', icon: CircleDollarSign },
+        { href: '/dashboard/deployments', label: 'Deployments', icon: ShieldCheck },
+        { href: '/dashboard/billing', label: 'Coins 🪙', icon: CircleDollarSign },
     ];
 
     const content = (

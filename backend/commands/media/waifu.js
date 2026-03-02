@@ -11,7 +11,7 @@ export const waifu = async (sock, m, args) => {
     const type = categories.includes(category) ? category : "waifu";
     const isSFW = true; // Always SFW
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     try {

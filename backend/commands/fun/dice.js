@@ -1,7 +1,7 @@
 import { getCachedConfig } from "../../services/configService.js";
 
 export const dice = async (sock, m, args) => {
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     const count = Math.min(parseInt(args[0]) || 1, 6); // Max 6 dice
     const rolls = [];

@@ -83,10 +83,4 @@ export function invalidateConfigCache(sessionId) {
     }
 }
 
-/**
- * Auth directory for sessions (new multi-tenant path)
- */
-export const AUTH_SESSIONS_DIR = join(process.cwd(), "auth_sessions");
-
-// Legacy compatibility — old code references this
-export const AUTH_INFO_PATH = join(process.cwd(), "auth_info");
+// Legacy flat-file authentication removed. Database-only auth activated.

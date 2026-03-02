@@ -16,7 +16,7 @@ function getResult(player, bot) {
 export const rps = async (sock, m, args) => {
     const input = args[0]?.toLowerCase();
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     if (!input || !choices.includes(input)) {

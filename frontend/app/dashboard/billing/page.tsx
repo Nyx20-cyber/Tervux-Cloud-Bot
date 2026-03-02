@@ -4,8 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { CircleDollarSign, CheckCircle2, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/store/useAuthStore";
-import { useSessionStore } from "@/store/useSessionStore";
+import { api, useAuthStore } from "@/store/useAuthStore";
 import { toast } from "sonner";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -14,19 +13,15 @@ import { Input } from "@/components/ui/input";
 function BillingContent() {
     const [plans, setPlans] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const { sessions, fetchSessions } = useSessionStore();
-    const searchParams = useSearchParams();
+    const { checkAuth } = useAuthStore();
     const router = useRouter();
 
-    const preSelectedSessionId = searchParams.get("session");
-    const [selectedSessionId, setSelectedSessionId] = useState<string>(preSelectedSessionId || "");
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
     const [selectedPlan, setSelectedPlan] = useState<any>(null);
     const [phoneNumber, setPhoneNumber] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
 
     useEffect(() => {
-        fetchSessions();
         api.get("/subscription/plans").then(res => {
             setPlans(res.data.plans || []);
             setIsLoading(false);
@@ -34,17 +29,7 @@ function BillingContent() {
             console.error(err);
             setIsLoading(false);
         });
-    }, [fetchSessions]);
-
-    // Force selection of first active session if none selected and available
-    useEffect(() => {
-        if (!selectedSessionId && sessions.length > 0) {
-            setSelectedSessionId(sessions[0]._id);
-        }
-        if (selectedSessionId) {
-            document.getElementById("plans-section")?.scrollIntoView({ behavior: "smooth" });
-        }
-    }, [sessions, selectedSessionId]);
+    }, []);
 
     const handleCheckout = async () => {
         if (!phoneNumber || phoneNumber.length < 9) {
@@ -55,9 +40,8 @@ function BillingContent() {
         setIsProcessing(true);
         try {
             const res = await api.post("/subscription/checkout", {
-                planId: selectedPlan._id,
-                phoneNumber,
-                sessionId: selectedSessionId
+                planSlug: selectedPlan.slug,
+                payerPhone: phoneNumber
             });
 
             toast.success("Payment request sent to your phone. Please enter your PIN.");
@@ -72,13 +56,14 @@ function BillingContent() {
     const pollPaymentStatus = (paymentId: string) => {
         const interval = setInterval(async () => {
             try {
-                const res = await api.get(`/subscription/payment-status/${paymentId}?sessionId=${selectedSessionId}`);
+                const res = await api.get(`/subscription/payment-status/${paymentId}`);
                 if (res.data.status === "completed") {
                     clearInterval(interval);
-                    toast.success("Payment successful! Session upgraded.");
+                    toast.success(res.data.message || "Payment successful! Coins added.");
+                    useAuthStore.getState().updateCoins(res.data.coins);
                     setIsProcessing(false);
                     setIsCheckoutOpen(false);
-                    fetchSessions();
+                    checkAuth(); // refresh user object
                     router.push("/dashboard");
                 } else if (res.data.status === "failed") {
                     clearInterval(interval);
@@ -106,35 +91,9 @@ function BillingContent() {
             <div>
                 <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
                     <CircleDollarSign className="h-8 w-8 text-primary" />
-                    Subscription Plans
+                    Buy Coins 🪙
                 </h1>
-                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Choose the best plan for your needs</p>
-            </div>
-
-            {/* Session Selection */}
-            <div className="p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-4">
-                <h2 className="text-sm font-bold text-white uppercase tracking-widest">Select Device</h2>
-                {sessions.length === 0 ? (
-                    <p className="text-xs text-gray-400">No active nodes available. Pair a device first.</p>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {sessions.map(s => (
-                            <div
-                                key={s._id}
-                                onClick={() => setSelectedSessionId(s._id)}
-                                className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${selectedSessionId === s._id ? 'border-primary bg-primary/10' : 'border-white/10 bg-white/5 hover:border-white/20'}`}
-                            >
-                                <div className="space-y-1">
-                                    <p className="text-sm font-bold text-white">{s.phone}</p>
-                                    <p className="text-[10px] text-gray-500 uppercase tracking-widest">{s.status}</p>
-                                </div>
-                                {selectedSessionId === s._id && (
-                                    <CheckCircle2 className="w-5 h-5 text-primary" />
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                )}
+                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Purchase credits to deploy more devices</p>
             </div>
 
             {/* Plans Grid */}
@@ -147,14 +106,18 @@ function BillingContent() {
                     <div key={plan._id} className="relative group perspective">
                         <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/30 to-secondary/30 rounded-3xl blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
                         <div className="relative p-8 rounded-3xl border border-white/10 bg-card/60 backdrop-blur-xl h-full flex flex-col hover:-translate-y-2 transition-transform duration-500">
-                            <h3 className="text-xl font-bold text-white capitalize">{plan.name === 'Siku' ? 'Siku 3' : plan.name}</h3>
+                            <h3 className="text-xl font-bold text-white capitalize">{plan.name} 🪙</h3>
                             <div className="mt-4 flex items-baseline text-4xl font-extrabold text-primary">
                                 {plan.price}
                                 <span className="ml-1 text-xl font-medium text-gray-500">TZS</span>
                             </div>
-                            <p className="mt-2 text-xs text-gray-400 uppercase tracking-widest font-bold">{plan.durationDays} Days Duration</p>
+                            <p className="mt-2 text-xs text-gray-400 uppercase tracking-widest font-bold">{plan.coinsAmount} Coins Included 🪙</p>
 
                             <ul className="mt-8 space-y-4 flex-1">
+                                <li className="flex items-center gap-3">
+                                    <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
+                                    <span className="text-sm text-gray-300">Deploy up to {Math.floor(plan.coinsAmount / 50)} Bot(s)</span>
+                                </li>
                                 <li className="flex items-center gap-3">
                                     <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
                                     <span className="text-sm text-gray-300">Unlimited Messages</span>
@@ -163,18 +126,13 @@ function BillingContent() {
                                     <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
                                     <span className="text-sm text-gray-300">Priority Support</span>
                                 </li>
-                                <li className="flex items-center gap-3">
-                                    <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
-                                    <span className="text-sm text-gray-300">Standard Groups limit</span>
-                                </li>
                             </ul>
 
                             <Button
                                 onClick={() => { setSelectedPlan(plan); setIsCheckoutOpen(true); }}
-                                disabled={!selectedSessionId}
                                 className="mt-8 w-full bg-white/5 border border-white/10 hover:border-primary text-white hover:text-black transition-all hover:bg-primary font-bold uppercase tracking-widest text-xs h-12"
                             >
-                                Select Plan
+                                Select Package
                                 <ChevronRight className="w-4 h-4 ml-2" />
                             </Button>
                         </div>
@@ -188,15 +146,24 @@ function BillingContent() {
                     <DialogHeader>
                         <DialogTitle className="text-xl font-bold text-white uppercase tracking-widest">Confirm Payment</DialogTitle>
                         <DialogDescription className="text-gray-400">
-                            You are about to upgrade device <span className="text-primary font-bold">{sessions.find(s => s._id === selectedSessionId)?.phone}</span> to <span className="text-white font-bold">{selectedPlan?.name}</span> plan for <span className="text-white font-bold">{selectedPlan?.price} TZS</span>.
+                            You are about to purchase the <span className="text-white font-bold">{selectedPlan?.name}</span> for <span className="text-white font-bold">{selectedPlan?.price} TZS</span>. You will receive {selectedPlan?.coinsAmount} coins 🪙.
                         </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                            <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">M-Pesa / Tigo Pesa Number</label>
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-relaxed block">
+                                Enter Mobile Number
+                            </label>
+                            <div className="flex flex-wrap gap-2 mt-1 mb-3">
+                                <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-[#E60000]/10 text-[#FF4D4D] border border-[#E60000]/30">M-Pesa</span>
+                                <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-[#0055A5]/10 text-[#66A3FF] border border-[#0055A5]/30">Tigo Pesa</span>
+                                <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-[#FF0000]/10 text-[#FF4D4D] border border-[#FF0000]/30">Airtel</span>
+                                <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-[#FF6600]/10 text-[#FF9933] border border-[#FF6600]/30">HaloPesa</span>
+                                <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-[#005B9F]/10 text-[#66B3FF] border border-[#005B9F]/30">T-Pesa</span>
+                            </div>
                             <Input
-                                placeholder="07XXXXXXXX"
+                                placeholder="07XXXXXXXX or 06XXXXXXXX"
                                 value={phoneNumber}
                                 onChange={(e) => setPhoneNumber(e.target.value)}
                                 className="bg-black/50 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-primary h-12"

@@ -4,7 +4,7 @@ export const base64 = async (sock, m, args) => {
     const action = args[0]?.toLowerCase();
     const text = args.slice(1).join(" ");
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     if (!action || !text || !["encode", "decode"].includes(action)) {

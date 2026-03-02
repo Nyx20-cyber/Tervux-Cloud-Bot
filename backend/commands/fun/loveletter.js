@@ -25,7 +25,7 @@ const closings = [
 import { getCachedConfig } from "../../services/configService.js";
 
 export const loveletter = async (sock, m, args) => {
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     const name = args.join(" ") || "My Love";
     const intro = intros[Math.floor(Math.random() * intros.length)];

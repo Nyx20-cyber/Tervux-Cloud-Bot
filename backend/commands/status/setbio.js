@@ -2,7 +2,7 @@ import { getCachedConfig } from "../../services/configService.js";
 
 export const setbio = async (sock, m, args) => {
     const bio = args.join(" ");
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     if (!bio) {

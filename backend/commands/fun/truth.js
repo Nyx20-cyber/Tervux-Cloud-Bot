@@ -16,7 +16,7 @@ export const truth = async (sock, m, args) => {
 
     const randomTruth = truths[Math.floor(Math.random() * truths.length)];
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     return `╔══════════════════════════════════╗

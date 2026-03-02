@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import { sessionManager } from "../services/whatsappService.js";
+import { queueService } from "../services/queueService.js";
 
 const router = Router();
 
@@ -11,15 +12,14 @@ const router = Router();
  */
 router.get("/", authenticate, async (req, res) => {
     try {
-        const sessions = await WhatsAppSession.find({ userId: req.user._id }).populate("subscription.planId");
+        const sessions = await WhatsAppSession.find({ userId: req.user._id });
 
         const enriched = sessions.map(session => {
             const isLive = sessionManager?.isConnected(session._id.toString());
 
             return {
                 ...session.toJSON(),
-                isLive: !!isLive,
-                subscriptionInfo: session.subscription || null
+                isLive: !!isLive
             };
         });
 
@@ -42,18 +42,88 @@ router.post("/pair", authenticate, async (req, res) => {
             return res.status(400).json({ error: "Phone number is required" });
         }
 
-        // Start pairing through session manager
-        const result = await sessionManager.startPairing(
+        const position = queueService.add(
             req.user._id.toString(),
             phoneNumber,
             method || "code",
             req.body.socketId
         );
 
-        res.json(result);
+        if (position > 0) {
+            return res.json({
+                status: "queued",
+                position,
+                message: `Server is busy. You are number ${position} in queue.`
+            });
+        }
+
+        res.json({ status: "processing", message: "Pairing process started." });
     } catch (error) {
         console.error("Pair session error:", error);
         res.status(500).json({ error: error.message || "Failed to start pairing" });
+    }
+});
+
+/**
+ * DELETE /api/sessions/pair/queue
+ * Leave the pairing queue
+ */
+router.delete("/pair/queue", authenticate, async (req, res) => {
+    try {
+        queueService.remove(req.user._id.toString());
+        res.json({ success: true, message: "Removed from queue" });
+    } catch (error) {
+        res.status(500).json({ error: "Failed to leave queue" });
+    }
+});
+
+/**
+ * POST /api/sessions/:id/deploy
+ * Deploy a bot by spending 50 coins
+ */
+router.post("/:id/deploy", authenticate, async (req, res) => {
+    try {
+        const session = await WhatsAppSession.findOne({
+            _id: req.params.id,
+            userId: req.user._id
+        });
+
+        if (!session) {
+            return res.status(404).json({ error: "Session not found" });
+        }
+
+        if (session.status === "active") {
+            return res.status(400).json({ error: "Session is already deployed and active" });
+        }
+
+        import("../models/User.js").then(async ({ default: User }) => {
+            const user = await User.findById(req.user._id);
+            if (!user || user.coins < 50) {
+                return res.status(402).json({ error: "Insufficient coins. You need 50 coins to deploy." });
+            }
+
+            // Deduct 50 coins
+            user.coins -= 50;
+            await user.save();
+
+            // Set session to active with absolute expiration date
+            session.status = "active";
+            session.expiresAt = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000); // 28 days mathematically
+            await session.save();
+
+            // Connect session Manager
+            if (!sessionManager.isConnected(session._id.toString())) {
+                sessionManager.connectSession(session._id.toString());
+            }
+
+            res.json({ success: true, message: "Bot deployed successfully!", coins: user.coins });
+        }).catch(err => {
+            console.error("Deploy user coins error:", err);
+            res.status(500).json({ error: "Failed to deploy bot" });
+        });
+    } catch (error) {
+        console.error("Deploy bot error:", error);
+        res.status(500).json({ error: "Failed to deploy bot" });
     }
 });
 
@@ -179,9 +249,6 @@ router.post("/:id/pause", authenticate, async (req, res) => {
         }
 
         session.status = "paused";
-        if (session.subscription) {
-            session.subscription.status = "paused";
-        }
         await session.save();
 
         res.json({ success: true, message: "Session paused successfully" });
@@ -214,13 +281,12 @@ router.post("/:id/resume", authenticate, async (req, res) => {
             return res.status(404).json({ error: "Session not found" });
         }
 
-        if (session.subscription?.status !== "paused" && session.subscription?.status !== "active") {
-            return res.status(403).json({ error: "Session requires an active subscription to resume" });
+        if (!session.expiresAt || new Date(session.expiresAt) < new Date()) {
+            return res.status(403).json({ error: "Session is expired or has not been deployed. Please deploy with coins first." });
         }
 
         // Subscription checks out, resume
         session.status = "active";
-        session.subscription.status = "active";
         await session.save();
 
         await sessionManager.resumeSession(session._id.toString());

@@ -4,7 +4,7 @@ import { getCachedConfig, updateConfig, invalidateConfigCache } from "../../serv
 const ALLOWED_PREFIXES = ["!", ".", "/", "#", "$", "%", "^", "&", "*", "-", "+", "=", "~", "?", ";", ":", ">", "<", "|", "\\"];
 
 export const prefix = async (sock, m, args) => {
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const newPrefix = args[0];
 
     if (!newPrefix) {
@@ -75,8 +75,8 @@ No changes were made.`;
     const oldPrefix = config.prefix || "!";
 
     try {
-        const success = updateConfig({ prefix: newPrefix });
-        invalidateConfigCache();
+        const success = await updateConfig(sock.sessionId, { prefix: newPrefix });
+        invalidateConfigCache(sock.sessionId);
 
         if (success) {
             return `╔══════════════════════════════════╗

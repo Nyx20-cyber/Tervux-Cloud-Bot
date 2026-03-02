@@ -3,7 +3,7 @@ import { getCachedConfig } from "../../services/configService.js";
 export const unblock = async (sock, m, args) => {
     let target = args[0] ? args[0].replace(/[^0-9]/g, "") + "@s.whatsapp.net" : null;
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     if (!target) {

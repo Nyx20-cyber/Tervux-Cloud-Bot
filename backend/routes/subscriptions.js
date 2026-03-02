@@ -33,24 +33,13 @@ router.get("/", authenticate, async (req, res) => {
         const subscriptions = [];
         for (const session of sessions) {
             const sub = session.subscription;
-            let isExpired = false;
-            if (sub?.expiresAt && new Date(sub.expiresAt) < new Date()) {
-                isExpired = true;
-                if (sub.status === "active") {
-                    session.subscription.status = "expired";
-                    session.status = "expired";
-                    await session.save();
-                }
-            }
-            if (sub?.planId) {
+            if (sub?.status === "active") {
                 subscriptions.push({
                     sessionId: session._id,
                     phone: session.phone,
                     plan: sub.planId,
                     status: sub.status || "none",
-                    activatedAt: sub.activatedAt || null,
-                    expiresAt: sub.expiresAt || null,
-                    isExpired
+                    activatedAt: sub.activatedAt || null
                 });
             }
         }
@@ -68,10 +57,10 @@ router.get("/", authenticate, async (req, res) => {
  */
 router.post("/checkout", authenticate, async (req, res) => {
     try {
-        const { planSlug, payerPhone, sessionId } = req.body;
+        const { planSlug, payerPhone } = req.body;
 
-        if (!planSlug || !payerPhone || !sessionId) {
-            return res.status(400).json({ error: "planSlug, payerPhone, and sessionId are required" });
+        if (!planSlug || !payerPhone) {
+            return res.status(400).json({ error: "planSlug and payerPhone are required" });
         }
 
         const plan = await Plan.findOne({ slug: planSlug, isActive: true });
@@ -97,7 +86,6 @@ router.post("/checkout", authenticate, async (req, res) => {
         // Save payment record as pending
         const payment = await Payment.create({
             userId: req.user._id,
-            sessionId: sessionId,
             planId: plan._id,
             amount: plan.price,
             currency: "TZS",
@@ -163,40 +151,19 @@ router.get("/payment-status/:paymentId", authenticate, async (req, res) => {
                 payment.status = "completed";
                 await payment.save();
 
-                // Activate subscription on the specific session
-                const session = await WhatsAppSession.findById(payment.sessionId);
+                // Add coins to user
                 const plan = payment.planId;
-                const now = new Date();
-
-                // If session has active subscription that hasn't expired, extend it
-                let startDate = now;
-                if (session.subscription?.status === "active" &&
-                    session.subscription?.expiresAt > now &&
-                    session.subscription?.planId?.toString() === plan._id.toString()) {
-                    startDate = new Date(session.subscription.expiresAt);
+                const user = await User.findById(req.user._id);
+                if (user && plan) {
+                    user.coins = (user.coins || 0) + (plan.coinsAmount || 0);
+                    await user.save();
                 }
-
-                session.subscription = {
-                    planId: plan._id,
-                    status: "active",
-                    activatedAt: now,
-                    expiresAt: new Date(startDate.getTime() + plan.durationDays * 86400000)
-                };
-                session.status = "active";
-                await session.save();
-
-                // Reconnect if offline
-                import("../services/whatsappService.js").then(({ sessionManager }) => {
-                    if (!sessionManager.isConnected(session._id.toString())) {
-                        sessionManager.connectSession(session._id.toString());
-                    }
-                });
 
                 return res.json({
                     status: "completed",
-                    message: "Subscription activated for session!",
+                    message: `Payment successful! You received ${plan.coinsAmount} coins.`,
                     plan: plan.name,
-                    expiresAt: session.subscription.expiresAt
+                    coins: user.coins
                 });
             }
 

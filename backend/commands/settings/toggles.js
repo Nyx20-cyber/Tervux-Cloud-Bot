@@ -2,7 +2,7 @@ import { getCachedConfig, updateConfig, invalidateConfigCache } from "../../serv
 
 // Helper for toggle commands
 const createToggle = (settingKey, displayName) => async (sock, m, args) => {
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     const value = args[0]?.toLowerCase();
 
@@ -16,8 +16,8 @@ const createToggle = (settingKey, displayName) => async (sock, m, args) => {
     }
 
     const newValue = value === "on";
-    updateConfig({ [settingKey]: newValue });
-    invalidateConfigCache();
+    await updateConfig(sock.sessionId, { [settingKey]: newValue });
+    invalidateConfigCache(sock.sessionId);
 
     return `╔══════════════════════════════════╗
 ║    ✅ *𝕊𝔼𝕋𝕋𝕀ℕ𝔾 𝕌ℙ𝔻𝔸𝕋𝔼𝔻* ✅      ║

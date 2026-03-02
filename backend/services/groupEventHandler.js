@@ -17,7 +17,7 @@ export async function handleGroupParticipantsUpdate(sock, update) {
     console.log(`👥 [GroupEvent] Participants update: action=${action}, group=${id}, participants=${normalizedParticipants.join(", ")}`);
 
     try {
-        const settings = loadGroupSettings(id);
+        const settings = await loadGroupSettings(sock.sessionId, id);
         console.log(`📋 [GroupEvent] Settings loaded: welcome.enabled=${settings.welcome?.enabled}, goodbye.enabled=${settings.goodbye?.enabled}`);
 
         const metadata = await getGroupMetadata(sock, id);
@@ -83,11 +83,11 @@ export async function handleGroupMessage(sock, m) {
     const botJid = (sock.user?.id?.split("@")[0]?.split(":")[0]) + "@s.whatsapp.net";
     if (sender.split(":")[0].split("@")[0] === botJid.split("@")[0]) return false;
 
-    const settings = loadGroupSettings(remoteJid);
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
 
     // Check if bot is disabled for this group
     if (settings.botEnabled === false) {
-        const config = getCachedConfig();
+        const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         const msgText = (m.message.conversation || m.message.extendedTextMessage?.text || "").toLowerCase().trim();
 

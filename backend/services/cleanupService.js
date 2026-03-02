@@ -16,10 +16,9 @@ export async function runCleanup() {
 
     try {
         await cleanGhostSessions();
-        await cleanExpiredSubscriptions();
         await cleanStaleDisconnected();
         await cleanOrphanedMongoAuth();
-        await cleanUnpaidSessions();
+        await cleanExpiredBots();
         console.log("✅ [Cleanup] Maintenance cycle complete.");
     } catch (error) {
         console.error("❌ [Cleanup] Maintenance failed:", error.message);
@@ -27,26 +26,38 @@ export async function runCleanup() {
 }
 
 /**
- * Unpaid sessions: sessions created > 24 hours ago with no active subscription
+ * Expired bots: Deletes sessions that have passed their 28-day deployment timestamp.
  */
-async function cleanUnpaidSessions() {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+async function cleanExpiredBots() {
+    const now = new Date();
 
-    const unpaidSessions = await WhatsAppSession.find({
-        createdAt: { $lt: twentyFourHoursAgo },
-        "subscription.status": { $ne: "active" }
+    const expiredSessions = await WhatsAppSession.find({
+        expiresAt: { $lt: now }
     });
 
-    for (const session of unpaidSessions) {
-        console.log(`   ⏳ [Unpaid] Deleting unpaid session ${session._id} (${session.phone || "unknown"})`);
-        await sessionManager.destroySession(session._id.toString());
+    for (const session of expiredSessions) {
+        console.log(`   ⏳ [Expired] Auto-deleting expired 28-day session ${session._id} (${session.phone || "unknown"})`);
+
+        try {
+            await sessionManager.destroySession(session._id.toString());
+        } catch (e) {
+            console.error(`   Failed to destroy session manager instance:`, e.message);
+        }
+
+        try {
+            await WhatsAppAuth.deleteMany({ sessionId: session._id });
+        } catch (e) {
+            console.error(`   Failed to delete auth records:`, e.message);
+        }
+
         await WhatsAppSession.deleteOne({ _id: session._id });
     }
 
-    if (unpaidSessions.length > 0) {
-        console.log(`   🧹 Cleaned ${unpaidSessions.length} unpaid session(s).`);
+    if (expiredSessions.length > 0) {
+        console.log(`   🧹 Cleaned ${expiredSessions.length} expired 28-day session(s).`);
     }
 }
+
 
 /**
  * Ghost sessions: stuck in "pairing" status for > 3 minutes
@@ -67,32 +78,6 @@ async function cleanGhostSessions() {
 
     if (ghosts.length > 0) {
         console.log(`   🧹 Cleaned ${ghosts.length} ghost session(s).`);
-    }
-}
-
-/**
- * Expired subscriptions: disconnect their active sessions
- */
-async function cleanExpiredSubscriptions() {
-    const expiredSessions = await WhatsAppSession.find({
-        "subscription.status": "active",
-        "subscription.expiresAt": { $lt: new Date() }
-    });
-
-    for (const session of expiredSessions) {
-        console.log(`   ⏰ [Expired] Session ${session._id} subscription expired.`);
-
-        // Update session subscription status
-        session.subscription.status = "expired";
-        session.status = "expired";
-        await session.save();
-
-        console.log(`   🔌 [Expired] Disconnecting session ${session._id}`);
-        await sessionManager.disconnectSession(session._id.toString());
-    }
-
-    if (expiredSessions.length > 0) {
-        console.log(`   🧹 Expired ${expiredSessions.length} session subscription(s).`);
     }
 }
 

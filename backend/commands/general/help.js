@@ -4,7 +4,7 @@ import { getRepoStats } from "../../utils/githubStats.js";
 import { getCachedConfig } from "../../services/configService.js";
 
 export const help = async (sock, m, args) => {
-  const config = getCachedConfig();
+  const config = await getCachedConfig(sock.sessionId);
   const p = config.prefix || "!";
 
   // Load Logo securely

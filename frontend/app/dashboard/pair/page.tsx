@@ -9,12 +9,14 @@ import { QRCodeSVG } from "qrcode.react";
 import { io, Socket } from "socket.io-client";
 import { toast } from "sonner";
 import { useSessionStore } from "@/store/useSessionStore";
+import { useAuthStore, api } from "@/store/useAuthStore";
 import { useRouter } from "next/navigation";
 
 export default function PairPage() {
     const [method, setMethod] = useState<"qr" | "code">("qr");
     const [phone, setPhone] = useState("");
-    const [status, setStatus] = useState<"idle" | "loading" | "waiting" | "linked" | "error">("idle");
+    const [status, setStatus] = useState<"idle" | "loading" | "waiting" | "linked" | "error" | "queued">("idle");
+    const [queuePosition, setQueuePosition] = useState(0);
     const [qrCode, setQrCode] = useState("");
     const [pairingCode, setPairingCode] = useState("");
     const [errorMsg, setErrorMsg] = useState("");
@@ -22,33 +24,48 @@ export default function PairPage() {
 
     const [sessionId, setSessionId] = useState("");
     const { createPairingReq, fetchSessions } = useSessionStore();
+    const { token } = useAuthStore();
     const router = useRouter();
 
     useEffect(() => {
-        // Initialize socket and proxy it via Next.js rewrites
-        const newSocket = io({ path: "/socket.io" });
+        if (!token) return;
+
+        // Initialize socket directly to backend (bypass Next.js proxy which drops WS headers)
+        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000";
+        const newSocket = io(backendUrl, {
+            transports: ["websocket", "polling"],
+            path: "/socket.io",
+            auth: { token }
+        });
+
         setSocket(newSocket);
 
         newSocket.on("connect", () => console.log("Socket connected:", newSocket.id));
 
-        newSocket.on("qr_update", (data) => {
-            if (method === "qr") {
-                setQrCode(data.qr);
-                setSessionId(data.sessionId);
-                setStatus("waiting");
-            }
+        newSocket.on("qr_update", (data: any) => {
+            setQrCode(data.qr);
+            setSessionId(data.sessionId);
+            setStatus(prev => prev !== "linked" ? "waiting" : prev);
         });
 
-        newSocket.on("pairing_code", (data) => {
-            if (method === "code") {
-                setPairingCode(data.code);
-                setSessionId(data.sessionId);
-                setStatus("waiting");
-            }
+        newSocket.on("pairing_code", (data: any) => {
+            setPairingCode(data.code);
+            setSessionId(data.sessionId);
+            setStatus(prev => prev !== "linked" ? "waiting" : prev);
+        });
+
+        newSocket.on("queue_update", (data: any) => {
+            setQueuePosition(data.position);
+            setStatus("queued");
+        });
+
+        newSocket.on("queue_ready", (data: any) => {
+            setStatus("loading");
+            toast.success(data.message || "Your turn! Generating connection...");
         });
 
         // Backend event names
-        newSocket.on("pairing_success", (data) => {
+        newSocket.on("pairing_success", (data: any) => {
             toast.success(data.message || "Device connected successfully!");
             setStatus("linked");
             setSessionId(data.sessionId);
@@ -60,7 +77,7 @@ export default function PairPage() {
             }, 3000);
         });
 
-        newSocket.on("pairing_error", (err) => {
+        newSocket.on("pairing_error", (err: any) => {
             setErrorMsg(err.error || "Connection Error");
             setStatus("error");
             toast.error(err.error || "Failed to connect device");
@@ -70,7 +87,7 @@ export default function PairPage() {
         return () => {
             newSocket.disconnect();
         };
-    }, [method, fetchSessions, router]);
+    }, [token, fetchSessions, router]);
 
     const handlePair = async () => {
         if (phone.startsWith("+") || phone.startsWith("0")) {
@@ -84,7 +101,12 @@ export default function PairPage() {
 
         try {
             const data = await createPairingReq(phone.replace(/\D/g, ""), method);
-            if (data.code) {
+            if (data.status === "queued") {
+                setQueuePosition(data.position);
+                setStatus("queued");
+            } else if (data.status === "processing") {
+                setStatus("loading");
+            } else if (data.code) {
                 setPairingCode(data.code);
                 setStatus("waiting");
             }
@@ -184,6 +206,36 @@ export default function PairPage() {
                                         <p className="text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">
                                             Preparing connection...
                                         </p>
+                                    </div>
+                                )}
+
+                                {status === "queued" && (
+                                    <div className="flex flex-col items-center justify-center text-center gap-6 text-amber-500 animate-fade-in py-12 flex-1">
+                                        <div className="relative flex items-center justify-center w-24 h-24">
+                                            <div className="absolute inset-0 border-4 border-amber-500/20 rounded-full animate-ping"></div>
+                                            <div className="absolute inset-2 border-4 border-amber-500/40 rounded-full animate-ping" style={{ animationDelay: "0.2s" }}></div>
+                                            <div className="z-10 flex flex-col items-center justify-center bg-card shadow-2xl rounded-full w-20 h-20 border-2 border-amber-500 shadow-amber-500/50">
+                                                <span className="text-2xl font-black text-amber-500">#{queuePosition}</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <p className="text-[12px] font-bold uppercase tracking-[0.2em] text-amber-500 font-mono">
+                                                Server is busy
+                                            </p>
+                                            <p className="text-[10px] font-bold uppercase tracking-widest text-amber-400/70 max-w-xs mx-auto">
+                                                Too many people are linking right now. You have to wait for your turn. Don't leave or close the window!
+                                            </p>
+                                        </div>
+                                        <Button
+                                            variant="ghost"
+                                            onClick={async () => {
+                                                setStatus("idle");
+                                                try { await api.delete("/sessions/pair/queue"); } catch (e) { }
+                                            }}
+                                            className="mt-4 h-10 w-32 rounded-xl text-gray-500 hover:text-white hover:bg-white/5 font-bold text-[9px] tracking-widest uppercase transition-all"
+                                        >
+                                            Cancel
+                                        </Button>
                                     </div>
                                 )}
 

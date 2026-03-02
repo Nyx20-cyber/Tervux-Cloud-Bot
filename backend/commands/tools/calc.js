@@ -1,7 +1,7 @@
 import { getCachedConfig } from "../../services/configService.js";
 
 export const calc = async (sock, m, args) => {
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     const expression = args.join("");

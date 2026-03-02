@@ -4,7 +4,7 @@ import { getCachedConfig } from "../../services/configService.js";
 export const meme = async (sock, m, args) => {
     const chatJid = m.key.remoteJid;
 
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     try {

@@ -20,13 +20,9 @@ const planSchema = new mongoose.Schema({
         type: String,
         default: "TZS"
     },
-    durationDays: {
+    coinsAmount: {
         type: Number,
         required: true
-    },
-    maxSessions: {
-        type: Number,
-        default: 1
     },
     description: {
         type: String,

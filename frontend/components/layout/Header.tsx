@@ -1,5 +1,5 @@
 import { useAuthStore } from "@/store/useAuthStore";
-import { LogOut, User as UserIcon, Menu } from "lucide-react";
+import { LogOut, User as UserIcon, Menu, Coins } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function Header({ onMenuClick }: { onMenuClick: () => void }) {
@@ -20,6 +20,10 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
             </div>
 
             <div className="flex items-center gap-4 text-sm">
+                <div className="hidden lg:flex items-center gap-2 bg-yellow-500/10 px-3 py-1.5 rounded-full border border-yellow-500/20 mr-2">
+                    <Coins className="h-3 w-3 text-yellow-500" />
+                    <span className="text-[10px] font-bold tracking-widest text-yellow-500 uppercase">{user?.coins || 0} Coins</span>
+                </div>
                 <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
                     <UserIcon className="h-3 w-3 text-gray-400" />
                     <span className="text-[10px] font-bold tracking-widest text-gray-300 uppercase truncate max-w-[120px]">{user?.email || "User"}</span>

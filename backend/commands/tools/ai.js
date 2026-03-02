@@ -8,7 +8,7 @@ const client = new OpenAI({
 });
 
 export const ai = async (sock, m, args) => {
-    const config = getCachedConfig();
+    const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     const chatJid = m.key.remoteJid;
     const question = args.join(" ");
