@@ -322,30 +322,30 @@ export default function PairPage() {
                 <div className="lg:col-span-5 space-y-6 animate-slide-right hidden lg:block">
                     <div className="p-8 rounded-3xl border border-border bg-card/50 backdrop-blur-md h-full">
                         <div className="space-y-1 mb-8">
-                            <h2 className="text-lg font-semibold text-white tracking-tight uppercase">Security Information</h2>
-                            <p className="text-[10px] font-semibold text-amber-500 tracking-widest uppercase">Safe Connection Guide</p>
+                            <h2 className="text-lg font-semibold text-white tracking-tight uppercase">Usage Terms & Safety</h2>
+                            <p className="text-[10px] font-semibold text-amber-500 tracking-widest uppercase">Risk Disclaimer</p>
                         </div>
 
                         <div className="space-y-6">
-                            <div className="space-y-3 p-6 rounded-2xl bg-white/5 border border-white/10">
-                                <div className="flex items-center gap-2 text-amber-500">
-                                    <Zap className="w-4 h-4" />
-                                    <span className="text-[10px] font-bold uppercase tracking-widest">Free Connection</span>
+                            <div className="space-y-3 p-6 rounded-2xl bg-white/5 border border-white/10 text-amber-500">
+                                <div className="flex items-center gap-2">
+                                    <AlertCircle className="w-4 h-4" />
+                                    <span className="text-[10px] font-bold uppercase tracking-widest">Account Responsibility</span>
                                 </div>
                                 <p className="text-xs text-gray-400 leading-relaxed font-medium">
-                                    Tervux WhatsApp modules are <span className="text-white font-bold">100% FREE</span> to pair.
-                                    If anyone asks for money to connect, stop immediately.
-                                    You only pay for server hosting via subscriptions.
+                                    Any usage issues or bans affecting your WhatsApp number <span className="text-white font-bold">are not our responsibility</span>.
+                                    You are solely responsible for how you use the bot, and any action taken by WhatsApp against your account is your own liability.
                                 </p>
                             </div>
 
                             <div className="space-y-3 p-6 rounded-2xl bg-primary/5 border border-primary/10">
                                 <div className="flex items-center gap-2 text-primary">
                                     <ShieldCheck className="w-4 h-4" />
-                                    <span className="text-[10px] font-bold uppercase tracking-widest">Secure Encryption</span>
+                                    <span className="text-[10px] font-bold uppercase tracking-widest">Data Protection & Risk</span>
                                 </div>
                                 <p className="text-xs text-gray-400 leading-relaxed font-medium">
-                                    Your session tokens are stored securely. Tervux does not read your messages or store your private data.
+                                    While we protect user data and session tokens with encryption, our service involves third-party modules that carry inherent risks.
+                                    <span className="text-white font-bold"> This service is not 100% free;</span> you must pay for hosting and deployment via coins or subscriptions.
                                 </p>
                             </div>
                         </div>
