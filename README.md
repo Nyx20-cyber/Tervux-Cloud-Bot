@@ -8,21 +8,7 @@ Built with security and scalability in mind, Tervux provides a seamless interfac
   <img src="./frontend/public/ui-image.png" width="100%" alt="Tervux UI Preview">
 </p>
 
-<p align="center">
-  <svg width="100%" height="4" viewBox="0 0 1000 4" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1000" height="4" fill="#1e293b" opacity="0.6"/>
-    <rect width="300" height="4" fill="url(#paint0_linear_all)">
-      <animate attributeName="x" from="-300" to="1000" dur="3s" repeatCount="indefinite" />
-    </rect>
-    <defs>
-      <linearGradient id="paint0_linear_all" x1="0" y1="0" x2="300" y2="0" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#3b82f6" stop-opacity="0"/>
-        <stop offset="0.5" stop-color="#60a5fa"/>
-        <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-  </svg>
-</p>
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## Project Architecture
 
@@ -42,21 +28,7 @@ graph LR
     API <--> Payment[Fastlipa/M-Pesa]
 ```
 
-<p align="center">
-  <svg width="100%" height="4" viewBox="0 0 1000 4" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1000" height="4" fill="#1e293b" opacity="0.6"/>
-    <rect width="300" height="4" fill="url(#paint0_linear_all)">
-      <animate attributeName="x" from="-300" to="1000" dur="3s" repeatCount="indefinite" />
-    </rect>
-    <defs>
-      <linearGradient id="paint0_linear_all" x1="0" y1="0" x2="300" y2="0" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#3b82f6" stop-opacity="0"/>
-        <stop offset="0.5" stop-color="#60a5fa"/>
-        <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-  </svg>
-</p>
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## Technology Stack
 
@@ -71,21 +43,7 @@ The platform is built using modern, stable web technologies:
 *   WhatsApp API: Baileys library (WebSocket proxy)
 *   Authentication: JSON Web Tokens (JWT)
 
-<p align="center">
-  <svg width="100%" height="4" viewBox="0 0 1000 4" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1000" height="4" fill="#1e293b" opacity="0.6"/>
-    <rect width="300" height="4" fill="url(#paint0_linear_all)">
-      <animate attributeName="x" from="-300" to="1000" dur="3s" repeatCount="indefinite" />
-    </rect>
-    <defs>
-      <linearGradient id="paint0_linear_all" x1="0" y1="0" x2="300" y2="0" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#3b82f6" stop-opacity="0"/>
-        <stop offset="0.5" stop-color="#60a5fa"/>
-        <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-  </svg>
-</p>
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## User Usage Flow
 
@@ -97,21 +55,7 @@ The platform is built using modern, stable web technologies:
 6.  Configuration: The user customizes their bot's behavior (e.g., toggling Auto-Read, Anti-Delete) via the "Settings" panel on the dashboard.
 7.  Monitoring: The user monitors their active sessions, disconnects them, or pauses them as needed.
 
-<p align="center">
-  <svg width="100%" height="4" viewBox="0 0 1000 4" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1000" height="4" fill="#1e293b" opacity="0.6"/>
-    <rect width="300" height="4" fill="url(#paint0_linear_all)">
-      <animate attributeName="x" from="-300" to="1000" dur="3s" repeatCount="indefinite" />
-    </rect>
-    <defs>
-      <linearGradient id="paint0_linear_all" x1="0" y1="0" x2="300" y2="0" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#3b82f6" stop-opacity="0"/>
-        <stop offset="0.5" stop-color="#60a5fa"/>
-        <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-  </svg>
-</p>
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## 🪙 Coin System and Usage Tracking
 
@@ -123,21 +67,7 @@ The platform uses a virtual currency called "Coins" (🪙) to manage bot deploym
 *   Session Expiration Tracking: A Node.js `node-cron` job (`cleanupService.js`) runs every 5 minutes on the server. It scans the `WhatsAppSession` collection for any active bots where the current server time has surpassed the `expiresAt` timestamp.
 *   Automated Deactivation: If an active bot has expired, the server automatically disconnects the Baileys WebSocket, clears the cached configuration, and updates the session status to "expired" in the database, requiring the user to spend more coins to reactivate it.
 
-<p align="center">
-  <svg width="100%" height="4" viewBox="0 0 1000 4" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1000" height="4" fill="#1e293b" opacity="0.6"/>
-    <rect width="300" height="4" fill="url(#paint0_linear_all)">
-      <animate attributeName="x" from="-300" to="1000" dur="3s" repeatCount="indefinite" />
-    </rect>
-    <defs>
-      <linearGradient id="paint0_linear_all" x1="0" y1="0" x2="300" y2="0" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#3b82f6" stop-opacity="0"/>
-        <stop offset="0.5" stop-color="#60a5fa"/>
-        <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-  </svg>
-</p>
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## Linking Queue System
 
@@ -148,21 +78,7 @@ To guarantee platform stability when handling a surge of new WhatsApp connection
 *   Queue Progression: As ongoing pairings complete (either successfully or through connection timeouts), the queue naturally advances. The backend triggers the actual connection creation on the next user in line automatically.
 *   Real-Time Socket Polling: Users waiting in line receive Socket.io `queue_update` broadcasts detailing their exact real-time mathematical position in line (e.g., "Position 4"). When their turn arrives, the server emits a `queue_ready` event, and the backend generates their Pairing Code or QR Code.
 
-<p align="center">
-  <svg width="100%" height="4" viewBox="0 0 1000 4" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1000" height="4" fill="#1e293b" opacity="0.6"/>
-    <rect width="300" height="4" fill="url(#paint0_linear_all)">
-      <animate attributeName="x" from="-300" to="1000" dur="3s" repeatCount="indefinite" />
-    </rect>
-    <defs>
-      <linearGradient id="paint0_linear_all" x1="0" y1="0" x2="300" y2="0" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#3b82f6" stop-opacity="0"/>
-        <stop offset="0.5" stop-color="#60a5fa"/>
-        <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-  </svg>
-</p>
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## Current Project Status and Implemented Features
 
@@ -192,21 +108,7 @@ We have completed the core infrastructure and critical user flows for the SaaS p
 - Payment Verification: System for users to submit transaction references (e.g., M-Pesa/Tigo Pesa) and for the system/admin to verify them.
 - Admin Panel: Comprehensive system statistics, user management, and manual payment verification queue.
 
-<p align="center">
-  <svg width="100%" height="4" viewBox="0 0 1000 4" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1000" height="4" fill="#1e293b" opacity="0.6"/>
-    <rect width="300" height="4" fill="url(#paint0_linear_all)">
-      <animate attributeName="x" from="-300" to="1000" dur="3s" repeatCount="indefinite" />
-    </rect>
-    <defs>
-      <linearGradient id="paint0_linear_all" x1="0" y1="0" x2="300" y2="0" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#3b82f6" stop-opacity="0"/>
-        <stop offset="0.5" stop-color="#60a5fa"/>
-        <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-  </svg>
-</p>
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## Missing Features and Next Steps
 
@@ -217,21 +119,7 @@ While the core SaaS routing, deployment, and session management are complete, th
 - User Analytics: Presenting detailed message statistics, uptime, and usage metrics to the user on their dashboard.
 - Developer API / Webhooks: Allowing users to connect external apps to their Tervux WhatsApp sessions via a public-facing API.
 
-<p align="center">
-  <svg width="100%" height="4" viewBox="0 0 1000 4" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1000" height="4" fill="#1e293b" opacity="0.6"/>
-    <rect width="300" height="4" fill="url(#paint0_linear_all)">
-      <animate attributeName="x" from="-300" to="1000" dur="3s" repeatCount="indefinite" />
-    </rect>
-    <defs>
-      <linearGradient id="paint0_linear_all" x1="0" y1="0" x2="300" y2="0" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#3b82f6" stop-opacity="0"/>
-        <stop offset="0.5" stop-color="#60a5fa"/>
-        <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-  </svg>
-</p>
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## Project Structure
 
@@ -249,21 +137,7 @@ Tervux-Cloud-Bot/
 └── README.md             # This file
 ```
 
-<p align="center">
-  <svg width="100%" height="4" viewBox="0 0 1000 4" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="1000" height="4" fill="#1e293b" opacity="0.6"/>
-    <rect width="300" height="4" fill="url(#paint0_linear_all)">
-      <animate attributeName="x" from="-300" to="1000" dur="3s" repeatCount="indefinite" />
-    </rect>
-    <defs>
-      <linearGradient id="paint0_linear_all" x1="0" y1="0" x2="300" y2="0" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#3b82f6" stop-opacity="0"/>
-        <stop offset="0.5" stop-color="#60a5fa"/>
-        <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-  </svg>
-</p>
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## Deployment Guide
 
@@ -293,7 +167,7 @@ pm2 start npm --name "tervux-frontend" -- start
 ### 3. Nginx Configuration
 Configure Nginx as a reverse proxy for both the frontend (Port 3000) and backend API/Socket (Port 5000).
 
-<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4520-a447-11eb-908a-139a6edaec5c.gif" width="100%">
+<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## Documentation
 
