@@ -1,8 +1,11 @@
 import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
+import User from "../models/User.js";
 import { sessionManager } from "../services/whatsappService.js";
 import { queueService } from "../services/queueService.js";
+import { emitToUser } from "../services/socketService.js";
+import { pairingLimiter } from "../middleware/rateLimiter.js";
 
 const router = Router();
 
@@ -34,7 +37,7 @@ router.get("/", authenticate, async (req, res) => {
  * POST /api/sessions/pair
  * Start pairing a new WhatsApp session (unlimited, but only active with subscription)
  */
-router.post("/pair", authenticate, async (req, res) => {
+router.post("/pair", authenticate, pairingLimiter, async (req, res) => {
     try {
         const { phoneNumber, method } = req.body;
 
@@ -92,35 +95,30 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
             return res.status(404).json({ error: "Session not found" });
         }
 
-        if (session.status === "active") {
+        if (session.expiresAt && new Date(session.expiresAt) > new Date()) {
             return res.status(400).json({ error: "Session is already deployed and active" });
         }
 
-        import("../models/User.js").then(async ({ default: User }) => {
-            const user = await User.findById(req.user._id);
-            if (!user || user.coins < 50) {
-                return res.status(402).json({ error: "Insufficient coins. You need 50 coins to deploy." });
-            }
+        const user = await User.findById(req.user._id);
+        if (!user || user.coins < 50) {
+            return res.status(402).json({ error: "Insufficient coins. You need 50 coins to deploy." });
+        }
 
-            // Deduct 50 coins
-            user.coins -= 50;
-            await user.save();
+        // Deduct 50 coins
+        user.coins -= 50;
+        await user.save();
 
-            // Set session to active with absolute expiration date
-            session.status = "active";
-            session.expiresAt = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000); // 28 days mathematically
-            await session.save();
+        // Set session to active with absolute expiration date
+        session.status = "active";
+        session.expiresAt = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000); // 28 days
+        await session.save();
 
-            // Connect session Manager
-            if (!sessionManager.isConnected(session._id.toString())) {
-                sessionManager.connectSession(session._id.toString());
-            }
+        // Connect session Manager
+        if (!sessionManager.isConnected(session._id.toString())) {
+            sessionManager.connectSession(session._id.toString());
+        }
 
-            res.json({ success: true, message: "Bot deployed successfully!", coins: user.coins });
-        }).catch(err => {
-            console.error("Deploy user coins error:", err);
-            res.status(500).json({ error: "Failed to deploy bot" });
-        });
+        res.json({ success: true, message: "Bot deployed successfully!", coins: user.coins });
     } catch (error) {
         console.error("Deploy bot error:", error);
         res.status(500).json({ error: "Failed to deploy bot" });
@@ -244,21 +242,19 @@ router.post("/:id/pause", authenticate, async (req, res) => {
             return res.status(404).json({ error: "Session not found" });
         }
 
+        session.status = "paused";
+        await session.save();
+
         if (sessionManager?.isConnected(session._id.toString())) {
             await sessionManager.pauseSession(session._id.toString());
         }
 
-        session.status = "paused";
-        await session.save();
-
         res.json({ success: true, message: "Session paused successfully" });
 
         // Notify client via socket
-        import("./socketService.js").then(({ emitToUser }) => {
-            emitToUser(req.user._id.toString(), "session_update", {
-                sessionId: session._id,
-                status: "paused"
-            });
+        emitToUser(req.user._id.toString(), "session_update", {
+            sessionId: session._id,
+            status: "paused"
         });
     } catch (error) {
         console.error("Pause session error:", error);
@@ -294,11 +290,9 @@ router.post("/:id/resume", authenticate, async (req, res) => {
         res.json({ success: true, message: "Session resumed successfully" });
 
         // Notify client via socket
-        import("./socketService.js").then(({ emitToUser }) => {
-            emitToUser(req.user._id.toString(), "session_update", {
-                sessionId: session._id,
-                status: "active"
-            });
+        emitToUser(req.user._id.toString(), "session_update", {
+            sessionId: session._id,
+            status: "active"
         });
     } catch (error) {
         console.error("Resume session error:", error);

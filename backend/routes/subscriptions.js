@@ -8,19 +8,7 @@ import { createTransaction, checkTransactionStatus, getBalance } from "../servic
 
 const router = Router();
 
-/**
- * GET /api/plans
- * List available subscription plans (public)
- */
-router.get("/plans", async (req, res) => {
-    try {
-        const plans = await Plan.find({ isActive: true }).sort({ price: 1 });
-        res.json({ plans });
-    } catch (error) {
-        console.error("List plans error:", error);
-        res.status(500).json({ error: "Failed to list plans" });
-    }
-});
+// Plans listing is handled by app.js at GET /api/plans
 
 /**
  * GET /api/subscription

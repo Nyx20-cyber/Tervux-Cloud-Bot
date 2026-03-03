@@ -1,5 +1,4 @@
 import { EventEmitter } from "events";
-import { sessionManager } from "./whatsappService.js";
 import { emitToUser } from "./socketService.js";
 
 const MAX_CONCURRENT_PAIRINGS = 3;
@@ -93,7 +92,7 @@ class QueueService extends EventEmitter {
 
     async startSessionPairing(item) {
         try {
-            // Import lazily to avoid circular dependencies if any
+            // Import lazily to avoid circular dependencies
             const { sessionManager } = await import("./whatsappService.js");
 
             // This is equivalent to what /sessions/pair used to do directly
@@ -104,7 +103,7 @@ class QueueService extends EventEmitter {
         } catch (error) {
             console.error(`[Queue] Error starting pairing for ${item.userId}:`, error);
             this.finishPairing(item.userId);
-            emitToUser(item.userId, "session_error", { error: "Failed to start pairing process from queue." });
+            emitToUser(item.userId, "pairing_error", { error: "Failed to start pairing process. Please try again." });
         }
     }
 

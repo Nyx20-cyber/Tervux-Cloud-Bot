@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Terminal, Copy, Share2, Zap, AlertCircle, Loader2, Check, ShieldCheck } from "lucide-react";
+import { Terminal, Copy, Share2, Zap, AlertCircle, Loader2, Check, ShieldCheck, Activity, RefreshCcw, Plus, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { QRCodeSVG } from "qrcode.react";
@@ -30,58 +30,74 @@ export default function PairPage() {
     useEffect(() => {
         if (!token) return;
 
-        // Initialize socket directly to backend (bypass Next.js proxy which drops WS headers)
-        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000";
+        // Initialize socket directly to backend
+        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
         const newSocket = io(backendUrl, {
             transports: ["websocket", "polling"],
             path: "/socket.io",
-            auth: { token }
+            auth: { token },
+            reconnectionAttempts: 5,
+            reconnectionDelay: 2000
         });
 
         setSocket(newSocket);
 
         newSocket.on("connect", () => console.log("Socket connected:", newSocket.id));
+        newSocket.on("connect_error", (err) => console.error("Socket connection error:", err.message));
 
-        newSocket.on("qr_update", (data: any) => {
+        newSocket.on("qr_update", (data: { qr: string; sessionId: string }) => {
             setQrCode(data.qr);
             setSessionId(data.sessionId);
             setStatus(prev => prev !== "linked" ? "waiting" : prev);
         });
 
-        newSocket.on("pairing_code", (data: any) => {
+        newSocket.on("pairing_code", (data: { code: string; sessionId: string }) => {
             setPairingCode(data.code);
             setSessionId(data.sessionId);
             setStatus(prev => prev !== "linked" ? "waiting" : prev);
         });
 
-        newSocket.on("queue_update", (data: any) => {
-            setQueuePosition(data.position);
-            setStatus("queued");
+        newSocket.on("queue_update", (data: { position: number }) => {
+            setStatus(prev => {
+                // Don't override waiting (code/QR visible) or linked states
+                if (prev === "waiting" || prev === "linked") return prev;
+                setQueuePosition(data.position);
+                return "queued";
+            });
         });
 
-        newSocket.on("queue_ready", (data: any) => {
-            setStatus("loading");
-            toast.success(data.message || "Your turn! Generating connection...");
+        newSocket.on("queue_ready", (data: { message?: string }) => {
+            setStatus(prev => {
+                if (prev === "waiting" || prev === "linked") return prev;
+                toast.success(data.message || "Your turn! Generating connection...");
+                return "loading";
+            });
         });
 
-        // Backend event names
-        newSocket.on("pairing_success", (data: any) => {
+        newSocket.on("pairing_success", (data: { message?: string; sessionId: string }) => {
             toast.success(data.message || "Device connected successfully!");
             setStatus("linked");
             setSessionId(data.sessionId);
             fetchSessions();
 
-            // Wait a moment and then push to the checkout UI with the new sessionId
             setTimeout(() => {
                 router.push(`/dashboard/billing?sessionId=${data.sessionId}`);
             }, 3000);
         });
 
-        newSocket.on("pairing_error", (err: any) => {
-            setErrorMsg(err.error || "Connection Error");
-            setStatus("error");
-            toast.error(err.error || "Failed to connect device");
-            setTimeout(() => setStatus("idle"), 5000);
+        newSocket.on("pairing_error", (err: { error?: string }) => {
+            setStatus(prev => {
+                // Don't override waiting (code/QR visible) or linked states  
+                // The user might still be entering the code
+                if (prev === "waiting" || prev === "linked") {
+                    // Show as toast only so user sees it without losing the code
+                    toast.error(err.error || "Connection issue — your code may still work. Enter it quickly.");
+                    return prev;
+                }
+                setErrorMsg(err.error || "Connection Error");
+                toast.error(err.error || "Failed to connect device");
+                return "error";
+            });
         });
 
         return () => {
@@ -91,26 +107,48 @@ export default function PairPage() {
 
     const handlePair = async () => {
         if (phone.startsWith("+") || phone.startsWith("0")) {
-            setErrorMsg("Invalid module ID. Use full international format without + or leading zero (e.g. 2557...)");
+            setErrorMsg("Invalid format. Use full international format without + or leading zero (e.g. 2557...)");
+            setStatus("error");
+            return;
+        }
+
+        if (phone.replace(/\D/g, "").length < 10) {
+            setErrorMsg("Phone number is too short. Please include country code (e.g. 255712345678).");
             setStatus("error");
             return;
         }
 
         setStatus("loading");
         setErrorMsg("");
+        setQrCode("");
+        setPairingCode("");
+
+        // Client-side timeout: if we're still in loading after 90s, show error
+        const loadingTimeout = setTimeout(() => {
+            setStatus(prev => {
+                if (prev === "loading") {
+                    setErrorMsg("Connection timed out. The server took too long. Please try again.");
+                    return "error";
+                }
+                return prev;
+            });
+        }, 90000);
 
         try {
             const data = await createPairingReq(phone.replace(/\D/g, ""), method);
             if (data.status === "queued") {
+                clearTimeout(loadingTimeout);
                 setQueuePosition(data.position);
                 setStatus("queued");
             } else if (data.status === "processing") {
-                setStatus("loading");
+                // Keep loading — socket events will update the status
             } else if (data.code) {
+                clearTimeout(loadingTimeout);
                 setPairingCode(data.code);
                 setStatus("waiting");
             }
         } catch (error: any) {
+            clearTimeout(loadingTimeout);
             setErrorMsg(error.message);
             setStatus("error");
         }
@@ -130,7 +168,7 @@ export default function PairPage() {
                         {/* Glowing Border Effect */}
                         <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/30 to-primary/0 rounded-3xl blur opacity-20 transition duration-1000"></div>
 
-                        <div className="relative p-6 lg:p-8 rounded-3xl border border-border bg-card/50 backdrop-blur-2xl shadow-xl overflow-hidden min-h-[500px] flex flex-col">
+                        <div className="relative p-4 sm:p-6 lg:p-8 rounded-3xl border border-border bg-card/50 backdrop-blur-2xl shadow-xl overflow-hidden">
                             {/* Header */}
                             <div className="flex items-center justify-between mb-8">
                                 <div className="space-y-1">
@@ -150,7 +188,7 @@ export default function PairPage() {
                             </div>
 
                             {/* Action Toggle */}
-                            <div className="inline-flex p-1 bg-white/5 rounded-xl mb-8 border border-white/10 w-fit">
+                            <div className="inline-flex p-1 bg-white/5 rounded-xl mb-8 border border-white/10">
                                 <button
                                     onClick={() => setMethod("qr")}
                                     className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all duration-300 ${method === 'qr' ? 'bg-primary text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
@@ -168,23 +206,28 @@ export default function PairPage() {
                             </div>
 
                             {/* Dynamic Content Area */}
-                            <div className="flex-1 flex flex-col justify-center gap-6">
+                            <div>
                                 {status === "idle" && (
-                                    <div className="space-y-6 animate-fade-in flex-1">
+                                    <div className="space-y-6 animate-fade-in">
                                         <div className="space-y-4">
-                                            <div className="flex justify-between px-1">
+                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 px-1">
                                                 <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2">
                                                     Phone Number
                                                 </label>
                                                 <span className="text-[10px] font-bold text-primary/70 uppercase">Format: 255...</span>
                                             </div>
-                                            <Input
-                                                type="tel"
-                                                placeholder="e.g. 255712345678"
-                                                value={phone}
-                                                onChange={(e) => setPhone(e.target.value)}
-                                                className="h-14 bg-white/5 border-white/10 hover:border-white/20 focus-visible:ring-primary/50 text-base font-semibold text-white placeholder:text-gray-700 rounded-xl"
-                                            />
+                                            <div className="relative group/input">
+                                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within/input:text-primary transition-colors">
+                                                    <Plus className="h-4 w-4" />
+                                                </div>
+                                                <input
+                                                    type="tel"
+                                                    placeholder="Phone Module ID (e.g. 255...)"
+                                                    value={phone}
+                                                    onChange={(e) => setPhone(e.target.value)}
+                                                    className="w-full h-14 pl-11 bg-white/5 border border-white/10 hover:border-white/20 focus:border-primary/50 text-base font-semibold tracking-tight text-white placeholder:text-gray-700 transition-all rounded-xl outline-none focus:ring-1 focus:ring-primary/50"
+                                                />
+                                            </div>
                                             <p className="text-[9px] text-gray-600 font-medium uppercase tracking-wider ml-1">
                                                 * Omit leading zero. Include country prefix for global signal lock.
                                             </p>
@@ -201,7 +244,7 @@ export default function PairPage() {
                                 )}
 
                                 {status === "loading" && (
-                                    <div className="flex flex-col items-center justify-center gap-4 text-primary animate-fade-in py-12 flex-1">
+                                    <div className="flex flex-col items-center justify-center gap-4 text-primary animate-fade-in py-12">
                                         <Loader2 className="h-12 w-12 animate-spin" />
                                         <p className="text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">
                                             Preparing connection...
@@ -210,7 +253,7 @@ export default function PairPage() {
                                 )}
 
                                 {status === "queued" && (
-                                    <div className="flex flex-col items-center justify-center text-center gap-6 text-amber-500 animate-fade-in py-12 flex-1">
+                                    <div className="flex flex-col items-center justify-center text-center gap-6 text-amber-500 animate-fade-in py-12">
                                         <div className="relative flex items-center justify-center w-24 h-24">
                                             <div className="absolute inset-0 border-4 border-amber-500/20 rounded-full animate-ping"></div>
                                             <div className="absolute inset-2 border-4 border-amber-500/40 rounded-full animate-ping" style={{ animationDelay: "0.2s" }}></div>
@@ -240,59 +283,67 @@ export default function PairPage() {
                                 )}
 
                                 {status === "waiting" && (
-                                    <div className="flex flex-col items-center text-center space-y-8 animate-fade-in flex-1">
-                                        <div className="space-y-2">
-                                            <h3 className="text-xl font-bold tracking-tight text-primary flex items-center justify-center gap-2">
-                                                <span className="animate-pulse">Waiting for connection...</span>
-                                            </h3>
+                                    <div className="space-y-8 py-4 animate-fade-in">
+                                        <div className="flex flex-col items-center text-center space-y-4">
+                                            <div className="space-y-2">
+                                                <h3 className="text-xl font-bold tracking-tight text-primary flex items-center justify-center gap-2">
+                                                    <span className="animate-pulse">Waiting for connection...</span>
+                                                </h3>
+                                            </div>
                                         </div>
 
-                                        <div className="bg-white p-4 rounded-xl shadow-2xl transition-all">
-                                            {method === "qr" ? (
-                                                qrCode ? (
-                                                    <QRCodeSVG value={qrCode} size={250} />
-                                                ) : (
-                                                    <div className="flex flex-col items-center justify-center gap-3 w-[250px] h-[250px] bg-gray-100/50 rounded-lg text-gray-400">
-                                                        <Loader2 className="h-6 w-6 animate-spin" />
-                                                        <span className="text-[10px] font-bold uppercase tracking-widest">Awaiting Payload...</span>
-                                                    </div>
-                                                )
-                                            ) : (
-                                                <div className="flex gap-2 min-h-[56px] items-center justify-center p-2">
-                                                    {pairingCode ? pairingCode.split('').map((char, i) => (
-                                                        <div key={i} className={`w-10 h-14 ${char === '-' ? 'bg-transparent text-gray-400 border-none' : 'bg-gray-100 border-2 border-transparent text-black shadow-sm'} rounded-lg flex items-center justify-center text-2xl font-black`}>
-                                                            {char}
-                                                        </div>
-                                                    )) : (
-                                                        <div className="flex flex-col items-center justify-center gap-3 text-gray-400 px-4">
+                                        <div className="flex justify-center min-h-[200px] items-center">
+                                            <div className="bg-white p-4 rounded-xl shadow-2xl transition-all">
+                                                {method === "qr" ? (
+                                                    qrCode ? (
+                                                        <QRCodeSVG value={qrCode} size={250} />
+                                                    ) : (
+                                                        <div className="flex flex-col items-center justify-center gap-3 w-[250px] h-[250px] bg-gray-100/50 rounded-lg text-gray-400">
                                                             <Loader2 className="h-6 w-6 animate-spin" />
-                                                            <span className="text-[10px] font-bold uppercase tracking-widest">Awaiting Code...</span>
+                                                            <span className="text-[10px] font-bold uppercase tracking-widest">Awaiting Payload...</span>
                                                         </div>
-                                                    )}
-                                                </div>
-                                            )}
+                                                    )
+                                                ) : (
+                                                    <div className="flex gap-2 min-h-[56px] items-center justify-center p-2">
+                                                        {pairingCode ? pairingCode.split('').map((char, i) => (
+                                                            <div key={i} className={`w-10 h-14 ${char === '-' ? 'bg-transparent text-gray-400 border-none' : 'bg-gray-100 border-2 border-transparent text-black shadow-sm'} rounded-lg flex items-center justify-center text-2xl font-black`}>
+                                                                {char}
+                                                            </div>
+                                                        )) : (
+                                                            <div className="flex flex-col items-center justify-center gap-3 text-gray-400 px-4">
+                                                                <Loader2 className="h-6 w-6 animate-spin" />
+                                                                <span className="text-[10px] font-bold uppercase tracking-widest">Awaiting Code...</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
 
                                         {method === "code" && pairingCode && (
-                                            <div className="flex gap-4">
-                                                <Button variant="outline" onClick={handleCopy} className="rounded-full border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary hover:text-primary text-[10px] font-black uppercase tracking-widest h-10 px-6">
-                                                    <Copy className="h-4 w-4 mr-2" /> Copy
-                                                </Button>
+                                            <div className="flex flex-wrap justify-center gap-4">
+                                                <div className="flex gap-2">
+                                                    <Button variant="outline" onClick={handleCopy} className="h-8 px-4 rounded-full border border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary hover:text-primary text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all">
+                                                        <Copy className="h-3 w-3 mr-2" /> Copy
+                                                    </Button>
+                                                </div>
                                             </div>
                                         )}
 
-                                        <Button
-                                            variant="ghost"
-                                            onClick={() => { setStatus("idle"); setQrCode(""); setPairingCode(""); }}
-                                            className="w-full h-12 rounded-xl text-gray-400 hover:text-white hover:bg-white/5 font-bold text-xs tracking-widest uppercase transition-all"
-                                        >
-                                            Cancel
-                                        </Button>
+                                        <div className="flex flex-col sm:flex-row gap-4 pt-4">
+                                            <Button
+                                                variant="ghost"
+                                                onClick={() => { setStatus("idle"); setQrCode(""); setPairingCode(""); }}
+                                                className="flex-1 h-12 rounded-xl text-white hover:bg-white/10 bg-white/5 border border-white/10 font-bold text-xs tracking-widest uppercase transition-all"
+                                            >
+                                                Cancel
+                                            </Button>
+                                        </div>
                                     </div>
                                 )}
 
                                 {status === "linked" && (
-                                    <div className="flex flex-col items-center justify-center gap-4 text-primary animate-fade-in py-12 flex-1">
+                                    <div className="flex flex-col items-center justify-center gap-4 text-primary animate-fade-in py-12">
                                         <div className="w-16 h-16 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
                                             <Check className="h-8 w-8" />
                                         </div>
@@ -303,7 +354,7 @@ export default function PairPage() {
                                 )}
 
                                 {status === "error" && (
-                                    <div className="flex flex-col items-center justify-center gap-4 text-destructive animate-fade-in py-12 flex-1">
+                                    <div className="flex flex-col items-center justify-center gap-4 text-destructive animate-fade-in py-12">
                                         <AlertCircle className="h-12 w-12" />
                                         <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-center max-w-sm">
                                             {errorMsg}
@@ -314,6 +365,25 @@ export default function PairPage() {
                                     </div>
                                 )}
                             </div>
+                        </div>
+                    </div>
+
+                    {/* Signal Stats Display */}
+                    <div className="grid grid-cols-3 gap-4 mt-6">
+                        <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 hover:bg-white/10 transition-colors cursor-default">
+                            <Activity className="h-3.5 w-3.5 text-gray-500" />
+                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600">Latency</p>
+                            <p className="text-[10px] font-semibold text-white tracking-widest">14ms</p>
+                        </div>
+                        <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 hover:bg-white/10 transition-colors cursor-default">
+                            <ShieldCheck className="h-3.5 w-3.5 text-gray-500" />
+                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600">Encryption</p>
+                            <p className="text-[10px] font-semibold text-white tracking-widest">AES-256</p>
+                        </div>
+                        <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 hover:bg-white/10 transition-colors cursor-default">
+                            <RefreshCcw className="h-3.5 w-3.5 text-gray-500" />
+                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600">Uptime</p>
+                            <p className="text-[10px] font-semibold text-white tracking-widest">99.9%</p>
                         </div>
                     </div>
                 </div>
@@ -352,6 +422,6 @@ export default function PairPage() {
                     </div>
                 </div>
             </div>
-        </DashboardLayout>
+        </DashboardLayout >
     );
 }

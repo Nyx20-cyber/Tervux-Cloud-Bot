@@ -32,7 +32,8 @@ async function cleanExpiredBots() {
     const now = new Date();
 
     const expiredSessions = await WhatsAppSession.find({
-        expiresAt: { $lt: now }
+        expiresAt: { $lt: now, $ne: null },
+        status: { $in: ["active", "paused"] }
     });
 
     for (const session of expiredSessions) {
@@ -73,6 +74,7 @@ async function cleanGhostSessions() {
     for (const ghost of ghosts) {
         console.log(`   👻 [Ghost] Cleaning pairing session ${ghost._id} (${ghost.phone || "unknown"})`);
         await sessionManager.destroySession(ghost._id.toString());
+        await WhatsAppAuth.deleteMany({ sessionId: ghost._id });
         await WhatsAppSession.deleteOne({ _id: ghost._id });
     }
 
@@ -112,11 +114,21 @@ async function cleanStaleDisconnected() {
  */
 async function cleanOrphanedMongoAuth() {
     try {
+        const { Types } = await import("mongoose");
+
         // Find all unique sessionIds currently in the auth collection
         const authSessionIds = await WhatsAppAuth.distinct("sessionId");
         let deletedCount = 0;
 
         for (const authId of authSessionIds) {
+            // If sessionId is not a valid ObjectId, it's definitely orphaned
+            if (!Types.ObjectId.isValid(authId)) {
+                console.log(`   🗂️ [Orphan] Deleting invalid auth records for session: ${authId}`);
+                await WhatsAppAuth.deleteMany({ sessionId: authId });
+                deletedCount++;
+                continue;
+            }
+
             const sessionExists = await WhatsAppSession.exists({ _id: authId });
             if (!sessionExists) {
                 console.log(`   🗂️ [Orphan] Deleting orphaned auth records for session: ${authId}`);

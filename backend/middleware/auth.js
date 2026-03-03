@@ -1,13 +1,18 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "tervux-saas-secret-change-me";
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET && process.env.NODE_ENV === "production") {
+    console.error("❌ FATAL: JWT_SECRET environment variable is not set!");
+    process.exit(1);
+}
+const effectiveSecret = JWT_SECRET || "dev-only-secret-do-not-use-in-prod";
 
 /**
  * Generate JWT token for a user
  */
 export function generateToken(userId) {
-    return jwt.sign({ userId }, JWT_SECRET, { expiresIn: "7d" });
+    return jwt.sign({ userId }, effectiveSecret, { expiresIn: "7d" });
 }
 
 /**
@@ -21,7 +26,7 @@ export async function authenticate(req, res, next) {
         }
 
         const token = authHeader.split(" ")[1];
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = jwt.verify(token, effectiveSecret);
         const user = await User.findById(decoded.userId);
 
         if (!user) {

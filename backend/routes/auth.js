@@ -1,6 +1,11 @@
 import { Router } from "express";
 import User from "../models/User.js";
 import { generateToken, authenticate } from "../middleware/auth.js";
+import { authLimiter } from "../middleware/rateLimiter.js";
+import validator from "validator";
+import sanitizeHtml from "sanitize-html";
+
+const sanitize = (str) => sanitizeHtml(str, { allowedTags: [], allowedAttributes: {} }).trim();
 
 const router = Router();
 
@@ -8,12 +13,16 @@ const router = Router();
  * POST /api/auth/register
  * Create a new user account
  */
-router.post("/register", async (req, res) => {
+router.post("/register", authLimiter, async (req, res) => {
     try {
         const { email, password, name, phone } = req.body;
 
         if (!email || !password || !name) {
             return res.status(400).json({ error: "Email, password, and name are required" });
+        }
+
+        if (!validator.isEmail(email)) {
+            return res.status(400).json({ error: "Please provide a valid email address" });
         }
 
         if (password.length < 6) {
@@ -29,8 +38,8 @@ router.post("/register", async (req, res) => {
         const user = await User.create({
             email: email.toLowerCase(),
             password,
-            name,
-            phone: phone || ""
+            name: sanitize(name),
+            phone: phone ? phone.replace(/[^0-9+]/g, "") : ""
         });
 
         const token = generateToken(user._id);
@@ -50,7 +59,7 @@ router.post("/register", async (req, res) => {
  * POST /api/auth/login
  * Login and receive JWT token
  */
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
 
@@ -97,6 +106,16 @@ router.get("/me", authenticate, async (req, res) => {
         console.error("Profile error:", error);
         res.status(500).json({ error: "Failed to fetch profile" });
     }
+});
+
+/**
+ * POST /api/auth/logout
+ * Invalidate session on client (stateless — clears token expectation)
+ */
+router.post("/logout", authenticate, (req, res) => {
+    // With stateless JWT, logout is handled client-side by removing the token.
+    // This endpoint exists so clients have a standard endpoint to call.
+    res.json({ success: true, message: "Logged out successfully" });
 });
 
 export default router;

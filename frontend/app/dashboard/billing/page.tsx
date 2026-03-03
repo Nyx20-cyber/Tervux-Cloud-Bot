@@ -22,7 +22,7 @@ function BillingContent() {
     const [isProcessing, setIsProcessing] = useState(false);
 
     useEffect(() => {
-        api.get("/subscription/plans").then(res => {
+        api.get("/plans").then(res => {
             setPlans(res.data.plans || []);
             setIsLoading(false);
         }).catch(err => {

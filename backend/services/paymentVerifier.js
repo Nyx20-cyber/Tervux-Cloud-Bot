@@ -35,40 +35,17 @@ export async function verifyPendingPayments() {
                     payment.status = "completed";
                     await payment.save();
 
-                    // Activate subscription
-                    const session = await WhatsAppSession.findById(payment.sessionId);
-                    if (!session) continue;
-
+                    // Add coins to user based on plan
                     const plan = payment.planId;
-                    if (!plan) continue;
-
-                    const now = new Date();
-                    let startDate = now;
-
-                    // Extend if same plan still active
-                    if (session.subscription?.status === "active" &&
-                        session.subscription?.expiresAt > now &&
-                        session.subscription?.planId?.toString() === plan._id.toString()) {
-                        startDate = new Date(session.subscription.expiresAt);
-                    }
-
-                    session.subscription = {
-                        planId: plan._id,
-                        status: "active",
-                        activatedAt: now,
-                        expiresAt: new Date(startDate.getTime() + plan.durationDays * 86400000)
-                    };
-                    session.status = "active";
-                    await session.save();
-
-                    // Call reconnect logic safely
-                    import("./whatsappService.js").then(({ sessionManager }) => {
-                        if (sessionManager && !sessionManager.isConnected(session._id.toString())) {
-                            sessionManager.connectSession(session._id.toString());
+                    if (plan) {
+                        const User = (await import("../models/User.js")).default;
+                        const user = await User.findById(payment.userId);
+                        if (user) {
+                            user.coins = (user.coins || 0) + (plan.coinsAmount || 0);
+                            await user.save();
+                            console.log(`   ✅ [${payment.fastlipaTransactionId}] Added ${plan.coinsAmount} coins to user ${user._id} — ${plan.name}`);
                         }
-                    }).catch(() => { });
-
-                    console.log(`   ✅ [${payment.fastlipaTransactionId}] Subscription activated for session ${session._id} — ${plan.name} until ${session.subscription.expiresAt}`);
+                    }
                 } else if (txStatus === "FAILED" || txStatus === "CANCELLED" || txStatus === "REJECTED" || txStatus === "EXPIRED") {
                     payment.status = "failed";
                     await payment.save();

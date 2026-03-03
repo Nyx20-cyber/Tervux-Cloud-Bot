@@ -22,7 +22,7 @@ router.get("/stats", authenticate, requireAdmin, async (req, res) => {
             recentPayments
         ] = await Promise.all([
             User.countDocuments(),
-            User.countDocuments({ "subscription.status": "active" }),
+            WhatsAppSession.countDocuments({ "subscription.status": "active" }),
             WhatsAppSession.countDocuments(),
             WhatsAppSession.countDocuments({ status: "active" }),
             Payment.aggregate([

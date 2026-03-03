@@ -11,6 +11,7 @@ import { format, differenceInDays } from "date-fns";
 import Link from "next/link";
 import { toast } from "sonner";
 import { api } from "@/store/useAuthStore";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 export default function DeploymentsPage() {
     const { sessions, isLoading, fetchSessions, updateSessionLocally } = useSessionStore();
@@ -87,10 +88,14 @@ function SessionCard({ session }: { session: any }) {
     const isPaused = session.status === "paused";
     const isActive = session.status === "active";
     const isError = ["disconnected", "expired", "failed"].includes(session.status);
-
     const isDeployed = !!session.expiresAt;
     const remainingDays = session.expiresAt ? differenceInDays(new Date(session.expiresAt), new Date()) : null;
     const isSubExpired = !isDeployed || (remainingDays !== null && remainingDays < 0);
+
+    const [isDeployDialogOpen, setIsDeployDialogOpen] = useState(false);
+    const [isPauseDialogOpen, setIsPauseDialogOpen] = useState(false);
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [isActioning, setIsActioning] = useState(false);
 
     const handleDeploy = async () => {
         setIsDeploying(true);
@@ -101,6 +106,7 @@ function SessionCard({ session }: { session: any }) {
             fetchSessions();
             // Refresh user for updated coin balance
             useAuthStore.getState().updateCoins(res.data.coins);
+            setIsDeployDialogOpen(false);
         } catch (error: any) {
             toast.error(error.response?.data?.error || "Failed to deploy bot. Check coin 🪙 balance.");
         } finally {
@@ -109,6 +115,7 @@ function SessionCard({ session }: { session: any }) {
     };
 
     const handlePauseResume = async () => {
+        setIsActioning(true);
         const action = isPaused ? "resume" : "pause";
         const targetStatus = isPaused ? "active" : "paused";
 
@@ -118,21 +125,27 @@ function SessionCard({ session }: { session: any }) {
         try {
             await api.post(`/sessions/${session._id}/${action}`);
             toast.success(`Connection ${action}d`);
+            setIsPauseDialogOpen(false);
         } catch (error: any) {
             // Rollback on error
             updateSessionLocally(session._id, { status: session.status });
             toast.error(error.response?.data?.error || "Action failed");
+        } finally {
+            setIsActioning(false);
         }
     };
 
     const handleDelete = async () => {
-        if (!confirm("Are you sure you want to disconnect this device?")) return;
+        setIsActioning(true);
         try {
             await api.delete(`/sessions/${session._id}`);
             toast.success("Device disconnected");
             fetchSessions();
+            setIsDeleteDialogOpen(false);
         } catch (error: any) {
             toast.error("Failed to delete session");
+        } finally {
+            setIsActioning(false);
         }
     };
 
@@ -174,7 +187,7 @@ function SessionCard({ session }: { session: any }) {
             <div className="flex gap-2 mt-auto pt-2">
                 <Button
                     variant="outline" size="sm"
-                    onClick={handlePauseResume}
+                    onClick={() => setIsPauseDialogOpen(true)}
                     className="flex-1 border-white/10 bg-white/5 hover:bg-white/10 text-[10px] uppercase font-bold tracking-widest h-8 text-white transition-colors"
                 >
                     {isPaused ? <PlayCircle className="w-3 h-3 mr-2" /> : <PauseCircle className="w-3 h-3 mr-2" />}
@@ -182,7 +195,7 @@ function SessionCard({ session }: { session: any }) {
                 </Button>
                 <Button
                     variant="outline" size="sm"
-                    onClick={handleDelete}
+                    onClick={() => setIsDeleteDialogOpen(true)}
                     className="w-8 border-destructive/20 bg-destructive/5 hover:bg-destructive/20 text-destructive p-0 h-8 transition-colors"
                 >
                     <Trash2 className="w-3 h-3" />
@@ -190,14 +203,110 @@ function SessionCard({ session }: { session: any }) {
             </div>
             {isSubExpired && (
                 <Button
-                    onClick={handleDeploy}
-                    disabled={isDeploying}
+                    onClick={() => setIsDeployDialogOpen(true)}
                     className="w-full bg-primary text-black font-bold uppercase tracking-widest text-[10px] h-8 mt-2 hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
                 >
                     <Rocket className="w-3 h-3 mr-2" />
-                    {isDeploying ? 'Deploying...' : 'Deploy Bot (50 Coins 🪙)'}
+                    Deploy Bot (50 Coins 🪙)
                 </Button>
             )}
+
+            {/* Deploy Confirmation Dialog */}
+            <Dialog open={isDeployDialogOpen} onOpenChange={setIsDeployDialogOpen}>
+                <DialogContent className="sm:max-w-md bg-card/90 border-white/10 backdrop-blur-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-xl font-bold text-white uppercase tracking-widest flex items-center gap-2">
+                            <Rocket className="w-5 h-5 text-primary" />
+                            Confirm Deployment
+                        </DialogTitle>
+                        <DialogDescription className="text-gray-400 mt-2">
+                            You are about to deploy this device. This will allow the bot to respond to commands and manage groups automatically.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-4">
+                        <div className="p-4 rounded-xl bg-primary/10 border border-primary/20 space-y-2">
+                            <p className="text-sm text-gray-300">
+                                <strong className="text-primary font-bold">Cost:</strong> 50 Coins 🪙
+                            </p>
+                            <p className="text-sm text-gray-300">
+                                <strong className="text-primary font-bold">Duration:</strong> 28 Days
+                            </p>
+                            <p className="text-[10px] uppercase tracking-widest text-primary/80 font-bold mt-2">
+                                Note: This active session will remain deployed for exactly 28 days before requiring renewal.
+                            </p>
+                        </div>
+                    </div>
+
+                    <DialogFooter className="flex justify-end gap-3 sm:justify-end">
+                        <Button variant="ghost" onClick={() => !isDeploying && setIsDeployDialogOpen(false)} disabled={isDeploying} className="text-gray-400 hover:text-white border-white/10 hover:bg-white/5">
+                            Cancel
+                        </Button>
+                        <Button onClick={handleDeploy} disabled={isDeploying} className="bg-primary text-black hover:bg-primary/90 font-bold uppercase tracking-widest px-6 shadow-lg shadow-primary/20">
+                            {isDeploying ? 'Deploying...' : 'Deploy Now'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Pause Confirmation Dialog */}
+            <Dialog open={isPauseDialogOpen} onOpenChange={setIsPauseDialogOpen}>
+                <DialogContent className="sm:max-w-md bg-card/90 border-white/10 backdrop-blur-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-xl font-bold text-white uppercase tracking-widest flex items-center gap-2">
+                            {isPaused ? <PlayCircle className="w-5 h-5 text-primary" /> : <PauseCircle className="w-5 h-5 text-amber-500" />}
+                            Confirm {isPaused ? 'Resume' : 'Pause'}
+                        </DialogTitle>
+                        <DialogDescription className="text-gray-400 mt-2">
+                            {isPaused
+                                ? "Resuming this device will reconnect it to the WhatsApp network and allow it to respond to commands again."
+                                : "Pausing this device will temporarily stop it from responding to messages and commands. You can resume it at any time."
+                            }
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <DialogFooter className="flex justify-end gap-3 sm:justify-end mt-4">
+                        <Button variant="ghost" onClick={() => !isActioning && setIsPauseDialogOpen(false)} disabled={isActioning} className="text-gray-400 hover:text-white border-white/10 hover:bg-white/5">
+                            Cancel
+                        </Button>
+                        <Button onClick={handlePauseResume} disabled={isActioning} className={`${isPaused ? 'bg-primary text-black hover:bg-primary/90 shadow-primary/20' : 'bg-amber-500 text-black hover:bg-amber-500/90 shadow-amber-500/20'} font-bold uppercase tracking-widest px-6 shadow-lg`}>
+                            {isActioning ? (isPaused ? 'Pausing...' : 'Resuming...') : (isPaused ? 'Resume' : 'Pause')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete Confirmation Dialog */}
+            <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                <DialogContent className="sm:max-w-md bg-card/90 border-white/10 backdrop-blur-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-xl font-bold text-white uppercase tracking-widest flex items-center gap-2">
+                            <Trash2 className="w-5 h-5 text-destructive" />
+                            Confirm Disconnect
+                        </DialogTitle>
+                        <DialogDescription className="text-gray-400 mt-2">
+                            Are you sure you want to disconnect and delete this device? This action cannot be undone. You will lose any remaining deployment time on this node.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-4">
+                        <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/20">
+                            <p className="text-sm text-destructive font-bold">
+                                Warning: Any active deployment will be forfeited!
+                            </p>
+                        </div>
+                    </div>
+
+                    <DialogFooter className="flex justify-end gap-3 sm:justify-end">
+                        <Button variant="ghost" onClick={() => !isActioning && setIsDeleteDialogOpen(false)} disabled={isActioning} className="text-gray-400 hover:text-white border-white/10 hover:bg-white/5">
+                            Cancel
+                        </Button>
+                        <Button onClick={handleDelete} disabled={isActioning} className="bg-destructive text-white hover:bg-destructive/90 font-bold uppercase tracking-widest px-6 shadow-lg shadow-destructive/20">
+                            {isActioning ? 'Deleting...' : 'Delete'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

@@ -177,4 +177,4 @@ For detailed information on each component, please refer to their respective REA
 - [Backend Documentation](./backend/README.md)
 
 ---
-Copyright 2024 Tervux Cloud. Professional WhatsApp Automation Solutions.
+Copyright 2026 Tervux Cloud. Professional WhatsApp Automation Solutions.

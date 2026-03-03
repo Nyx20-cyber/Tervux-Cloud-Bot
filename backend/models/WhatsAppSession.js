@@ -21,6 +21,12 @@ const whatsAppSessionSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    subscription: {
+        planId: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", default: null },
+        status: { type: String, enum: ["active", "expired", "none"], default: "none" },
+        activatedAt: { type: Date, default: null },
+        expiresAt: { type: Date, default: null }
+    },
     settings: {
         prefix: { type: String, default: "!" },
         alwaysOnline: { type: Boolean, default: false },

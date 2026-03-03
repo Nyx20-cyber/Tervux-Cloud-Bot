@@ -20,11 +20,12 @@ export default function DashboardPage() {
     useEffect(() => {
         fetchSessions();
 
-        const socket = io({
+        const backendUrl = process.env.NEXT_PUBLIC_API_URL || "";
+        const socket = io(backendUrl, {
             auth: { token: localStorage.getItem("token") }
         });
 
-        socket.on("session_update", (data) => {
+        socket.on("session_update", (data: { sessionId: string; status: string }) => {
             updateSessionLocally(data.sessionId, { status: data.status });
         });
 

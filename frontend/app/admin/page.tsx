@@ -63,7 +63,7 @@ export default function AdminDashboard() {
                             <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col items-center text-center space-y-1 backdrop-blur-md">
                                 <CreditCard className="h-4 w-4 text-primary mb-1 animate-pulse" />
                                 <p className="text-[8px] font-bold uppercase tracking-widest text-primary/70">Revenue (30d)</p>
-                                <p className="text-xs font-bold text-primary tracking-widest">{stats?.recentRevenue || 0} TZS</p>
+                                <p className="text-xs font-bold text-primary tracking-widest">{stats?.totalRevenue || 0} TZS</p>
                             </div>
                         </div>
 

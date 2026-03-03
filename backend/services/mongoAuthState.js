@@ -66,10 +66,8 @@ export const useMongoDBAuthState = async (sessionId) => {
                         ids.map(async (id) => {
                             let value = await readData(type, id);
                             if (type === "app-state-sync-key" && value) {
-                                // Specific baileys conversion for sync key buffers
-                                value = import("@whiskeysockets/baileys").then(baileys =>
-                                    baileys.proto.Message.AppStateSyncKeyData.fromObject(value)
-                                );
+                                const baileys = await import("@whiskeysockets/baileys");
+                                value = baileys.proto.Message.AppStateSyncKeyData.fromObject(value);
                             }
                             data[id] = value;
                         })

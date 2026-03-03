@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 
 let io;
 
-const JWT_SECRET = process.env.JWT_SECRET || "tervux-saas-secret-change-me";
+const JWT_SECRET = process.env.JWT_SECRET || "dev-only-secret-do-not-use-in-prod";
 
 export const initSocket = async (server) => {
     console.log("🔌 Initializing Socket.io (Multi-Tenant)...");

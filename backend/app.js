@@ -13,7 +13,14 @@ import { sessionManager } from "./services/whatsappService.js";
 const app = express();
 
 // Middleware
-app.use(cors());
+const allowedOrigins = process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(",").map(o => o.trim())
+    : ["http://localhost:3000", "http://localhost:5173"];
+
+app.use(cors({
+    origin: process.env.NODE_ENV === "production" ? allowedOrigins : "*",
+    credentials: true
+}));
 app.use(express.json());
 app.use(express.static("public"));
 
