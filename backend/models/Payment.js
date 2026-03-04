@@ -32,13 +32,21 @@ const paymentSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["pending", "completed", "failed"],
+        enum: ["pending", "completed", "failed", "cancelled"],
         default: "pending",
         index: true
     },
     payerPhone: {
         type: String,
         required: true
+    },
+    failureReason: {
+        type: String,
+        default: null
+    },
+    gatewayResponse: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null
     }
 }, {
     timestamps: true

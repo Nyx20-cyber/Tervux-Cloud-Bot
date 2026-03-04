@@ -2,15 +2,19 @@ import Payment from "../models/Payment.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import Plan from "../models/Plan.js";
 import { checkTransactionStatus } from "./paymentService.js";
+import { emitToUser } from "./socketService.js";
 
 /**
  * Background Payment Verifier
- * Checks all pending payments with FastLipa and activates subscriptions
- * on confirmed payments. Runs on a cron schedule.
+ * - Skips payments younger than 30s (let user respond to initial PIN prompt)
+ * - Calls FastLipa status API ONCE at 30-60s mark (to catch completed payments)
+ * - Auto-cancels anything older than 60s that is still PENDING (no more API calls)
+ * 
+ * IMPORTANT: FastLipa re-triggers PIN prompts on every status-transaction call,
+ * so we MUST limit how many times we call it per payment.
  */
 export async function verifyPendingPayments() {
     try {
-        // Find payments that are still pending and less than 24h old
         const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
         const pendingPayments = await Payment.find({
             status: "pending",
@@ -24,39 +28,87 @@ export async function verifyPendingPayments() {
         for (const payment of pendingPayments) {
             if (!payment.fastlipaTransactionId) continue;
 
+            const paymentAge = Date.now() - new Date(payment.createdAt).getTime();
+            const alreadyChecked = payment.gatewayResponse?.data?.payment_status !== undefined;
+
             try {
-                const statusResult = await checkTransactionStatus(payment.fastlipaTransactionId);
-                const txStatus = (statusResult.data?.status || statusResult.status || "").toUpperCase();
-
-                console.log(`   💳 [${payment.fastlipaTransactionId}] Status: ${txStatus}`);
-
-                if (txStatus === "COMPLETED" || txStatus === "SUCCESS") {
-                    // Mark payment as completed
-                    payment.status = "completed";
-                    await payment.save();
-
-                    // Add coins to user based on plan
-                    const plan = payment.planId;
-                    if (plan) {
-                        const User = (await import("../models/User.js")).default;
-                        const user = await User.findById(payment.userId);
-                        if (user) {
-                            user.coins = (user.coins || 0) + (plan.coinsAmount || 0);
-                            await user.save();
-                            console.log(`   ✅ [${payment.fastlipaTransactionId}] Added ${plan.coinsAmount} coins to user ${user._id} — ${plan.name}`);
-                        }
-                    }
-                } else if (txStatus === "FAILED" || txStatus === "CANCELLED" || txStatus === "REJECTED" || txStatus === "EXPIRED") {
-                    payment.status = "failed";
-                    await payment.save();
-                    console.log(`   ❌ [${payment.fastlipaTransactionId}] Payment failed.`);
+                // Phase 1: Too early (< 30s) — skip, let user respond to initial PIN prompt
+                if (paymentAge < 30000) {
+                    console.log(`   ⏳ [${payment.fastlipaTransactionId}] Waiting... (${Math.round(paymentAge / 1000)}s old)`);
+                    continue;
                 }
-                // If still PENDING, do nothing — will check again next cycle
+
+                // Phase 2: Check window (30-60s) — call FastLipa ONCE
+                if (paymentAge <= 60000 && !alreadyChecked) {
+                    const statusResult = await checkTransactionStatus(payment.fastlipaTransactionId);
+                    const txStatus = (statusResult.data?.payment_status || statusResult.data?.status || "").toUpperCase();
+
+                    payment.gatewayResponse = statusResult;
+                    console.log(`   💳 [${payment.fastlipaTransactionId}] ONE-TIME check — API: "${statusResult.status}", Transaction: "${txStatus}"`);
+
+                    if (txStatus === "COMPLETED" || txStatus === "SUCCESSFUL") {
+                        payment.status = "completed";
+                        await payment.save();
+
+                        const plan = payment.planId;
+                        if (plan) {
+                            const User = (await import("../models/User.js")).default;
+                            const user = await User.findById(payment.userId);
+                            if (user) {
+                                user.coins = (user.coins || 0) + (plan.coinsAmount || 0);
+                                await user.save();
+                                console.log(`   ✅ [${payment.fastlipaTransactionId}] Added ${plan.coinsAmount} coins to user ${user._id}`);
+
+                                emitToUser(payment.userId.toString(), "payment_update", {
+                                    paymentId: payment._id,
+                                    status: "completed",
+                                    message: `🪙 Payment successful! You received ${plan.coinsAmount} coins.`,
+                                    coins: user.coins
+                                });
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (txStatus === "FAILED" || txStatus === "EXPIRED" || txStatus === "CANCELLED" || txStatus === "REJECTED") {
+                        payment.status = txStatus === "CANCELLED" || txStatus === "REJECTED" ? "cancelled" : "failed";
+                        payment.failureReason = txStatus === "CANCELLED" || txStatus === "REJECTED"
+                            ? "Payment was cancelled."
+                            : `Payment failed (${txStatus}).`;
+                        await payment.save();
+                        console.log(`   ❌ [${payment.fastlipaTransactionId}] ${payment.status}: ${txStatus}`);
+
+                        emitToUser(payment.userId.toString(), "payment_update", {
+                            paymentId: payment._id,
+                            status: payment.status,
+                            message: payment.failureReason
+                        });
+                        continue;
+                    }
+
+                    // Still PENDING after one-time check — save and wait for auto-cancel
+                    await payment.save();
+                    continue;
+                }
+
+                // Phase 3: Auto-cancel (> 60s and still pending) — NO more FastLipa calls
+                if (paymentAge > 60000) {
+                    payment.status = "cancelled";
+                    payment.failureReason = "Payment expired — no confirmation received.";
+                    await payment.save();
+                    console.log(`   ⏰ [${payment.fastlipaTransactionId}] Auto-cancelled after ${Math.round(paymentAge / 1000)}s.`);
+
+                    emitToUser(payment.userId.toString(), "payment_update", {
+                        paymentId: payment._id,
+                        status: "cancelled",
+                        message: "Payment expired. You did not confirm in time. No charges were made."
+                    });
+                }
+
             } catch (err) {
                 console.error(`   ⚠️ [${payment.fastlipaTransactionId}] Check failed:`, err.message);
             }
 
-            // Rate limit: small delay between checks
             await new Promise(r => setTimeout(r, 1000));
         }
 

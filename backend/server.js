@@ -43,10 +43,10 @@ async function start() {
             runCleanup().catch(err => console.error("Cleanup cron error:", err));
         });
 
-        // 7. Schedule payment verification every 2 minutes
-        cron.schedule("*/2 * * * *", () => {
-            verifyPendingPayments().catch(err => console.error("Payment verify cron error:", err));
-        });
+        // 7. Check pending payments every 15 seconds for near-instant user feedback
+        setInterval(() => {
+            verifyPendingPayments().catch(err => console.error("Payment verify error:", err));
+        }, 15000);
 
         console.log("✅ All systems operational.");
 

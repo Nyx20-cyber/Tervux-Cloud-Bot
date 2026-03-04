@@ -10,6 +10,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
+import { io, Socket } from "socket.io-client";
+
 function BillingContent() {
     const [plans, setPlans] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -45,7 +47,6 @@ function BillingContent() {
             });
 
             toast.success("Payment request sent to your phone. Please enter your PIN.");
-            // Open a polling interval or wait
             pollPaymentStatus(res.data.paymentId);
         } catch (error: any) {
             toast.error(error.response?.data?.error || "Failed to initiate payment");
@@ -54,35 +55,70 @@ function BillingContent() {
     };
 
     const pollPaymentStatus = (paymentId: string) => {
+        let resolved = false;
+
+        const handleResolved = (status: string, data: any) => {
+            if (resolved) return;
+            resolved = true;
+            clearInterval(interval);
+            clearTimeout(timeout);
+            socket?.disconnect();
+
+            if (status === "completed") {
+                toast.success(data.message || "🪙 Payment successful! Coins added.");
+                if (data.coins) useAuthStore.getState().updateCoins(data.coins);
+                setIsProcessing(false);
+                setIsCheckoutOpen(false);
+                checkAuth();
+                router.push("/dashboard");
+            } else if (status === "cancelled") {
+                toast.warning(data.message || "Payment was cancelled. No charges were made.", { duration: 6000 });
+                setIsProcessing(false);
+            } else if (status === "failed") {
+                toast.error(data.message || "Payment failed. Please try again.");
+                setIsProcessing(false);
+            }
+        };
+
+        // 1. Connect Socket.IO for real-time updates from background verifier
+        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        const token = useAuthStore.getState().token;
+        const socket = io(backendUrl, {
+            transports: ["websocket", "polling"],
+            path: "/socket.io",
+            auth: { token }
+        });
+
+        socket.on("payment_update", (data: { paymentId: string; status: string; message: string; coins?: number }) => {
+            if (data.paymentId === paymentId) {
+                console.log("⚡ Real-time payment update:", data);
+                handleResolved(data.status, data);
+            }
+        });
+
+        // 2. HTTP polling as fallback (DB-only, no FastLipa API calls)
         const interval = setInterval(async () => {
+            if (resolved) return;
             try {
                 const res = await api.get(`/subscription/payment-status/${paymentId}`);
-                if (res.data.status === "completed") {
-                    clearInterval(interval);
-                    toast.success(res.data.message || "Payment successful! Coins added.");
-                    useAuthStore.getState().updateCoins(res.data.coins);
-                    setIsProcessing(false);
-                    setIsCheckoutOpen(false);
-                    checkAuth(); // refresh user object
-                    router.push("/dashboard");
-                } else if (res.data.status === "failed") {
-                    clearInterval(interval);
-                    toast.error("Payment failed or was cancelled.");
-                    setIsProcessing(false);
+                if (res.data.status !== "pending") {
+                    handleResolved(res.data.status, res.data);
                 }
             } catch (error) {
                 console.error("Polling error", error);
             }
-        }, 5000);
+        }, 10000); // 10s interval (DB-only, so lightweight)
 
-        // Timeout after 2 minutes
-        setTimeout(() => {
-            clearInterval(interval);
-            if (isProcessing) {
+        // 3. Timeout after 2.5 minutes
+        const timeout = setTimeout(() => {
+            if (!resolved) {
+                resolved = true;
+                clearInterval(interval);
+                socket?.disconnect();
                 setIsProcessing(false);
-                toast.error("Payment verification timed out. If you paid, it will be updated shortly.");
+                toast.warning("Payment verification timed out. If you paid, your coins 🪙 will be added automatically.", { duration: 8000 });
             }
-        }, 120000);
+        }, 150000);
     };
 
     return (

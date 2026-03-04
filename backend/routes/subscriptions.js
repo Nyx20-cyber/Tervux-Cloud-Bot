@@ -4,7 +4,7 @@ import Plan from "../models/Plan.js";
 import User from "../models/User.js";
 import Payment from "../models/Payment.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
-import { createTransaction, checkTransactionStatus, getBalance } from "../services/paymentService.js";
+import { createTransaction, getBalance } from "../services/paymentService.js";
 
 const router = Router();
 
@@ -71,7 +71,7 @@ router.post("/checkout", authenticate, async (req, res) => {
             return res.status(502).json({ error: "Payment gateway error — no transaction ID returned" });
         }
 
-        // Save payment record as pending
+        // Save payment record as pending with full gateway response
         const payment = await Payment.create({
             userId: req.user._id,
             planId: plan._id,
@@ -79,7 +79,8 @@ router.post("/checkout", authenticate, async (req, res) => {
             currency: "TZS",
             fastlipaTransactionId: tranId,
             status: "pending",
-            payerPhone
+            payerPhone,
+            gatewayResponse: fastlipaResult
         });
 
         res.json({
@@ -98,7 +99,8 @@ router.post("/checkout", authenticate, async (req, res) => {
 
 /**
  * GET /api/subscription/payment-status/:paymentId
- * Check payment result and activate subscription on success
+ * Check payment result from DATABASE ONLY (no FastLipa API calls here).
+ * The background paymentVerifier cron handles FastLipa polling and updates the DB.
  */
 router.get("/payment-status/:paymentId", authenticate, async (req, res) => {
     try {
@@ -111,58 +113,32 @@ router.get("/payment-status/:paymentId", authenticate, async (req, res) => {
             return res.status(404).json({ error: "Payment not found" });
         }
 
-        // If already completed, return immediately
         if (payment.status === "completed") {
+            const user = await User.findById(req.user._id);
             return res.json({
                 status: "completed",
-                message: "Subscription activated!",
-                plan: payment.planId?.name
+                message: `🪙 Payment successful! You received ${payment.planId?.coinsAmount || 0} coins.`,
+                plan: payment.planId?.name,
+                coins: user?.coins || 0
             });
         }
 
         if (payment.status === "failed") {
-            return res.json({ status: "failed", message: "Payment failed." });
+            return res.json({ status: "failed", message: payment.failureReason || "Payment failed." });
         }
 
-        // Poll FastLipa for status update
-        if (payment.fastlipaTransactionId) {
-            const statusResult = await checkTransactionStatus(payment.fastlipaTransactionId);
-            console.log("💳 FastLipa status check:", JSON.stringify(statusResult));
+        if (payment.status === "cancelled") {
+            return res.json({ status: "cancelled", message: payment.failureReason || "Payment was cancelled." });
+        }
 
-            // FastLipa returns: { status, data: { tranID, status, amount, ... } }
-            const txStatus = (statusResult.data?.status || statusResult.status || "").toUpperCase();
+        // Still pending — auto-cancel if older than 60s (FastLipa won't update after this)
+        const paymentAge = Date.now() - new Date(payment.createdAt).getTime();
 
-            const isCompleted = txStatus === "COMPLETED" || txStatus === "SUCCESS" ||
-                statusResult.paid === true;
-
-            if (isCompleted) {
-                payment.status = "completed";
-                await payment.save();
-
-                // Add coins to user
-                const plan = payment.planId;
-                const user = await User.findById(req.user._id);
-                if (user && plan) {
-                    user.coins = (user.coins || 0) + (plan.coinsAmount || 0);
-                    await user.save();
-                }
-
-                return res.json({
-                    status: "completed",
-                    message: `Payment successful! You received ${plan.coinsAmount} coins.`,
-                    plan: plan.name,
-                    coins: user.coins
-                });
-            }
-
-            const isFailed = txStatus === "FAILED" || txStatus === "CANCELLED" ||
-                txStatus === "REJECTED" || txStatus === "EXPIRED";
-
-            if (isFailed) {
-                payment.status = "failed";
-                await payment.save();
-                return res.json({ status: "failed", message: "Payment was not completed." });
-            }
+        if (paymentAge > 60000) {
+            payment.status = "cancelled";
+            payment.failureReason = "Payment expired — no confirmation received.";
+            await payment.save();
+            return res.json({ status: "cancelled", message: "Payment expired. You did not confirm in time. No charges were made." });
         }
 
         res.json({
