@@ -102,20 +102,24 @@ We have completed the core infrastructure and critical user flows for the SaaS p
 - Advanced Bot Settings: UI and API support for configuring bot behaviors such as Anti-Delete, Anti-View-Once, Auto-Read, Anti-Call, Always Online, and Always Typing.
 - Session Lifecycle Controls: Users can pause, resume, and disconnect their active sessions.
 
-### Billing and Admin Infrastructure
-- Virtual Coin System: Users purchase and spend coins to deploy bots.
-- Subscription Plans: Database-driven pricing plans.
-- Payment Verification: System for users to submit transaction references (e.g., M-Pesa/Tigo Pesa) and for the system/admin to verify them.
-- Admin Panel: Comprehensive system statistics, user management, and manual payment verification queue.
+### Billing and Payment System
+- Virtual Coin System: Users purchase and spend coins 🪙 to deploy bots.
+- Subscription Plans: Database-driven pricing plans (Siku, Wiki, Mwezi).
+- FastLipa M-Pesa/Tigo Integration: Automated mobile money payment processing via FastLipa API — users receive an instant STK push to enter their PIN.
+- 3-Phase Payment Verification: Intelligent background verifier that (1) waits 30s for user to respond to PIN prompt, (2) checks FastLipa once at 30-60s mark, (3) auto-cancels stale payments after 60s to prevent infinite loops.
+- Real-Time Payment Updates via Socket.IO: Users receive instant toast notifications when payments are confirmed, cancelled, or failed — no page refresh needed.
+- Cancellation Detection: Automatically detects when users cancel or ignore payments and shows distinct UI notifications (amber warning for cancellations, red error for failures, green success for completions).
+- Full Gateway Audit Trail: Every FastLipa API response is stored in the `gatewayResponse` field for debugging and financial auditing.
+- Color-Coded Toast Notifications: Vibrant, distinct toast colors for each event type (emerald green for success, red for errors, amber for warnings, sky blue for info) — all positioned top-center for visibility.
+- Admin Panel: Comprehensive system statistics, user management, and payment history.
 
 <img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
 
 ## Missing Features and Next Steps
 
-While the core SaaS routing, deployment, and session management are complete, the following areas require further development:
+While the core SaaS routing, deployment, session management, and payment processing are complete, the following areas require further development:
 
 - Core Message Handling Logic: While the Baileys sockets are connected and deployed, the actual event listeners for incoming messages (Auto-Reply logic, executing Anti-Delete functionality, forwarding metrics) need to be fully mapped out in the `messageHandler`.
-- Automated Payment Gateway Webhooks: Transitioning from manual/cron-based payment verification to real-time asynchronous webhooks from Fastlipa or other payment providers.
 - User Analytics: Presenting detailed message statistics, uptime, and usage metrics to the user on their dashboard.
 - Developer API / Webhooks: Allowing users to connect external apps to their Tervux WhatsApp sessions via a public-facing API.
 
