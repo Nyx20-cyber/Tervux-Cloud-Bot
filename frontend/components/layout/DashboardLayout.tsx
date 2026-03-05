@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
+import { WhatsAppFloat } from "./WhatsAppFloat";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -28,6 +29,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                         {children}
                     </div>
                 </main>
+                <WhatsAppFloat />
             </div>
         </div>
     )

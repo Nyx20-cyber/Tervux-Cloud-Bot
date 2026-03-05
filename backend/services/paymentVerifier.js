@@ -1,6 +1,7 @@
 import Payment from "../models/Payment.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import Plan from "../models/Plan.js";
+import Notification from "../models/Notification.js";
 import { checkTransactionStatus } from "./paymentService.js";
 import { emitToUser } from "./socketService.js";
 
@@ -58,6 +59,14 @@ export async function verifyPendingPayments() {
                                 user.coins = (user.coins || 0) + (plan.coinsAmount || 0);
                                 await user.save();
                                 console.log(`   ✅ [${payment.fastlipaTransactionId}] Added ${plan.coinsAmount} coins to user ${user._id}`);
+
+                                // Notification
+                                await Notification.create({
+                                    userId: user._id,
+                                    title: "Coins Added 🪙",
+                                    message: `Successfully received ${plan.coinsAmount} coins from your payment for "${plan.name}".`,
+                                    type: "success"
+                                });
 
                                 emitToUser(payment.userId.toString(), "payment_update", {
                                     paymentId: payment._id,

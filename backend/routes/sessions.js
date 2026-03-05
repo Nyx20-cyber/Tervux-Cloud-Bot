@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import User from "../models/User.js";
+import Notification from "../models/Notification.js";
 import { sessionManager } from "../services/whatsappService.js";
 import { queueService } from "../services/queueService.js";
 import { emitToUser } from "../services/socketService.js";
@@ -107,6 +108,18 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         // Deduct 50 coins
         user.coins -= 50;
         await user.save();
+
+        // Notification for coin deduction
+        try {
+            await Notification.create({
+                userId: user._id,
+                title: "Coins Spent 🪙",
+                message: `Spent 50 coins to deploy bot for ${session.phone || "your device"}. Your new balance is ${user.coins}.`,
+                type: "info"
+            });
+        } catch (err) {
+            console.error("Failed to create deployment notification:", err);
+        }
 
         // Set session to active with absolute expiration date
         session.status = "active";

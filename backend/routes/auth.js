@@ -1,5 +1,6 @@
 import { Router } from "express";
 import User from "../models/User.js";
+import { getSettings } from "../models/SystemSettings.js";
 import { generateToken, authenticate } from "../middleware/auth.js";
 import { authLimiter } from "../middleware/rateLimiter.js";
 import validator from "validator";
@@ -16,6 +17,11 @@ const router = Router();
 router.post("/register", authLimiter, async (req, res) => {
     try {
         const { email, password, name, phone } = req.body;
+
+        const settings = await getSettings();
+        if (!settings.registrationEnabled) {
+            return res.status(403).json({ error: "Registration is currently disabled by the administrator" });
+        }
 
         if (!email || !password || !name) {
             return res.status(400).json({ error: "Email, password, and name are required" });

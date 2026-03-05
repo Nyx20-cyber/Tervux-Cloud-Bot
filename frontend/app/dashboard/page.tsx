@@ -11,14 +11,45 @@ import { format } from "date-fns";
 import Link from "next/link";
 import { toast } from "sonner";
 import { api } from "@/store/useAuthStore";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Megaphone, Info, AlertTriangle, Wrench, Sparkles, Tag } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+
+interface AnnouncementRecord {
+    _id: string;
+    title: string;
+    message: string;
+    type: "info" | "warning" | "maintenance" | "update" | "promo";
+    isActive: boolean;
+    createdBy?: { name?: string };
+    createdAt: string;
+}
+
+const typeConfig: Record<string, { icon: any; color: string; bg: string; border: string }> = {
+    info: { icon: Info, color: "text-sky-400", bg: "bg-sky-500/20", border: "border-sky-500/30" },
+    warning: { icon: AlertTriangle, color: "text-amber-400", bg: "bg-amber-500/20", border: "border-amber-500/30" },
+    maintenance: { icon: Wrench, color: "text-orange-400", bg: "bg-orange-500/20", border: "border-orange-500/30" },
+    update: { icon: Sparkles, color: "text-violet-400", bg: "bg-violet-500/20", border: "border-violet-500/30" },
+    promo: { icon: Tag, color: "text-emerald-400", bg: "bg-emerald-500/20", border: "border-emerald-500/30" },
+};
 
 export default function DashboardPage() {
     const { sessions, isLoading, fetchSessions, updateSessionLocally } = useSessionStore();
     const { user, checkAuth } = useAuthStore();
+    const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
 
     useEffect(() => {
         fetchSessions();
+
+        // Fetch active announcements
+        const fetchAnnouncements = async () => {
+            try {
+                const res = await api.get("/announcements");
+                setAnnouncements(res.data.announcements);
+            } catch (err) {
+                console.error("Failed to fetch announcements:", err);
+            }
+        };
+        fetchAnnouncements();
 
         const backendUrl = process.env.NEXT_PUBLIC_API_URL || "";
         const socket = io(backendUrl, {
@@ -70,6 +101,48 @@ export default function DashboardPage() {
                         <p className="text-xs font-bold text-primary tracking-widest">{activeSessionsCount}</p>
                     </div>
                 </div>
+
+                {/* Announcements Section */}
+                <AnimatePresence>
+                    {announcements.length > 0 && (
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-2">
+                                <Megaphone className="h-5 w-5 text-primary" />
+                                <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Announcements</h2>
+                            </div>
+                            <div className="grid gap-4">
+                                {announcements.map((announcement, idx) => {
+                                    const tc = typeConfig[announcement.type] || typeConfig.info;
+                                    const Icon = tc.icon;
+                                    return (
+                                        <motion.div
+                                            key={announcement._id}
+                                            initial={{ opacity: 0, x: -20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            transition={{ delay: idx * 0.1 }}
+                                            className={`p-4 rounded-2xl border ${tc.border} ${tc.bg} backdrop-blur-md flex gap-4 items-start`}
+                                        >
+                                            <div className={`p-2 rounded-xl bg-black/20 border ${tc.border} shrink-0`}>
+                                                <Icon className={`w-5 h-5 ${tc.color}`} />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <h3 className="text-sm font-bold text-white tracking-wide">{announcement.title}</h3>
+                                                    <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">
+                                                        {format(new Date(announcement.createdAt), "MMM dd")}
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-white/70 font-medium leading-relaxed">
+                                                    {announcement.message}
+                                                </p>
+                                            </div>
+                                        </motion.div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+                </AnimatePresence>
 
                 {/* Deployed Sessions Summary */}
                 <div className="space-y-4 pt-4">

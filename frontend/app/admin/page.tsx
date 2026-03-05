@@ -2,33 +2,60 @@
 
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Users, CreditCard, Network, AlertTriangle } from "lucide-react";
+import {
+    AlertTriangle, Loader2, RefreshCw, LayoutDashboard,
+    Users, Network, History, Settings as SettingsIcon, Coins, Megaphone
+} from "lucide-react";
 import { api, useAuthStore } from "@/store/useAuthStore";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
-import { Loader2 } from "lucide-react";
+import { motion } from "framer-motion";
+
+import { AdminStats } from "@/components/admin/AdminStats";
+import { AdminCharts } from "@/components/admin/AdminCharts";
+import { SessionMonitor } from "@/components/admin/SessionMonitor";
+import { PaymentHistory } from "@/components/admin/PaymentHistory";
+import { PlanManagement } from "@/components/admin/PlanManagement";
+import { CoinManagement } from "@/components/admin/CoinManagement";
+import { AnnouncementSystem } from "@/components/admin/AnnouncementSystem";
+import { UserManagement } from "@/components/admin/UserManagement";
+import { GlobalSettings } from "@/components/admin/GlobalSettings";
+
+const ADMIN_TABS = [
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "users", label: "Users", icon: Users },
+    { id: "sessions", label: "Sessions", icon: Network },
+    { id: "payments", label: "Payments", icon: History },
+    { id: "plans", label: "Plans", icon: SettingsIcon },
+    { id: "coins", label: "Coins", icon: Coins },
+    { id: "announcements", label: "Announcements", icon: Megaphone },
+    { id: "settings", label: "Site Settings", icon: SettingsIcon },
+];
 
 export default function AdminDashboard() {
     const { user } = useAuthStore();
     const router = useRouter();
     const [stats, setStats] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [activeTab, setActiveTab] = useState("dashboard");
+
+    const fetchStats = async () => {
+        setIsLoading(true);
+        try {
+            const res = await api.get("/admin/stats");
+            setStats(res.data);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     useEffect(() => {
         if (user && user.role !== "admin") {
             router.replace("/dashboard");
             return;
         }
-
-        api.get("/admin/stats")
-            .then(res => {
-                setStats(res.data);
-                setIsLoading(false);
-            })
-            .catch(err => {
-                console.error(err);
-                setIsLoading(false);
-            });
+        fetchStats();
     }, [user, router]);
 
     if (!user || user.role !== "admin") return null;
@@ -36,78 +63,83 @@ export default function AdminDashboard() {
     return (
         <DashboardLayout>
             <div className="space-y-8 animate-fade-in">
-                <div>
-                    <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
-                        <AlertTriangle className="h-8 w-8 text-destructive" />
-                        Admin Dashboard
-                    </h1>
-                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">System management and statistics</p>
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
+                            <AlertTriangle className="h-8 w-8 text-destructive" />
+                            Admin Panel
+                        </h1>
+                        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">
+                            System management · Analytics · User control
+                        </p>
+                    </div>
+                    <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={fetchStats}
+                        disabled={isLoading}
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-widest text-gray-400 hover:text-white transition-all disabled:opacity-50 backdrop-blur-md"
+                    >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
+                        Refresh
+                    </motion.button>
                 </div>
 
-                {isLoading ? (
-                    <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 text-destructive animate-spin" /></div>
-                ) : (
-                    <>
-                        {/* Stats Grid */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 backdrop-blur-md">
-                                <Users className="h-4 w-4 text-gray-400 mb-1" />
-                                <p className="text-[8px] font-bold uppercase tracking-widest text-gray-500">Total Users</p>
-                                <p className="text-xs font-semibold text-white tracking-widest">{stats?.totalUsers || 0}</p>
-                            </div>
-                            <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 backdrop-blur-md">
-                                <Network className="h-4 w-4 text-gray-400 mb-1" />
-                                <p className="text-[8px] font-bold uppercase tracking-widest text-gray-500">Connected Devices</p>
-                                <p className="text-xs font-semibold text-white tracking-widest">{stats?.activeSessions || 0}</p>
-                            </div>
-                            <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col items-center text-center space-y-1 backdrop-blur-md">
-                                <CreditCard className="h-4 w-4 text-primary mb-1 animate-pulse" />
-                                <p className="text-[8px] font-bold uppercase tracking-widest text-primary/70">Revenue (30d)</p>
-                                <p className="text-xs font-bold text-primary tracking-widest">{stats?.totalRevenue || 0} TZS</p>
-                            </div>
-                        </div>
+                {/* Navigation Tabs */}
+                <div className="flex items-center gap-2 border-b border-white/5 pb-4 overflow-x-auto no-scrollbar scroll-smooth">
+                    {ADMIN_TABS.map((tab) => {
+                        const Icon = tab.icon;
+                        const isActive = activeTab === tab.id;
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                className={`flex items-center gap-2 px-4 py-3 rounded-xl transition-all duration-300 shrink-0 border ${isActive
+                                    ? "bg-primary/10 border-primary/30 text-primary shadow-lg shadow-primary/5"
+                                    : "bg-white/5 border-transparent text-gray-400 hover:bg-white/10 hover:text-white"
+                                    }`}
+                            >
+                                <Icon className={`w-4 h-4 ${isActive ? "text-primary" : "text-gray-500"}`} />
+                                <span className="text-[10px] font-black uppercase tracking-widest">{tab.label}</span>
+                            </button>
+                        );
+                    })}
+                </div>
 
-                        {/* Recent Payments Table */}
-                        <div className="space-y-4">
-                            <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Recent History</h2>
-                            <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden backdrop-blur-sm">
-                                <table className="w-full text-sm text-left text-gray-400">
-                                    <thead className="text-[10px] text-gray-500 uppercase tracking-widest bg-white/5 border-b border-white/10">
-                                        <tr>
-                                            <th className="px-6 py-4 font-bold">Ref ID</th>
-                                            <th className="px-6 py-4 font-bold">Device</th>
-                                            <th className="px-6 py-4 font-bold">Amount</th>
-                                            <th className="px-6 py-4 font-bold">Status</th>
-                                            <th className="px-6 py-4 font-bold">Date</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-white/5">
-                                        {stats?.recentPayments?.map((p: any) => (
-                                            <tr key={p._id} className="hover:bg-white/5 transition-colors">
-                                                <td className="px-6 py-4 text-white font-mono text-[10px]">{p.transactionId || p._id.slice(-8)}</td>
-                                                <td className="px-6 py-4 text-xs font-bold">{p.sessionId?.phone || p.sessionId}</td>
-                                                <td className="px-6 py-4 text-primary font-black tracking-widest text-xs">{p.amount}</td>
-                                                <td className="px-6 py-4 uppercase text-[10px] font-bold">
-                                                    <span className={p.status === 'completed' ? 'text-primary' : p.status === 'failed' ? 'text-destructive' : 'text-amber-500'}>
-                                                        {p.status}
-                                                    </span>
-                                                </td>
-                                                <td className="px-6 py-4 text-[10px] tracking-widest">{format(new Date(p.createdAt), "MMM dd, HH:mm")}</td>
-                                            </tr>
-                                        ))}
-                                        {(!stats?.recentPayments || stats.recentPayments.length === 0) && (
-                                            <tr>
-                                                <td colSpan={5} className="px-6 py-8 text-center text-xs font-bold uppercase tracking-widest text-gray-500">
-                                                    No recent transactions found
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
+                <div className="min-h-[400px]">
+                    {isLoading && !stats ? (
+                        <div className="flex flex-col items-center justify-center p-20 space-y-4">
+                            <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Loading admin data...</p>
                         </div>
-                    </>
-                )}
+                    ) : (
+                        <motion.div
+                            key={activeTab}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="space-y-8"
+                        >
+                            {activeTab === "dashboard" && (
+                                <>
+                                    <AdminStats stats={stats} />
+                                    <AdminCharts
+                                        recentPayments={stats?.recentPayments || []}
+                                        stats={stats}
+                                    />
+                                </>
+                            )}
+                            {activeTab === "users" && <UserManagement />}
+                            {activeTab === "sessions" && <SessionMonitor />}
+                            {activeTab === "payments" && <PaymentHistory />}
+                            {activeTab === "plans" && <PlanManagement />}
+                            {activeTab === "coins" && <CoinManagement />}
+                            {activeTab === "announcements" && <AnnouncementSystem />}
+                            {activeTab === "settings" && <GlobalSettings />}
+                        </motion.div>
+                    )}
+                </div>
             </div>
         </DashboardLayout>
     );

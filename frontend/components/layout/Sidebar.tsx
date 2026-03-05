@@ -1,16 +1,19 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Network, CircleDollarSign, ShieldCheck, Activity } from 'lucide-react';
+import { Network, CircleDollarSign, ShieldCheck, Activity, AlertTriangle } from 'lucide-react';
 import { DialogTitle } from '@radix-ui/react-dialog';
+import { useAuthStore } from '@/store/useAuthStore';
 
 export function Sidebar({ isMobile }: { isMobile?: boolean }) {
     const pathname = usePathname();
+    const { user } = useAuthStore();
 
     const links = [
         { href: '/dashboard', label: 'Overview', icon: Activity },
         { href: '/dashboard/pair', label: 'Connect Device', icon: Network },
         { href: '/dashboard/deployments', label: 'Deployments', icon: ShieldCheck },
         { href: '/dashboard/billing', label: 'Coins 🪙', icon: CircleDollarSign },
+        ...(user?.role === 'admin' ? [{ href: '/admin', label: 'Admin Panel', icon: AlertTriangle }] : []),
     ];
 
     const content = (

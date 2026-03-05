@@ -5,6 +5,7 @@ import { handleGroupParticipantsUpdate, handleGroupMessage } from "./groupEventH
 import { addAutoReaction, getRandomEmoji } from "../utils/reactionUtils.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import WhatsAppAuth from "../models/WhatsAppAuth.js";
+import Notification from "../models/Notification.js";
 import { useMongoDBAuthState } from "./mongoAuthState.js";
 import { queueService } from "./queueService.js";
 import { emitToUser } from "./socketService.js";
@@ -224,6 +225,22 @@ class SessionManager {
                     const currentStatusCheck = await WhatsAppSession.findById(sessionId);
                     if (currentStatusCheck?.status !== "paused") {
                         await WhatsAppSession.findByIdAndUpdate(sessionId, { status: "disconnected" });
+
+                        // Notify user about persistent disconnection
+                        try {
+                            const dbSession = await WhatsAppSession.findById(sessionId);
+                            if (dbSession) {
+                                await Notification.create({
+                                    userId: dbSession.userId,
+                                    title: "Device Disconnected",
+                                    message: `Your device for ${dbSession.phone || "unknown number"} has disconnected and failed to reconnect. Please check your dashboard.`,
+                                    type: "error",
+                                    link: "/dashboard/pair"
+                                });
+                            }
+                        } catch (err) {
+                            console.error("Failed to create disconnection notification:", err);
+                        }
                     }
                     this.sessions.delete(sessionId);
                 }

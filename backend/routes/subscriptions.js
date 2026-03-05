@@ -4,6 +4,7 @@ import Plan from "../models/Plan.js";
 import User from "../models/User.js";
 import Payment from "../models/Payment.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
+import Notification from "../models/Notification.js";
 import { createTransaction, getBalance } from "../services/paymentService.js";
 
 const router = Router();
@@ -29,6 +30,29 @@ router.get("/", authenticate, async (req, res) => {
                     status: sub.status || "none",
                     activatedAt: sub.activatedAt || null
                 });
+
+                // Check for expiry (e.g., < 2 days)
+                if (session.expiresAt) {
+                    const daysLeft = Math.ceil((new Date(session.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                    if (daysLeft <= 2 && daysLeft > 0) {
+                        // Create notification if not already sent recently
+                        const lastNotif = await Notification.findOne({
+                            userId: req.user._id,
+                            title: "Subscription Expiring",
+                            createdAt: { $gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } // within last 24h
+                        });
+
+                        if (!lastNotif) {
+                            await Notification.create({
+                                userId: req.user._id,
+                                title: "Subscription Expiring",
+                                message: `Your subscription for ${session.phone} expires in ${daysLeft} day(s). Renew now to avoid service interruption.`,
+                                type: "warning",
+                                link: "/dashboard/billing"
+                            });
+                        }
+                    }
+                }
             }
         }
         res.json({ subscriptions });
