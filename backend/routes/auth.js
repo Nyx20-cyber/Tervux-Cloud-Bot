@@ -1,7 +1,9 @@
 import { Router } from "express";
 import User from "../models/User.js";
+import Notification from "../models/Notification.js";
 import { getSettings } from "../models/SystemSettings.js";
 import { generateToken, authenticate } from "../middleware/auth.js";
+import { emitToUser } from "../services/socketService.js";
 import { authLimiter } from "../middleware/rateLimiter.js";
 import validator from "validator";
 import sanitizeHtml from "sanitize-html";
@@ -16,7 +18,7 @@ const router = Router();
  */
 router.post("/register", authLimiter, async (req, res) => {
     try {
-        const { email, password, name, phone } = req.body;
+        const { email, password, name, phone, referralCode } = req.body;
 
         const settings = await getSettings();
         if (!settings.registrationEnabled) {
@@ -41,12 +43,48 @@ router.post("/register", authLimiter, async (req, res) => {
             return res.status(409).json({ error: "Email already registered" });
         }
 
+        let referrer = null;
+        if (referralCode) {
+            referrer = await User.findOne({
+                referralCode
+            });
+            if (!referrer) {
+                return res.status(400).json({ error: "Invalid referral code" });
+            }
+        }
+
         const user = await User.create({
             email: email.toLowerCase(),
             password,
             name: sanitize(name),
-            phone: phone ? phone.replace(/[^0-9+]/g, "") : ""
+            phone: phone ? phone.replace(/[^0-9+]/g, "") : "",
+            referredBy: referrer ? referrer._id : null
         });
+
+        // Notify both parties about the pending referral
+        if (referrer) {
+            try {
+                // 1. Notify Referrer
+                const notifyReferrer = await Notification.create({
+                    userId: referrer._id,
+                    title: "New Pending Referral! 👤",
+                    message: `Someone joined with your code. You'll get 10 coins once they make their first successful purchase!`,
+                    type: "info"
+                });
+                emitToUser(referrer._id, "new_notification", notifyReferrer);
+
+                // 2. Notify New User
+                const notifyUser = await Notification.create({
+                    userId: user._id,
+                    title: "Welcome! 🎁",
+                    message: `By using a friend's code, you've helped them out! They'll get a reward once you make your first coin purchase.`,
+                    type: "info"
+                });
+                emitToUser(user._id, "new_notification", notifyUser);
+            } catch (err) {
+                console.error("Failed to create referral notifications:", err);
+            }
+        }
 
         const token = generateToken(user._id);
 
@@ -111,6 +149,59 @@ router.get("/me", authenticate, async (req, res) => {
     } catch (error) {
         console.error("Profile error:", error);
         res.status(500).json({ error: "Failed to fetch profile" });
+    }
+});
+
+/**
+ * POST /api/auth/daily-claim
+ * Claim daily reward (Punch Card)
+ */
+router.post("/daily-claim", authenticate, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id);
+
+        // Check if already claimed today based on server local time for simplicity
+        const now = new Date();
+        if (user.lastDailyClaim) {
+            const lastDate = new Date(user.lastDailyClaim).setHours(0, 0, 0, 0);
+            const todayDate = new Date(now).setHours(0, 0, 0, 0);
+
+            if (lastDate === todayDate) {
+                return res.status(400).json({ error: "Already claimed today! Come back tomorrow." });
+            }
+        }
+
+        // Random 1-5 coins
+        let rewardCoins = Math.floor(Math.random() * 5) + 1;
+
+        user.dailyClaimCount += 1;
+        user.coins += rewardCoins;
+        user.lastDailyClaim = now;
+        await user.save();
+
+        let title = "Daily Reward Claimed! 🎁";
+        let message = `You received your daily reward of ${rewardCoins} coins 🪙! Come back tomorrow!`;
+
+        try {
+            const notification = await Notification.create({
+                userId: user._id,
+                title,
+                message,
+                type: "success"
+            });
+            emitToUser(user._id, "new_notification", notification);
+        } catch (err) {
+            console.error("Failed to create daily claim notification:", err);
+        }
+
+        res.json({
+            success: true,
+            rewardCoins,
+            user: user.toJSON()
+        });
+    } catch (error) {
+        console.error("Daily claim error:", error);
+        res.status(500).json({ error: "Failed to claim daily reward" });
     }
 });
 

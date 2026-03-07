@@ -27,8 +27,8 @@ export default function ParticlesBackground() {
                 interactivity: {
                     detectsOn: "window",
                     events: {
-                        onClick: { enable: true, mode: "push" },
-                        onHover: { enable: true, mode: "repulse" },
+                        onClick: { enable: false, mode: "push" },
+                        onHover: { enable: false, mode: "repulse" },
                         resize: { enable: true },
                     },
                     modes: {

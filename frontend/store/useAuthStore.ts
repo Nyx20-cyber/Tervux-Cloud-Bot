@@ -27,6 +27,13 @@ export interface User {
   role: "user" | "admin";
   coins: number;
   isBanned: boolean;
+  dailyClaimCount?: number;
+  lastDailyClaim?: string;
+  badges: string[];
+  isVIP: boolean;
+  totalDeployments: number;
+  totalReferrals: number;
+  totalCoinsSpent: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +45,7 @@ interface AuthState {
   login: (token: string, user: User) => void;
   logout: () => Promise<void>;
   updateCoins: (coins: number) => void;
+  setUser: (user: User) => void;
   checkAuth: () => Promise<void>;
 }
 
@@ -54,7 +62,12 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: async () => {
-        try { await api.post("/auth/logout"); } catch (e) { /* ignore */ }
+        try {
+          // Attempt to notify server
+          await api.post("/auth/logout");
+        } catch (e) {
+          // ignore
+        }
         removeToken();
         set({ token: null, user: null, isAuthenticated: false });
         if (typeof window !== "undefined") window.location.href = "/login";
@@ -64,6 +77,10 @@ export const useAuthStore = create<AuthState>()(
         set((state) => ({
           user: state.user ? { ...state.user, coins } : null
         }));
+      },
+
+      setUser: (user) => {
+        set({ user: { ...user } });
       },
 
       checkAuth: async () => {

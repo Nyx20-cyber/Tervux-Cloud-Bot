@@ -34,8 +34,6 @@ const whatsAppSessionSchema = new mongoose.Schema({
         autoViewStatus: { type: Boolean, default: false },
         antiDelete: { type: Boolean, default: false },
         antiCall: { type: Boolean, default: false },
-        antiViewOnce: { type: Boolean, default: false },
-        antiRemove: { type: Boolean, default: false },
         autoReadMessages: { type: Boolean, default: false },
         alwaysTyping: { type: Boolean, default: false },
         alwaysRecording: { type: Boolean, default: false }

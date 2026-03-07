@@ -101,20 +101,42 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         }
 
         const user = await User.findById(req.user._id);
-        if (!user || user.coins < 50) {
-            return res.status(402).json({ error: "Insufficient coins. You need 50 coins to deploy." });
+        const cost = user.isVIP ? 45 : 50;
+
+        if (!user || user.coins < cost) {
+            return res.status(402).json({ error: `Insufficient coins. You need ${cost} coins to deploy.` });
         }
 
-        // Deduct 50 coins
-        user.coins -= 50;
+        // Deduct coins and track gamification
+        user.coins -= cost;
+        user.totalDeployments = (user.totalDeployments || 0) + 1;
+        user.totalCoinsSpent = (user.totalCoinsSpent || 0) + cost;
+
+        let earnedBotMaster = false;
+        let earnedVIP = false;
+
+        if (user.totalDeployments >= 3 && !user.badges.includes("bot_master")) {
+            user.badges.push("bot_master");
+            user.badges = user.badges.filter(b => b !== "pioneer");
+            earnedBotMaster = true;
+        }
+
+        if (user.totalCoinsSpent >= 1000 && !user.isVIP) {
+            user.isVIP = true;
+            earnedVIP = true;
+        }
+
         await user.save();
 
         // Notification for coin deduction
         try {
+            let badgeMsg = earnedBotMaster ? "\n\nYou unlocked the 'Bot Master' badge! 🤖" : "";
+            let vipMsg = earnedVIP ? "\n\n🎉 You have unlocked VIP Status! 💎" : "";
+
             await Notification.create({
                 userId: user._id,
                 title: "Coins Spent 🪙",
-                message: `Spent 50 coins to deploy bot for ${session.phone || "your device"}. Your new balance is ${user.coins}.`,
+                message: `Spent ${cost} coins to deploy bot for ${session.phone || "your device"}. Your new balance is ${user.coins} coins.${badgeMsg}${vipMsg}`,
                 type: "info"
             });
         } catch (err) {
@@ -123,7 +145,7 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
 
         // Set session to active with absolute expiration date
         session.status = "active";
-        session.expiresAt = new Date(Date.now() + 28 * 24 * 60 * 60 * 1000); // 28 days
+        session.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
         await session.save();
 
         // Connect session Manager

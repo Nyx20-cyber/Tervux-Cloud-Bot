@@ -62,8 +62,6 @@ class SessionManager {
             autoViewStatus: session.settings?.autoViewStatus || false,
             antiDelete: session.settings?.antiDelete || false,
             antiCall: session.settings?.antiCall || false,
-            antiViewOnce: session.settings?.antiViewOnce || false,
-            antiRemove: session.settings?.antiRemove || false,
             autoReadMessages: session.settings?.autoReadMessages || false,
             alwaysTyping: session.settings?.alwaysTyping || false,
             alwaysRecording: session.settings?.alwaysRecording || false,
@@ -603,10 +601,12 @@ ${text}
      */
     async reconnectAll() {
         try {
+            const now = new Date();
             const activeSessions = await WhatsAppSession.find({
-                status: { $in: ["active", "paused"] }
+                status: { $in: ["active", "paused", "disconnected"] },
+                expiresAt: { $gt: now }
             });
-
+            console.log(`🔄 [Reconnect] Current Time: ${now.toISOString()}`);
             console.log(`🔄 Found ${activeSessions.length} eligible session(s) to reconnect.`);
 
             for (const session of activeSessions) {
@@ -630,7 +630,7 @@ ${text}
                 }
 
                 // Check auth directory exists
-                const hasAuth = await WhatsAppAuth.findOne({ sessionId: session._id, type: "creds" });
+                const hasAuth = await WhatsAppAuth.findOne({ sessionId: session._id.toString(), type: "creds" });
                 if (!hasAuth) {
                     console.log(`⏭️ [${session._id}] Skipping — no Mongo Auth creds found.`);
                     session.status = "disconnected";

@@ -7,6 +7,8 @@ import sessionRoutes from "./routes/sessions.js";
 import subscriptionRoutes from "./routes/subscriptions.js";
 import adminRoutes from "./routes/admin.js";
 import notificationRoutes from "./routes/notifications.js";
+import referralRoutes from "./routes/referral.js";
+import dashboardRoutes from "./routes/dashboard.js";
 import { authenticate } from "./middleware/auth.js";
 import Plan from "./models/Plan.js";
 import Announcement from "./models/Announcement.js";
@@ -121,6 +123,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/sessions", sessionRoutes);
 app.use("/api/subscription", subscriptionRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/referral", referralRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/admin", adminRoutes);
 
 export default app;

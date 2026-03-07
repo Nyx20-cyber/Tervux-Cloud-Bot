@@ -4,10 +4,13 @@ import { useState } from "react";
 import { api, useAuthStore } from "@/store/useAuthStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ShieldCheck, Loader2, Eye, EyeOff } from "lucide-react";
+import { ShieldCheck, Loader2, Eye, EyeOff, Globe } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
+import { motion } from "framer-motion";
 
 export default function LoginPage() {
     const [email, setEmail] = useState("");
@@ -15,6 +18,8 @@ export default function LoginPage() {
     const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const { login } = useAuthStore();
+    const { language, setLanguage } = useLocaleStore();
+    const t = translations[language];
     const router = useRouter();
 
     const handleLogin = async (e: React.FormEvent) => {
@@ -23,67 +28,104 @@ export default function LoginPage() {
         try {
             const res = await api.post("/auth/login", { email, password });
             login(res.data.token, res.data.user);
-            toast.success("Login successful");
+            toast.success(t.successful_login);
             router.push("/dashboard");
         } catch (error: any) {
-            toast.error(error.response?.data?.error || "Invalid credentials");
+            toast.error(error.response?.data?.error || t.invalid_credentials);
         } finally {
             setIsLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-4 animate-fade-in relative z-20">
-            <div className="w-full max-w-md p-8 rounded-3xl border border-border bg-card/50 backdrop-blur-2xl shadow-2xl relative">
-                <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/20 to-primary/0 rounded-3xl blur opacity-20 z-0"></div>
+        <div className="min-h-screen flex items-center justify-center p-4 animate-fade-in relative z-20 overflow-hidden bg-black">
+            {/* Background elements */}
+            <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-primary/10 blur-[120px] rounded-full -z-10 animate-pulse transition-all duration-1000"></div>
+            <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-primary/5 blur-[120px] rounded-full -z-10"></div>
+
+            {/* Language Toggle in Auth */}
+            <div className="absolute top-8 right-8 z-50">
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setLanguage(language === "en" ? "sw" : "en")}
+                    className="bg-white/5 border border-white/5 text-white font-medium uppercase tracking-[0.2em] text-[10px] h-11 px-5 rounded-2xl backdrop-blur-xl transition-all active:scale-95"
+                >
+                    <span className="mr-2 text-base">{language === "en" ? "🇺🇸" : "🇹🇿"}</span>
+                    {language === "en" ? "EN" : "SW"}
+                </Button>
+            </div>
+
+            <div className="w-full max-w-md p-8 sm:p-10 rounded-[2.5rem] border border-white/[0.08] bg-white/[0.02] backdrop-blur-3xl shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] relative overflow-hidden group">
+                <div className="absolute -inset-0.5 bg-gradient-to-tr from-primary/10 to-transparent rounded-[2.5rem] blur opacity-20 z-0 transition-opacity duration-500"></div>
 
                 <div className="relative z-10 space-y-8">
-                    <div className="text-center space-y-2">
-                        <div className="flex justify-center mb-6">
-                            <ShieldCheck className="h-12 w-12 text-primary" />
+                    <div className="text-center space-y-6">
+                        <div className="flex justify-center">
+                            <motion.div
+                                animate={{
+                                    scale: [1, 1.05, 1],
+                                    opacity: [0.8, 1, 0.8]
+                                }}
+                                transition={{
+                                    duration: 4,
+                                    repeat: Infinity,
+                                    ease: "easeInOut"
+                                }}
+                                className="p-5 rounded-[1.75rem] bg-primary/5 border border-primary/10 shadow-inner"
+                            >
+                                <ShieldCheck className="h-10 w-10 text-primary/80" />
+                            </motion.div>
                         </div>
-                        <h1 className="text-2xl font-bold text-white uppercase tracking-widest">Tervux Cloud Bot</h1>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Sign in to your account</p>
+                        <div className="space-y-1.5">
+                            <h1 className="text-2xl font-bold text-white uppercase tracking-[0.25em] font-mono">Tervux Cloud</h1>
+                            <p className="text-[10px] font-medium text-gray-500 uppercase tracking-[0.3em] opacity-80">{t.sign_in_account}</p>
+                        </div>
                     </div>
 
-                    <form onSubmit={handleLogin} className="space-y-4">
+                    <form onSubmit={handleLogin} className="space-y-6">
                         <div className="space-y-4">
-                            <Input
-                                type="email"
-                                placeholder="EMAIL ADDRESS"
-                                value={email}
-                                onChange={e => setEmail(e.target.value)}
-                                className="h-12 bg-black/50 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-primary uppercase text-xs tracking-widest"
-                                required
-                            />
-                            <div className="relative">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest ml-2 opacity-60">{t.email_address}</label>
                                 <Input
-                                    type={showPassword ? "text" : "password"}
-                                    placeholder="PASSWORD"
-                                    value={password}
-                                    onChange={e => setPassword(e.target.value)}
-                                    className="h-12 bg-black/50 border-white/10 text-white placeholder:text-gray-600 focus-visible:ring-primary text-xs tracking-widest pr-10"
+                                    type="email"
+                                    placeholder="your@email.com"
+                                    value={email}
+                                    onChange={e => setEmail(e.target.value)}
+                                    className="h-14 bg-white/[0.03] border-white/5 text-white placeholder:text-gray-700 focus-visible:ring-primary/40 focus-visible:border-primary/30 text-sm font-medium tracking-wide rounded-2xl transition-all px-6 outline-none shadow-inner"
                                     required
                                 />
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-white transition-colors"
-                                >
-                                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                </button>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest ml-2 opacity-60">{t.password}</label>
+                                <div className="relative">
+                                    <Input
+                                        type={showPassword ? "text" : "password"}
+                                        placeholder="••••••••"
+                                        value={password}
+                                        onChange={e => setPassword(e.target.value)}
+                                        className="h-14 bg-white/[0.03] border-white/5 text-white placeholder:text-gray-700 focus-visible:ring-primary/40 focus-visible:border-primary/30 text-sm font-medium tracking-wide pr-14 rounded-2xl transition-all px-6 outline-none shadow-inner"
+                                        required
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="absolute inset-y-0 right-0 pr-6 flex items-center text-gray-600 hover:text-primary/70 transition-colors"
+                                    >
+                                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
-                        <Button type="submit" disabled={isLoading} className="w-full h-12 bg-primary hover:bg-primary/90 text-black font-bold uppercase tracking-widest mt-6">
-                            {isLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                            {isLoading ? "Signing in..." : "Sign In"}
+                        <Button type="submit" disabled={isLoading} className="w-full h-15 bg-primary hover:bg-primary/90 text-black font-bold uppercase tracking-[0.2em] text-[11px] rounded-2xl shadow-xl shadow-primary/10 mt-2 transition-all active:scale-[0.98]">
+                            {isLoading ? <><Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" /> {t.signing_in}</> : t.sign_in}
                         </Button>
                     </form>
 
-                    <div className="text-center pt-2">
-                        <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">
-                            No account? <Link href="/register" className="text-primary hover:underline ml-1">Create one</Link>
+                    <div className="text-center pt-6 border-t border-white/[0.05]">
+                        <p className="text-[10px] text-gray-500 font-medium uppercase tracking-widest">
+                            {t.no_account} <Link href="/register" className="text-primary hover:text-primary/80 transition-colors ml-1.5 font-bold">{t.create_one}</Link>
                         </p>
                     </div>
                 </div>

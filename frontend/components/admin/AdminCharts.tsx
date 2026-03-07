@@ -7,6 +7,8 @@ import {
 } from "recharts";
 import { motion } from "framer-motion";
 import { TrendingUp, BarChart3 } from "lucide-react";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
 
 interface Payment {
     _id: string;
@@ -31,7 +33,7 @@ interface AdminChartsProps {
     } | null;
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label, language }: any) => {
     if (active && payload && payload.length) {
         return (
             <div className="rounded-xl border border-white/10 bg-black/80 backdrop-blur-xl p-3 shadow-2xl">
@@ -48,27 +50,30 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export function AdminCharts({ recentPayments, stats }: AdminChartsProps) {
+    const { language } = useLocaleStore();
+    const t = translations[language];
+
     // Aggregate payments by day for the area chart
     const revenueByDay = useMemo(() => {
         const map = new Map<string, number>();
         recentPayments.forEach(p => {
-            const day = new Date(p.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            const day = new Date(p.createdAt).toLocaleDateString(language === "sw" ? "sw-TZ" : "en-US", { month: "short", day: "numeric" });
             map.set(day, (map.get(day) || 0) + p.amount);
         });
         return Array.from(map.entries()).map(([day, amount]) => ({ day, amount }));
-    }, [recentPayments]);
+    }, [recentPayments, language]);
 
     // Bar chart data from stats
     const barData = useMemo(() => {
         if (!stats) return [];
         return [
-            { name: "Users", value: stats.totalUsers, color: "#8b5cf6" },
-            { name: "Active Subs", value: stats.activeSubscriptions, color: "#10b981" },
-            { name: "Devices", value: stats.totalSessions, color: "#0ea5e9" },
-            { name: "Active", value: stats.activeSessions, color: "#f59e0b" },
-            { name: "Live", value: stats.liveConnections, color: "#25D366" },
+            { name: t.users, value: stats.totalUsers, color: "#8b5cf6" },
+            { name: t.active_subs, value: stats.activeSubscriptions, color: "#10b981" },
+            { name: t.deployments, value: stats.totalSessions, color: "#0ea5e9" },
+            { name: t.active_sessions, value: stats.activeSessions, color: "#f59e0b" },
+            { name: t.live_now, value: stats.liveConnections, color: "#25D366" },
         ];
-    }, [stats]);
+    }, [stats, t]);
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -77,48 +82,57 @@ export function AdminCharts({ recentPayments, stats }: AdminChartsProps) {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
-                className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-6 space-y-4"
+                className="rounded-[2.5rem] border border-white/5 bg-black/40 backdrop-blur-2xl p-8 space-y-6 overflow-hidden relative group"
             >
-                <div className="flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4 text-primary" />
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Revenue Trend</h3>
+                <div className="flex items-center justify-between relative z-10">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-primary/10 border border-primary/20">
+                            <TrendingUp className="h-4 w-4 text-primary" />
+                        </div>
+                        <h3 className="text-xs font-black uppercase tracking-widest text-white/50">{t.revenue_trend}</h3>
+                    </div>
                 </div>
                 {revenueByDay.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={220}>
+                    <ResponsiveContainer width="100%" height={240}>
                         <AreaChart data={revenueByDay}>
                             <defs>
                                 <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#25D366" stopOpacity={0.4} />
+                                    <stop offset="5%" stopColor="#25D366" stopOpacity={0.3} />
                                     <stop offset="95%" stopColor="#25D366" stopOpacity={0} />
                                 </linearGradient>
                             </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
                             <XAxis
                                 dataKey="day"
-                                tick={{ fontSize: 10, fill: "#6b7280", fontWeight: 700 }}
+                                tick={{ fontSize: 9, fill: "#4b5563", fontWeight: 800 }}
                                 axisLine={false}
                                 tickLine={false}
+                                dy={10}
                             />
                             <YAxis
-                                tick={{ fontSize: 10, fill: "#6b7280", fontWeight: 700 }}
+                                tick={{ fontSize: 9, fill: "#4b5563", fontWeight: 800 }}
                                 axisLine={false}
                                 tickLine={false}
-                                width={60}
+                                width={50}
                                 tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
                             />
-                            <Tooltip content={<CustomTooltip />} />
+                            <Tooltip content={<CustomTooltip language={language} />} />
                             <Area
                                 type="monotone"
                                 dataKey="amount"
                                 stroke="#25D366"
-                                strokeWidth={2}
+                                strokeWidth={3}
                                 fill="url(#revenueGradient)"
+                                animationDuration={1500}
                             />
                         </AreaChart>
                     </ResponsiveContainer>
                 ) : (
-                    <div className="flex items-center justify-center h-[220px]">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">No revenue data yet</p>
+                    <div className="flex flex-col items-center justify-center h-[240px] space-y-4">
+                        <div className="p-4 rounded-2xl bg-white/5 border border-white/10 opacity-20">
+                            <TrendingUp className="w-8 h-8 text-gray-400" />
+                        </div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-600">{t.no_revenue_data}</p>
                     </div>
                 )}
             </motion.div>
@@ -128,40 +142,48 @@ export function AdminCharts({ recentPayments, stats }: AdminChartsProps) {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.4 }}
-                className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-6 space-y-4"
+                className="rounded-[2.5rem] border border-white/5 bg-black/40 backdrop-blur-2xl p-8 space-y-6 overflow-hidden relative group"
             >
-                <div className="flex items-center gap-2">
-                    <BarChart3 className="h-4 w-4 text-violet-400" />
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Platform Overview</h3>
+                <div className="flex items-center justify-between relative z-10">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-xl bg-violet-500/10 border border-violet-500/20">
+                            <BarChart3 className="h-4 w-4 text-violet-400" />
+                        </div>
+                        <h3 className="text-xs font-black uppercase tracking-widest text-white/50">{t.platform_overview}</h3>
+                    </div>
                 </div>
                 {barData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={220}>
-                        <BarChart data={barData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <ResponsiveContainer width="100%" height={240}>
+                        <BarChart data={barData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
                             <XAxis
                                 dataKey="name"
-                                tick={{ fontSize: 9, fill: "#6b7280", fontWeight: 700 }}
+                                tick={{ fontSize: 8, fill: "#4b5563", fontWeight: 800 }}
                                 axisLine={false}
                                 tickLine={false}
+                                dy={10}
                             />
                             <YAxis
-                                tick={{ fontSize: 10, fill: "#6b7280", fontWeight: 700 }}
+                                tick={{ fontSize: 9, fill: "#4b5563", fontWeight: 800 }}
                                 axisLine={false}
                                 tickLine={false}
                                 width={40}
                             />
                             <Tooltip
+                                cursor={{ fill: 'rgba(255,255,255,0.05)', radius: 8 }}
                                 contentStyle={{
                                     background: "rgba(0,0,0,0.85)",
                                     border: "1px solid rgba(255,255,255,0.1)",
-                                    borderRadius: "12px",
+                                    borderRadius: "16px",
                                     backdropFilter: "blur(20px)",
                                     fontSize: "11px",
-                                    fontWeight: 700,
+                                    fontWeight: 800,
+                                    padding: "12px"
                                 }}
-                                labelStyle={{ color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.1em", fontSize: "9px" }}
+                                itemStyle={{ color: "#fff", textTransform: "uppercase", fontSize: "10px", letterSpacing: "0.05em" }}
+                                labelStyle={{ color: "#25D366", marginBottom: "4px", fontSize: "9px" }}
                             />
-                            <Bar dataKey="value" radius={[8, 8, 0, 0]}>
+                            <Bar dataKey="value" radius={[10, 10, 0, 0]} barSize={32}>
                                 {barData.map((entry, index) => (
                                     <Cell key={`cell-${index}`} fill={entry.color} fillOpacity={0.8} />
                                 ))}
@@ -169,8 +191,11 @@ export function AdminCharts({ recentPayments, stats }: AdminChartsProps) {
                         </BarChart>
                     </ResponsiveContainer>
                 ) : (
-                    <div className="flex items-center justify-center h-[220px]">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">No data available</p>
+                    <div className="flex flex-col items-center justify-center h-[240px] space-y-4">
+                        <div className="p-4 rounded-2xl bg-white/5 border border-white/10 opacity-20">
+                            <BarChart3 className="w-8 h-8 text-gray-400" />
+                        </div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-600">{t.no_data_available}</p>
                     </div>
                 )}
             </motion.div>

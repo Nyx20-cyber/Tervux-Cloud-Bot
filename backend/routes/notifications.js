@@ -10,13 +10,18 @@ const router = Router();
  */
 router.get("/", authenticate, async (req, res) => {
     try {
+        console.log("Fetching notifications for user:", req.user?._id);
         const notifications = await Notification.find({ userId: req.user._id })
             .sort({ createdAt: -1 })
             .limit(50);
         res.json({ notifications });
     } catch (error) {
-        console.error("Fetch notifications error:", error);
-        res.status(500).json({ error: "Failed to fetch notifications" });
+        console.error("Fetch notifications error details:", error);
+        res.status(500).json({
+            error: "Failed to fetch notifications",
+            details: error.message,
+            stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+        });
     }
 });
 

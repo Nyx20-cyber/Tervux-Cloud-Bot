@@ -2,6 +2,8 @@
 
 import { Users, Network, CreditCard, Wifi, ShieldCheck, Zap } from "lucide-react";
 import { motion } from "framer-motion";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
 
 interface AdminStatsProps {
     stats: {
@@ -15,10 +17,10 @@ interface AdminStatsProps {
     } | null;
 }
 
-const cards = [
+const getCards = (t: any) => [
     {
         key: "totalUsers",
-        label: "Total Users",
+        label: t.total_users,
         icon: Users,
         gradient: "from-violet-500/20 to-violet-600/5",
         border: "border-violet-500/30",
@@ -28,7 +30,7 @@ const cards = [
     },
     {
         key: "activeSubscriptions",
-        label: "Active Subs",
+        label: t.active_subs,
         icon: ShieldCheck,
         gradient: "from-emerald-500/20 to-emerald-600/5",
         border: "border-emerald-500/30",
@@ -38,7 +40,7 @@ const cards = [
     },
     {
         key: "activeSessions",
-        label: "Active Sessions",
+        label: t.active_sessions,
         icon: Network,
         gradient: "from-sky-500/20 to-sky-600/5",
         border: "border-sky-500/30",
@@ -48,7 +50,7 @@ const cards = [
     },
     {
         key: "liveConnections",
-        label: "Live Now",
+        label: t.live_now,
         icon: Wifi,
         gradient: "from-amber-500/20 to-amber-600/5",
         border: "border-amber-500/30",
@@ -59,7 +61,7 @@ const cards = [
     },
     {
         key: "totalSessions",
-        label: "Total Devices",
+        label: t.total_devices,
         icon: Zap,
         gradient: "from-pink-500/20 to-pink-600/5",
         border: "border-pink-500/30",
@@ -69,7 +71,7 @@ const cards = [
     },
     {
         key: "totalRevenue",
-        label: "Revenue (All)",
+        label: t.total_revenue,
         icon: CreditCard,
         gradient: "from-primary/20 to-primary/5",
         border: "border-primary/30",
@@ -90,6 +92,10 @@ const cardVariants = {
 };
 
 export function AdminStats({ stats }: AdminStatsProps) {
+    const { language } = useLocaleStore();
+    const t = translations[language];
+    const cards = getCards(t);
+
     if (!stats) return null;
 
     return (
@@ -113,7 +119,7 @@ export function AdminStats({ stats }: AdminStatsProps) {
                         <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br ${card.gradient} blur-xl -z-10`} />
 
                         <Icon className={`h-5 w-5 ${card.iconColor} ${card.pulse ? "animate-pulse" : ""}`} />
-                        <p className="text-[8px] font-bold uppercase tracking-widest text-gray-500">
+                        <p className="text-[8px] font-black uppercase tracking-widest text-gray-500 opacity-70">
                             {card.label}
                         </p>
                         <p className={`text-sm font-black tracking-widest ${card.text}`}>

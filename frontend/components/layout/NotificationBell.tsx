@@ -13,6 +13,8 @@ import { api } from "@/store/useAuthStore";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { io } from "socket.io-client";
+import Link from "next/link";
 
 interface Notification {
     _id: string;
@@ -40,9 +42,23 @@ export function NotificationBell() {
 
     useEffect(() => {
         fetchNotifications();
-        // Polling every 60 seconds
-        const interval = setInterval(fetchNotifications, 60000);
-        return () => clearInterval(interval);
+
+        const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "", {
+            auth: { token: localStorage.getItem("token") }
+        });
+
+        socket.on("new_notification", (notification: Notification) => {
+            setNotifications(prev => [notification, ...prev]);
+            setUnreadCount(prev => prev + 1);
+            toast(notification.title, {
+                description: notification.message,
+                icon: getIcon(notification.type)
+            });
+        });
+
+        return () => {
+            socket.disconnect();
+        };
     }, [fetchNotifications]);
 
     const markAsRead = async (id: string) => {
@@ -158,13 +174,13 @@ export function NotificationBell() {
                         ))
                     )}
                 </div>
-                {notifications.length > 0 && (
-                    <div className="p-3 border-t border-white/10 text-center">
+                <div className="p-3 border-t border-white/10 text-center">
+                    <Link href="/dashboard/notifications" className="block w-full">
                         <Button variant="ghost" className="w-full text-[10px] uppercase tracking-widest font-bold text-gray-500 hover:text-white h-8">
                             View All Activity
                         </Button>
-                    </div>
-                )}
+                    </Link>
+                </div>
             </DropdownMenuContent>
         </DropdownMenu>
     );

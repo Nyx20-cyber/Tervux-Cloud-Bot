@@ -6,6 +6,7 @@ import { connectDB } from "./lib/db.js";
 import { initWhatsAppService, shutdownWhatsAppService } from "./services/whatsappService.js";
 import { runCleanup } from "./services/cleanupService.js";
 import { verifyPendingPayments } from "./services/paymentVerifier.js";
+import { runWeeklyKingCeremony } from "./services/referralKingService.js";
 import cron from "node-cron";
 
 const httpServer = createServer(app);
@@ -42,6 +43,12 @@ async function start() {
         cron.schedule("*/5 * * * *", () => {
             runCleanup().catch(err => console.error("Cleanup cron error:", err));
         });
+
+        // 8. Weekly Referral King Ceremony — every Sunday at 00:00
+        cron.schedule("0 0 * * 0", () => {
+            runWeeklyKingCeremony().catch(err => console.error("King ceremony cron error:", err));
+        });
+        console.log("👑 Weekly Referral King ceremony scheduled for every Sunday at midnight.");
 
         // 7. Check pending payments every 15 seconds for near-instant user feedback
         setInterval(() => {

@@ -17,6 +17,14 @@ const systemSettingsSchema = new mongoose.Schema({
         type: String,
         default: "Tervux Cloud"
     },
+    kingBonusCoins: {
+        type: Number,
+        default: 100
+    },
+    referralBonus: {
+        type: Number,
+        default: 10
+    },
     lastUpdatedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User"

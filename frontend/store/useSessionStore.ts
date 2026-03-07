@@ -1,12 +1,43 @@
 import { create } from "zustand";
 import { api } from "./useAuthStore";
 
+export interface SessionSettings {
+  [key: string]: string | boolean | undefined;
+  prefix?: string;
+  alwaysOnline?: boolean;
+  autoLikeStatus?: boolean;
+  autoViewStatus?: boolean;
+  antiDelete?: boolean;
+  antiCall?: boolean;
+  autoReadMessages?: boolean;
+  alwaysTyping?: boolean;
+  alwaysRecording?: boolean;
+}
+
+export interface Session {
+  _id: string;
+  userId: string;
+  phone?: string;
+  name?: string;
+  status: string;
+  expiresAt?: string;
+  settings: SessionSettings;
+  updatedAt?: string;
+  phoneNumber?: string; // Add if used in UI
+  nodeId?: string;
+  subscriptionActive?: boolean;
+  createdAt: string;
+}
+
 interface SessionState {
-  sessions: any[];
+  sessions: Session[];
   isLoading: boolean;
   fetchSessions: () => Promise<void>;
   createPairingReq: (phone: string, method: "qr" | "code") => Promise<any>;
-  updateSessionLocally: (sessionId: string, updates: any) => void;
+  updateSessionLocally: (sessionId: string, updates: Partial<Session>) => void;
+  updateSessionSettings: (sessionId: string, settings: SessionSettings) => Promise<void>;
+  updateSessionStatus: (sessionId: string, status: string) => Promise<void>;
+  deploySession: (sessionId: string) => Promise<void>;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -26,7 +57,7 @@ export const useSessionStore = create<SessionState>((set) => ({
     }
   },
 
-  updateSessionLocally: (sessionId: string, updates: any) => {
+  updateSessionLocally: (sessionId: string, updates: Partial<Session>) => {
     set((state) => ({
       sessions: state.sessions.map((s) =>
         s._id === sessionId ? { ...s, ...updates } : s
@@ -34,12 +65,53 @@ export const useSessionStore = create<SessionState>((set) => ({
     }));
   },
 
-  createPairingReq: async (phoneNumber, method) => {
+  createPairingReq: async (phone: string, method: "qr" | "code") => {
     try {
-      const res = await api.post("/sessions/pair", { phoneNumber, method });
+      const res = await api.post("/sessions/pair", { phoneNumber: phone, method });
       return res.data;
     } catch (error: any) {
       throw new Error(error.response?.data?.error || "Pairing request failed");
+    }
+  },
+
+  updateSessionSettings: async (sessionId: string, settings: SessionSettings) => {
+    try {
+      const res = await api.put(`/sessions/${sessionId}/settings`, settings);
+      set((state) => ({
+        sessions: state.sessions.map((s) =>
+          s._id === sessionId ? { ...s, settings: res.data.settings } : s
+        ),
+      }));
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || "Failed to update settings");
+    }
+  },
+
+  updateSessionStatus: async (sessionId: string, status: string) => {
+    try {
+      const endpoint = status === "active" ? "resume" : "pause";
+      await api.post(`/sessions/${sessionId}/${endpoint}`);
+      set((state) => ({
+        sessions: state.sessions.map((s) =>
+          s._id === sessionId ? { ...s, status } : s
+        ),
+      }));
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || "Failed to update status");
+    }
+  },
+
+  deploySession: async (sessionId: string) => {
+    try {
+      const res = await api.post(`/sessions/${sessionId}/deploy`);
+      set((state) => ({
+        sessions: state.sessions.map((s) =>
+          s._id === sessionId ? { ...s, status: "active" } : s
+        ),
+      }));
+      return res.data;
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || "Deployment failed");
     }
   }
 }));

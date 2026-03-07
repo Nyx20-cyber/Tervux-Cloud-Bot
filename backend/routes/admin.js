@@ -8,6 +8,7 @@ import Announcement from "../models/Announcement.js";
 import Notification from "../models/Notification.js";
 import SystemSettings, { getSettings } from "../models/SystemSettings.js";
 import { sessionManager } from "../services/whatsappService.js";
+import { emitToUser } from "../services/socketService.js";
 
 const router = Router();
 
@@ -107,6 +108,19 @@ router.put("/users/:id", authenticate, requireAdmin, async (req, res) => {
             const base = current > new Date() ? current : new Date();
             user.subscription.expiresAt = new Date(base.getTime() + subscriptionExtendDays * 86400000);
             user.subscription.status = "active";
+
+            // Notify user about subscription extension
+            try {
+                const notification = await Notification.create({
+                    userId: user._id,
+                    title: "Subscription Extended! 🚀",
+                    message: `System administrator has extended your subscription by ${subscriptionExtendDays} days.`,
+                    type: "success"
+                });
+                emitToUser(user._id, "new_notification", notification);
+            } catch (err) {
+                console.error("Failed to create sub extension notification:", err);
+            }
         }
 
         await user.save();
@@ -337,6 +351,7 @@ router.post("/users/:id/coins", authenticate, requireAdmin, async (req, res) => 
 
         user.coins = newBalance;
         await user.save();
+        emitToUser(user._id, "balance_update", { coins: user.coins });
 
         // Notify user about coin adjustment
         try {
@@ -346,6 +361,7 @@ router.post("/users/:id/coins", authenticate, requireAdmin, async (req, res) => 
                 message: `Your coin balance has been ${amount > 0 ? "credited with" : "debited by"} ${Math.abs(amount)} coins. Reason: ${reason || "Admin adjustment"}.`,
                 type: amount > 0 ? "info" : "warning"
             });
+            emitToUser(user._id, "new_notification", notification);
         } catch (err) {
             console.error("Failed to create admin coin notification:", err);
         }
@@ -361,6 +377,68 @@ router.post("/users/:id/coins", authenticate, requireAdmin, async (req, res) => 
     } catch (error) {
         console.error("Admin coin adjustment error:", error);
         res.status(500).json({ error: "Failed to adjust coins" });
+    }
+});
+
+/**
+ * POST /api/admin/users/bonus-all
+ * Award bonus coins to ALL registered users at once
+ * Body: { amount: number, reason: string, message?: string }
+ */
+router.post("/users/bonus-all", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const { amount, reason, message } = req.body;
+        if (!amount || Number(amount) <= 0) {
+            return res.status(400).json({ error: "Amount must be a positive number" });
+        }
+        if (!reason || !reason.trim()) {
+            return res.status(400).json({ error: "A reason is required for the global bonus" });
+        }
+
+        const coins = Number(amount);
+        const allUsers = await User.find({ isBanned: false }, { _id: 1, name: 1 }).lean();
+
+        if (allUsers.length === 0) {
+            return res.status(400).json({ error: "No eligible users found" });
+        }
+
+        // 1. Bulk increment coins for all users
+        await User.updateMany({ isBanned: false }, { $inc: { coins } });
+
+        // Notify all connected users of the balance change
+        const updatedUsers = await User.find({ isBanned: false }, { _id: 1, coins: 1 }).lean();
+        updatedUsers.forEach(u => {
+            emitToUser(u._id, "balance_update", { coins: u.coins });
+        });
+
+        // 2. Create personalised notifications for all users
+        const now = new Date();
+        const notificationMessage = message?.trim()
+            ? message.trim()
+            : `🎉 Exciting news! You've received a bonus of ${coins} coins 🪙 from the Tervux Team! Reason: ${reason.trim()}. Your new balance has been updated automatically. Thank you for being part of our community! — Tervux Team`;
+
+        const notifications = allUsers.map(u => ({
+            userId: u._id,
+            title: `🎁 Bonus Received: +${coins} Coins!`,
+            message: notificationMessage,
+            type: "success",
+            createdAt: now
+        }));
+
+        await Notification.insertMany(notifications);
+
+        console.log(`💰 [BonusAll] Admin gave +${coins} coins to ${allUsers.length} users. Reason: ${reason}`);
+
+        res.json({
+            success: true,
+            usersRewarded: allUsers.length,
+            coinsPerUser: coins,
+            totalCoinsDistributed: coins * allUsers.length,
+            reason
+        });
+    } catch (error) {
+        console.error("Bonus-all error:", error);
+        res.status(500).json({ error: "Failed to distribute bonus" });
     }
 });
 
@@ -464,21 +542,171 @@ router.get("/settings", authenticate, requireAdmin, async (req, res) => {
  */
 router.put("/settings", authenticate, requireAdmin, async (req, res) => {
     try {
-        const { maintenanceMode, registrationEnabled, supportPhone, siteName } = req.body;
+        const { maintenanceMode, registrationEnabled, supportPhone, siteName, kingBonusCoins, referralBonus } = req.body;
         const settings = await getSettings();
+
+        const oldKingBonus = settings.kingBonusCoins;
+        const oldReferralBonus = settings.referralBonus;
 
         if (maintenanceMode !== undefined) settings.maintenanceMode = maintenanceMode;
         if (registrationEnabled !== undefined) settings.registrationEnabled = registrationEnabled;
         if (supportPhone !== undefined) settings.supportPhone = supportPhone;
         if (siteName !== undefined) settings.siteName = siteName;
+        if (kingBonusCoins !== undefined && Number(kingBonusCoins) > 0) settings.kingBonusCoins = Number(kingBonusCoins);
+        if (referralBonus !== undefined && Number(referralBonus) > 0) settings.referralBonus = Number(referralBonus);
 
         settings.lastUpdatedBy = req.user._id;
         await settings.save();
+
+        // Broadcast notification for coin changes
+        const kingBonusChanged = oldKingBonus !== settings.kingBonusCoins;
+        const referralBonusChanged = oldReferralBonus !== settings.referralBonus;
+
+        if (kingBonusChanged || referralBonusChanged) {
+            const allUsers = await User.find({ isBanned: false }, { _id: 1 }).lean();
+            if (allUsers.length > 0) {
+                let message = "Habari, tumefanya mabadiliko kwenye mfumo wetu wa zawadi! 🪙\n\n";
+                let messageEn = "We've updated our rewards system! 🪙\n\n";
+
+                if (kingBonusChanged) {
+                    message += `• Bonasi ya Mfalme wa Wiki sasa ni sarafu ${settings.kingBonusCoins} 👑\n`;
+                    messageEn += `• The Weekly Referral King bonus is now ${settings.kingBonusCoins} coins 👑\n`;
+                }
+                if (referralBonusChanged) {
+                    message += `• Zawadi kwa kila mwaliko uliofanikiwa sasa ni sarafu ${settings.referralBonus} 🎁\n`;
+                    messageEn += `• The reward for each successful referral is now ${settings.referralBonus} coins 🎁\n`;
+                }
+
+                message += "\nAsante kwa kuendelea nasi! Endelea kualika na kupata zaidi. — Tervux Team";
+                messageEn += "\nThank you for being a part of Tervux Cloud! Keep sharing and earning. — Tervux Team";
+
+                const notifications = allUsers.map(u => ({
+                    userId: u._id,
+                    title: "System Update: Rewards Adjusted 🪙",
+                    message: messageEn, // Using English for the main message object, but could consider language-specific later
+                    type: "info"
+                }));
+
+                await Notification.insertMany(notifications);
+                console.log(`📢 [Admin] Broadcasted coin update to ${allUsers.length} users.`);
+            }
+        }
 
         res.json({ success: true, settings });
     } catch (error) {
         console.error("Admin update settings error:", error);
         res.status(500).json({ error: "Failed to update settings" });
+    }
+});
+
+/**
+ * GET /api/admin/referral/overview
+ * Full referral data overview for admin
+ */
+router.get("/referral/overview", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const settings = await getSettings();
+
+        const [leaderboard, currentKing, totalReferrals, topWeekly] = await Promise.all([
+            // All-time top referrers
+            User.aggregate([
+                { $match: { referredBy: { $ne: null }, referredByPaid: true } },
+                { $group: { _id: "$referredBy", count: { $sum: 1 } } },
+                { $sort: { count: -1 } },
+                { $limit: 10 },
+                { $lookup: { from: "users", localField: "_id", foreignField: "_id", as: "u" } },
+                { $unwind: "$u" },
+                { $project: { _id: 1, count: 1, name: "$u.name", email: "$u.email", isReferralKing: "$u.isReferralKing", weeklyReferralCount: "$u.weeklyReferralCount" } }
+            ]),
+            // Current king
+            User.findOne({ isReferralKing: true }).select("name email referralKingSince coins"),
+            // Total referrals across platform
+            User.countDocuments({ referredBy: { $ne: null }, referredByPaid: true }),
+            // This week's top referrer
+            User.findOne({ weeklyReferralCount: { $gt: 0 } }).sort({ weeklyReferralCount: -1 }).select("name email weeklyReferralCount")
+        ]);
+
+        res.json({
+            leaderboard,
+            currentKing,
+            totalReferrals,
+            topWeekly,
+            kingBonusCoins: settings.kingBonusCoins,
+            referralBonus: settings.referralBonus
+        });
+    } catch (error) {
+        console.error("Admin referral overview error:", error);
+        res.status(500).json({ error: "Failed to fetch referral overview" });
+    }
+});
+
+/**
+ * POST /api/admin/referral/trigger-ceremony
+ * Manually trigger the weekly king ceremony (for testing or emergency)
+ */
+router.post("/referral/trigger-ceremony", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const { runWeeklyKingCeremony } = await import("../services/referralKingService.js");
+        await runWeeklyKingCeremony();
+        res.json({ success: true, message: "King ceremony completed successfully." });
+    } catch (error) {
+        console.error("Trigger ceremony error:", error);
+        res.status(500).json({ error: "Failed to trigger king ceremony" });
+    }
+});
+
+/**
+ * POST /api/admin/referral/reset-weekly
+ * Reset all weekly referral counts manually
+ */
+router.post("/referral/reset-weekly", authenticate, requireAdmin, async (req, res) => {
+    try {
+        await User.updateMany({}, { weeklyReferralCount: 0 });
+        res.json({ success: true, message: "Weekly counts reset." });
+    } catch (error) {
+        console.error("Reset weekly error:", error);
+        res.status(500).json({ error: "Failed to reset weekly counts" });
+    }
+});
+
+/**
+ * DELETE /api/admin/referral/dethrone
+ * Dethrone the current king without crowning a new one
+ */
+router.delete("/referral/dethrone", authenticate, requireAdmin, async (req, res) => {
+    try {
+        await User.updateMany({ isReferralKing: true }, { isReferralKing: false, referralKingSince: null });
+        res.json({ success: true, message: "King dethroned." });
+    } catch (error) {
+        console.error("Dethrone error:", error);
+        res.status(500).json({ error: "Failed to dethrone king" });
+    }
+});
+
+/**
+ * POST /api/admin/users/:id/gamification
+ * Update a user's badges and VIP status
+ */
+router.post("/users/:id/gamification", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const { badges, isVIP } = req.body;
+
+        let updateData = {};
+        if (Array.isArray(badges)) updateData.badges = badges;
+        if (typeof isVIP === 'boolean') updateData.isVIP = isVIP;
+
+        const updatedUser = await User.findByIdAndUpdate(
+            req.params.id,
+            { $set: updateData },
+            { new: true }
+        );
+
+        if (!updatedUser) return res.status(404).json({ error: "User not found" });
+
+        res.json({ success: true, user: updatedUser.toJSON() });
+    } catch (error) {
+        console.error("Admin gamification update error:", error);
+        res.status(500).json({ error: "Failed to update user gamification data" });
     }
 });
 

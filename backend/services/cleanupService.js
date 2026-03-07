@@ -26,7 +26,7 @@ export async function runCleanup() {
 }
 
 /**
- * Expired bots: Deletes sessions that have passed their 28-day deployment timestamp.
+ * Expired bots: Deletes sessions that have passed their 30-day deployment timestamp.
  */
 async function cleanExpiredBots() {
     const now = new Date();
@@ -37,7 +37,7 @@ async function cleanExpiredBots() {
     });
 
     for (const session of expiredSessions) {
-        console.log(`   ⏳ [Expired] Auto-deleting expired 28-day session ${session._id} (${session.phone || "unknown"})`);
+        console.log(`   ⏳ [Expired] Auto-deleting expired 30-day session ${session._id} (${session.phone || "unknown"})`);
 
         try {
             await sessionManager.destroySession(session._id.toString());
@@ -55,7 +55,7 @@ async function cleanExpiredBots() {
     }
 
     if (expiredSessions.length > 0) {
-        console.log(`   🧹 Cleaned ${expiredSessions.length} expired 28-day session(s).`);
+        console.log(`   🧹 Cleaned ${expiredSessions.length} expired 30-day session(s).`);
     }
 }
 

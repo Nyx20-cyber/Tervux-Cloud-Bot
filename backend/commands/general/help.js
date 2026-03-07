@@ -139,6 +139,8 @@ ${githubSection}
 │ 🛡️ ➾ *${p}antidelete* _(DMs only)_
 │ 📵 ➾ *${p}anticall*
 │ ✔️ ➾ *${p}autoread*
+│ ⌨️ ➾ *${p}alwaystyping*
+│ 🎙️ ➾ *${p}alwaysrecording*
 ╰──────────────────────────────╯
 
 ╭───『 👥 *𝔾ℝ𝕆𝕌ℙ 𝕄𝔸ℕ𝔸𝔾𝔼𝕄𝔼ℕ𝕋* 』───╮

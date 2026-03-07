@@ -136,6 +136,45 @@ export function GlobalSettings() {
                 </div>
             </div>
 
+            {/* Rewards & Incentives */}
+            <div className="p-6 rounded-2xl border border-yellow-500/20 bg-yellow-500/5 backdrop-blur-md space-y-6">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-yellow-500/20 border border-yellow-500/30">
+                        <Settings className="w-5 h-5 text-yellow-500" />
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-bold text-white uppercase tracking-widest">Rewards & Incentives</h3>
+                        <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Coin-based prize configurations</p>
+                    </div>
+                </div>
+
+                <div className="space-y-4">
+                    <div>
+                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">Weekly King Bonus (Coins)</label>
+                        <input
+                            type="number"
+                            value={settings?.kingBonusCoins}
+                            onChange={e => setSettings({ ...settings, kingBonusCoins: parseInt(e.target.value) || 0 })}
+                            className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-black/20 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-primary/50 tracking-widest"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">Referral Bonus (Coins/Purchase)</label>
+                        <input
+                            type="number"
+                            value={settings?.referralBonus}
+                            onChange={e => setSettings({ ...settings, referralBonus: parseInt(e.target.value) || 0 })}
+                            className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-black/20 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-primary/50 tracking-widest"
+                        />
+                    </div>
+                    <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+                        <p className="text-[9px] font-bold text-yellow-500/70 uppercase leading-relaxed">
+                            💡 Changing these values will automatically notify all users about the new reward structure.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
             {/* Save Button */}
             <div className="md:col-span-2 flex justify-end">
                 <button

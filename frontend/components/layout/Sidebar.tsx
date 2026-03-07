@@ -1,31 +1,39 @@
+"use client";
+
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Network, CircleDollarSign, ShieldCheck, Activity, AlertTriangle } from 'lucide-react';
-import { DialogTitle } from '@radix-ui/react-dialog';
-import { useAuthStore } from '@/store/useAuthStore';
+import { ShieldCheck, CircleDollarSign, AlertTriangle, Users, LayoutDashboard, Activity, Settings2, Network } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useAuthStore } from "@/store/useAuthStore";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
 
 export function Sidebar({ isMobile }: { isMobile?: boolean }) {
     const pathname = usePathname();
     const { user } = useAuthStore();
+    const { language } = useLocaleStore();
+    const t = translations[language];
 
     const links = [
-        { href: '/dashboard', label: 'Overview', icon: Activity },
-        { href: '/dashboard/pair', label: 'Connect Device', icon: Network },
-        { href: '/dashboard/deployments', label: 'Deployments', icon: ShieldCheck },
-        { href: '/dashboard/billing', label: 'Coins 🪙', icon: CircleDollarSign },
-        ...(user?.role === 'admin' ? [{ href: '/admin', label: 'Admin Panel', icon: AlertTriangle }] : []),
+        { href: '/dashboard', label: t.dashboard, icon: LayoutDashboard },
+        { href: '/dashboard/pair', label: t.pair, icon: Network },
+        { href: '/dashboard/configurations', label: t.configurations, icon: Settings2 },
+        { href: '/dashboard/deployments', label: t.deployments, icon: ShieldCheck },
+        { href: '/dashboard/referrals', label: t.referrals, icon: Users },
+        { href: '/dashboard/notifications', label: t.notifications, icon: Activity },
+        { href: '/dashboard/billing', label: t.billing, icon: CircleDollarSign },
+        ...(user?.role === 'admin' ? [{ href: '/admin', label: t.admin_panel, icon: AlertTriangle }] : []),
     ];
 
     const content = (
         <div className="flex flex-col h-full w-full">
             <div className="p-6">
-                {isMobile && <DialogTitle className="sr-only">Navigation Menu</DialogTitle>}
-                <h2 className="text-xl font-semibold tracking-tight text-white flex items-center gap-3 uppercase">
+                <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-3 uppercase">
                     <ShieldCheck className="h-5 w-5 text-primary" />
                     Tervux Cloud
                 </h2>
-                <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest mt-1">
-                    Securely connected
+                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1 italic opacity-70">
+                    {t.securely_connected}
                 </p>
             </div>
 
@@ -37,23 +45,30 @@ export function Sidebar({ isMobile }: { isMobile?: boolean }) {
                         <Link
                             key={link.href}
                             href={link.href}
-                            className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${isActive
-                                ? 'bg-primary/10 border border-primary/20 text-primary'
-                                : 'bg-white/5 border border-transparent hover:bg-white/10 hover:border-white/10 text-gray-400 hover:text-white'
-                                }`}
+                            className={cn(
+                                "flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-300 group border",
+                                isActive
+                                    ? "bg-primary border-primary text-black shadow-lg shadow-primary/20"
+                                    : "bg-white/5 border-transparent text-gray-400 hover:bg-white/10 hover:border-white/10 hover:text-white"
+                            )}
                         >
-                            <Icon className={`w-4 h-4 ${isActive ? 'text-primary' : 'text-gray-500 group-hover:text-primary'}`} />
-                            <span className="text-xs font-bold uppercase tracking-widest">{link.label}</span>
+                            <Icon className={cn("w-4 h-4", isActive ? "text-black" : "text-gray-500 group-hover:text-primary transition-colors")} />
+                            <span className="text-[10px] font-black uppercase tracking-widest">{link.label}</span>
                         </Link>
                     )
                 })}
             </nav>
 
             <div className="p-4 mt-auto">
-                <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col items-center text-center space-y-1">
-                    <Activity className="h-4 w-4 text-primary animate-pulse mb-1" />
-                    <p className="text-[8px] font-bold uppercase tracking-widest text-primary/70">Service Status</p>
-                    <p className="text-[10px] font-black text-primary tracking-widest">ONLINE</p>
+                <div className="p-6 rounded-[2rem] border border-primary/20 bg-primary/5 flex flex-col items-center text-center space-y-2 backdrop-blur-md">
+                    <div className="relative">
+                        <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full animate-pulse"></div>
+                        <Activity className="h-5 w-5 text-primary relative z-10" />
+                    </div>
+                    <div>
+                        <p className="text-[8px] font-black uppercase tracking-widest text-primary/50">{t.service_status}</p>
+                        <p className="text-[10px] font-black text-primary tracking-[0.2em]">{t.online}</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -64,7 +79,7 @@ export function Sidebar({ isMobile }: { isMobile?: boolean }) {
     }
 
     return (
-        <aside className="w-64 border-r border-border bg-card/50 backdrop-blur-xl h-full flex flex-col hidden lg:flex">
+        <aside className="w-68 border-r border-white/5 bg-black/40 backdrop-blur-3xl h-full flex flex-col hidden lg:flex">
             {content}
         </aside>
     );

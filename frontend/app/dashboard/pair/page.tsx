@@ -1,18 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Terminal, Copy, Share2, Zap, AlertCircle, Loader2, Check, ShieldCheck, Activity, RefreshCcw, Plus, Globe } from "lucide-react";
+import { Terminal, Copy, Zap, AlertCircle, Loader2, Check, ShieldCheck, Activity, RefreshCcw, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { QRCodeSVG } from "qrcode.react";
 import { io, Socket } from "socket.io-client";
 import { toast } from "sonner";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useAuthStore, api } from "@/store/useAuthStore";
 import { useRouter } from "next/navigation";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
 
 export default function PairPage() {
+    const { language } = useLocaleStore();
+    const t = translations[language];
     const [method, setMethod] = useState<"qr" | "code">("qr");
     const [phone, setPhone] = useState("");
     const [status, setStatus] = useState<"idle" | "loading" | "waiting" | "linked" | "error" | "queued">("idle");
@@ -20,11 +23,12 @@ export default function PairPage() {
     const [qrCode, setQrCode] = useState("");
     const [pairingCode, setPairingCode] = useState("");
     const [errorMsg, setErrorMsg] = useState("");
-    const [socket, setSocket] = useState<Socket | null>(null);
+    const socketRef = useRef<Socket | null>(null);
 
     const [sessionId, setSessionId] = useState("");
-    const { createPairingReq, fetchSessions } = useSessionStore();
-    const { token } = useAuthStore();
+    const fetchSessions = useSessionStore(state => state.fetchSessions);
+    const createPairingReq = useSessionStore(state => state.createPairingReq);
+    const { token, user } = useAuthStore();
     const router = useRouter();
 
     useEffect(() => {
@@ -40,7 +44,7 @@ export default function PairPage() {
             reconnectionDelay: 2000
         });
 
-        setSocket(newSocket);
+        socketRef.current = newSocket;
 
         newSocket.on("connect", () => console.log("Socket connected:", newSocket.id));
         newSocket.on("connect_error", (err) => console.error("Socket connection error:", err.message));
@@ -59,7 +63,6 @@ export default function PairPage() {
 
         newSocket.on("queue_update", (data: { position: number }) => {
             setStatus(prev => {
-                // Don't override waiting (code/QR visible) or linked states
                 if (prev === "waiting" || prev === "linked") return prev;
                 setQueuePosition(data.position);
                 return "queued";
@@ -69,13 +72,13 @@ export default function PairPage() {
         newSocket.on("queue_ready", (data: { message?: string }) => {
             setStatus(prev => {
                 if (prev === "waiting" || prev === "linked") return prev;
-                toast.success(data.message || "Your turn! Generating connection...");
+                toast.success(data.message || (language === "sw" ? "Zamu yako! Inatengeneza muunganisho..." : "Your turn! Generating connection..."));
                 return "loading";
             });
         });
 
         newSocket.on("pairing_success", (data: { message?: string; sessionId: string }) => {
-            toast.success(data.message || "Device connected successfully!");
+            toast.success(data.message || (language === "sw" ? "Kifaa kimeunganishwa kwa mafanikio!" : "Device connected successfully!"));
             setStatus("linked");
             setSessionId(data.sessionId);
             fetchSessions();
@@ -87,33 +90,31 @@ export default function PairPage() {
 
         newSocket.on("pairing_error", (err: { error?: string }) => {
             setStatus(prev => {
-                // Don't override waiting (code/QR visible) or linked states  
-                // The user might still be entering the code
                 if (prev === "waiting" || prev === "linked") {
-                    // Show as toast only so user sees it without losing the code
-                    toast.error(err.error || "Connection issue — your code may still work. Enter it quickly.");
+                    toast.error(err.error || (language === "sw" ? "Suala la muunganisho — kodi yako inaweza bado kufanya kazi. Ingiza haraka." : "Connection issue — your code may still work. Enter it quickly."));
                     return prev;
                 }
-                setErrorMsg(err.error || "Connection Error");
-                toast.error(err.error || "Failed to connect device");
+                setErrorMsg(err.error || (language === "sw" ? "Hitilafu ya Muunganisho" : "Connection Error"));
+                toast.error(err.error || (language === "sw" ? "Imeshindwa kuunganisha kifaa" : "Failed to connect device"));
                 return "error";
             });
         });
 
         return () => {
             newSocket.disconnect();
+            socketRef.current = null;
         };
-    }, [token, fetchSessions, router]);
+    }, [token, fetchSessions, router, language]);
 
     const handlePair = async () => {
         if (phone.startsWith("+") || phone.startsWith("0")) {
-            setErrorMsg("Invalid format. Use full international format without + or leading zero (e.g. 2557...)");
+            setErrorMsg(language === "sw" ? "Umbizo batili. Tumia umbizo kamili la kimataifa bila + au sifuri ya kwanza (mf. 2557...)" : "Invalid format. Use full international format without + or leading zero (e.g. 2557...)");
             setStatus("error");
             return;
         }
 
         if (phone.replace(/\D/g, "").length < 10) {
-            setErrorMsg("Phone number is too short. Please include country code (e.g. 255712345678).");
+            setErrorMsg(language === "sw" ? "Namba ya simu ni fupi mno. Tafadhali jumuisha kodi ya nchi (mf. 255712345678)." : "Phone number is too short. Please include country code (e.g. 255712345678).");
             setStatus("error");
             return;
         }
@@ -123,11 +124,10 @@ export default function PairPage() {
         setQrCode("");
         setPairingCode("");
 
-        // Client-side timeout: if we're still in loading after 90s, show error
         const loadingTimeout = setTimeout(() => {
             setStatus(prev => {
                 if (prev === "loading") {
-                    setErrorMsg("Connection timed out. The server took too long. Please try again.");
+                    setErrorMsg(language === "sw" ? "Muda wa muunganisho umeisha. Server imechukua muda mrefu mno. Tafadhali jaribu tena." : "Connection timed out. The server took too long. Please try again.");
                     return "error";
                 }
                 return prev;
@@ -135,6 +135,14 @@ export default function PairPage() {
         }, 90000);
 
         try {
+            if (socketRef.current) {
+                socketRef.current.emit("start_pairing", {
+                    method,
+                    userId: user?._id,
+                    phoneNumber: method === "code" ? phone.replace(/\D/g, "") : null
+                });
+            }
+
             const data = await createPairingReq(phone.replace(/\D/g, ""), method);
             if (data.status === "queued") {
                 clearTimeout(loadingTimeout);
@@ -156,7 +164,7 @@ export default function PairPage() {
 
     const handleCopy = () => {
         navigator.clipboard.writeText(pairingCode);
-        toast.success("Code copied to clipboard");
+        toast.success(language === "sw" ? "Kodi imenakiliwa!" : "Code copied to clipboard");
     };
 
     return (
@@ -174,10 +182,10 @@ export default function PairPage() {
                                 <div className="space-y-1">
                                     <h2 className="text-base sm:text-lg lg:text-xl font-semibold tracking-tight text-white flex items-center gap-3">
                                         <Terminal className="h-5 w-5 text-primary" />
-                                        Connect Your Device
+                                        {t.connect_your_device}
                                     </h2>
                                     <p className="text-[9px] sm:text-[10px] font-semibold text-gray-500 uppercase tracking-widest">
-                                        Link your WhatsApp account
+                                        {t.link_whatsapp}
                                     </p>
                                 </div>
                                 <div className="flex gap-1.5 opacity-30">
@@ -194,14 +202,14 @@ export default function PairPage() {
                                     className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all duration-300 ${method === 'qr' ? 'bg-primary text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
                                     disabled={status === "loading" || status === "waiting"}
                                 >
-                                    QR Code
+                                    {t.qr_code}
                                 </button>
                                 <button
                                     onClick={() => setMethod("code")}
                                     className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all duration-300 ${method === 'code' ? 'bg-primary text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
                                     disabled={status === "loading" || status === "waiting"}
                                 >
-                                    Pairing Code
+                                    {t.pairing_code}
                                 </button>
                             </div>
 
@@ -212,7 +220,7 @@ export default function PairPage() {
                                         <div className="space-y-4">
                                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 px-1">
                                                 <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2">
-                                                    Phone Number
+                                                    {t.phone_number}
                                                 </label>
                                                 <span className="text-[10px] font-bold text-primary/70 uppercase">Format: 255...</span>
                                             </div>
@@ -222,14 +230,14 @@ export default function PairPage() {
                                                 </div>
                                                 <input
                                                     type="tel"
-                                                    placeholder="Phone Module ID (e.g. 255...)"
+                                                    placeholder="2557..."
                                                     value={phone}
                                                     onChange={(e) => setPhone(e.target.value)}
                                                     className="w-full h-14 pl-11 bg-white/5 border border-white/10 hover:border-white/20 focus:border-primary/50 text-base font-semibold tracking-tight text-white placeholder:text-gray-700 transition-all rounded-xl outline-none focus:ring-1 focus:ring-primary/50"
                                                 />
                                             </div>
                                             <p className="text-[9px] text-gray-600 font-medium uppercase tracking-wider ml-1">
-                                                * Omit leading zero. Include country prefix for global signal lock.
+                                                {language === "sw" ? "* Usiongeze sifuri ya mwanzo. Jumuisha kodi ya nchi." : "* Omit leading zero. Include country prefix."}
                                             </p>
                                         </div>
 
@@ -237,7 +245,7 @@ export default function PairPage() {
                                             onClick={handlePair}
                                             className="w-full h-14 rounded-xl bg-primary hover:bg-primary/90 text-black font-bold uppercase tracking-widest text-[11px] shadow-lg shadow-primary/20 transition-all flex items-center justify-center gap-2 group mt-4 hover:scale-[1.01]"
                                         >
-                                            {method === "qr" ? "Generate QR Code" : "Get Pairing Code"}
+                                            {method === "qr" ? t.generate_qr : t.get_pairing_code}
                                             <Zap className="h-3.5 w-3.5 group-hover:translate-x-1 transition-transform" />
                                         </Button>
                                     </div>
@@ -247,7 +255,7 @@ export default function PairPage() {
                                     <div className="flex flex-col items-center justify-center gap-4 text-primary animate-fade-in py-12">
                                         <Loader2 className="h-12 w-12 animate-spin" />
                                         <p className="text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">
-                                            Preparing connection...
+                                            {t.preparing_connection}
                                         </p>
                                     </div>
                                 )}
@@ -263,10 +271,10 @@ export default function PairPage() {
                                         </div>
                                         <div className="space-y-2">
                                             <p className="text-[12px] font-bold uppercase tracking-[0.2em] text-amber-500 font-mono">
-                                                Server is busy
+                                                {t.server_busy}
                                             </p>
                                             <p className="text-[10px] font-bold uppercase tracking-widest text-amber-400/70 max-w-xs mx-auto">
-                                                Too many people are linking right now. You have to wait for your turn. Don't leave or close the window!
+                                                {t.queue_desc}
                                             </p>
                                         </div>
                                         <Button
@@ -277,7 +285,7 @@ export default function PairPage() {
                                             }}
                                             className="mt-4 h-10 w-32 rounded-xl text-gray-500 hover:text-white hover:bg-white/5 font-bold text-[9px] tracking-widest uppercase transition-all"
                                         >
-                                            Cancel
+                                            {t.cancel}
                                         </Button>
                                     </div>
                                 )}
@@ -287,7 +295,7 @@ export default function PairPage() {
                                         <div className="flex flex-col items-center text-center space-y-4">
                                             <div className="space-y-2">
                                                 <h3 className="text-xl font-bold tracking-tight text-primary flex items-center justify-center gap-2">
-                                                    <span className="animate-pulse">Waiting for connection...</span>
+                                                    <span className="animate-pulse">{t.waiting_connection}</span>
                                                 </h3>
                                             </div>
                                         </div>
@@ -324,7 +332,7 @@ export default function PairPage() {
                                             <div className="flex flex-wrap justify-center gap-4">
                                                 <div className="flex gap-2">
                                                     <Button variant="outline" onClick={handleCopy} className="h-8 px-4 rounded-full border border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary hover:text-primary text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all">
-                                                        <Copy className="h-3 w-3 mr-2" /> Copy
+                                                        <Copy className="h-3 w-3 mr-2" /> {language === "sw" ? "Nakili" : "Copy"}
                                                     </Button>
                                                 </div>
                                             </div>
@@ -336,7 +344,7 @@ export default function PairPage() {
                                                 onClick={() => { setStatus("idle"); setQrCode(""); setPairingCode(""); }}
                                                 className="flex-1 h-12 rounded-xl text-white hover:bg-white/10 bg-white/5 border border-white/10 font-bold text-xs tracking-widest uppercase transition-all"
                                             >
-                                                Cancel
+                                                {t.cancel}
                                             </Button>
                                         </div>
                                     </div>
@@ -348,7 +356,7 @@ export default function PairPage() {
                                             <Check className="h-8 w-8" />
                                         </div>
                                         <p className="text-[12px] font-bold uppercase tracking-[0.3em]">
-                                            Device Connected
+                                            {t.device_connected}
                                         </p>
                                     </div>
                                 )}
@@ -360,7 +368,7 @@ export default function PairPage() {
                                             {errorMsg}
                                         </p>
                                         <Button variant="outline" onClick={() => setStatus("idle")} className="mt-4 border-white/10 text-white hover:bg-white/10 uppercase tracking-widest text-[10px]">
-                                            Try Again
+                                            {language === "sw" ? "Jaribu Tena" : "Try Again"}
                                         </Button>
                                     </div>
                                 )}
@@ -372,18 +380,18 @@ export default function PairPage() {
                     <div className="grid grid-cols-3 gap-4 mt-6">
                         <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 hover:bg-white/10 transition-colors cursor-default">
                             <Activity className="h-3.5 w-3.5 text-gray-500" />
-                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600">Latency</p>
+                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600">{t.latency}</p>
                             <p className="text-[10px] font-semibold text-white tracking-widest">14ms</p>
                         </div>
                         <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 hover:bg-white/10 transition-colors cursor-default">
                             <ShieldCheck className="h-3.5 w-3.5 text-gray-500" />
-                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600">Encryption</p>
-                            <p className="text-[10px] font-semibold text-white tracking-widest">AES-256</p>
+                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600">{t.encryption}</p>
+                            <p className="text-[10px] font-semibold text-white tracking-widest">{t.encryption_aes}</p>
                         </div>
                         <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 hover:bg-white/10 transition-colors cursor-default">
                             <RefreshCcw className="h-3.5 w-3.5 text-gray-500" />
-                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600">Uptime</p>
-                            <p className="text-[10px] font-semibold text-white tracking-widest">99.9%</p>
+                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600">{t.uptime}</p>
+                            <p className="text-[10px] font-semibold text-white tracking-widest">{t.uptime_stats}</p>
                         </div>
                     </div>
                 </div>
@@ -392,30 +400,32 @@ export default function PairPage() {
                 <div className="lg:col-span-5 space-y-6 animate-slide-right hidden lg:block">
                     <div className="p-8 rounded-3xl border border-border bg-card/50 backdrop-blur-md h-full">
                         <div className="space-y-1 mb-8">
-                            <h2 className="text-lg font-semibold text-white tracking-tight uppercase">Usage Terms & Safety</h2>
-                            <p className="text-[10px] font-semibold text-amber-500 tracking-widest uppercase">Risk Disclaimer</p>
+                            <h2 className="text-lg font-semibold text-white tracking-tight uppercase">{t.usage_terms_safety}</h2>
+                            <p className="text-[10px] font-semibold text-amber-500 tracking-widest uppercase">{t.risk_disclaimer}</p>
                         </div>
 
                         <div className="space-y-6">
                             <div className="space-y-3 p-6 rounded-2xl bg-white/5 border border-white/10 text-amber-500">
                                 <div className="flex items-center gap-2">
                                     <AlertCircle className="w-4 h-4" />
-                                    <span className="text-[10px] font-bold uppercase tracking-widest">Account Responsibility</span>
+                                    <span className="text-[10px] font-bold uppercase tracking-widest">{t.account_responsibility}</span>
                                 </div>
                                 <p className="text-xs text-gray-400 leading-relaxed font-medium">
-                                    Any usage issues or bans affecting your WhatsApp number <span className="text-white font-bold">are not our responsibility</span>.
-                                    You are solely responsible for how you use the bot, and any action taken by WhatsApp against your account is your own liability.
+                                    {t.account_responsibility_desc.split('not our responsibility')[0]}
+                                    <span className="text-white font-bold">{language === "sw" ? "si jukumu letu" : "not our responsibility"}</span>
+                                    {t.account_responsibility_desc.split('not our responsibility')[1] || t.account_responsibility_desc.split('si jukumu letu')[1]}
                                 </p>
                             </div>
 
                             <div className="space-y-3 p-6 rounded-2xl bg-primary/5 border border-primary/10">
                                 <div className="flex items-center gap-2 text-primary">
                                     <ShieldCheck className="w-4 h-4" />
-                                    <span className="text-[10px] font-bold uppercase tracking-widest">Data Protection & Risk</span>
+                                    <span className="text-[10px] font-bold uppercase tracking-widest">{t.data_protection_risk}</span>
                                 </div>
                                 <p className="text-xs text-gray-400 leading-relaxed font-medium">
-                                    While we protect user data and session tokens with encryption, our service involves third-party modules that carry inherent risks.
-                                    <span className="text-white font-bold"> This service is not 100% free;</span> you must pay for hosting and deployment via coins or subscriptions.
+                                    {t.data_protection_risk_desc.split('not 100% free')[0].split('si bure 100%')[0]}
+                                    <span className="text-white font-bold">{language === "sw" ? "si bure 100%" : "not 100% free"}</span>
+                                    {t.data_protection_risk_desc.split('not 100% free')[1] || t.data_protection_risk_desc.split('si bure 100%')[1]}
                                 </p>
                             </div>
                         </div>

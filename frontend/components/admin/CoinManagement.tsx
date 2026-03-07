@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/store/useAuthStore";
 import {
-    Coins, Search, Loader2, Plus, Minus, X, Send, ArrowUpRight, ArrowDownRight
+    Coins, Search, Loader2, Plus, Minus, X, Send, ArrowUpRight, ArrowDownRight, Globe, Zap, CheckCircle2
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -25,6 +25,13 @@ export function CoinManagement() {
     const [reason, setReason] = useState("");
     const [sending, setSending] = useState(false);
     const [mode, setMode] = useState<"add" | "remove">("add");
+
+    // Global bonus state
+    const [bonusAmount, setBonusAmount] = useState("");
+    const [bonusReason, setBonusReason] = useState("");
+    const [bonusMessage, setBonusMessage] = useState("");
+    const [sendingBonus, setSendingBonus] = useState(false);
+    const [bonusResult, setBonusResult] = useState<{ usersRewarded: number; totalCoinsDistributed: number } | null>(null);
 
     const fetchUsers = useCallback(async () => {
         setIsLoading(true);
@@ -74,6 +81,32 @@ export function CoinManagement() {
 
     const totalCoins = users.reduce((sum, u) => sum + u.coins, 0);
 
+    const handleBonusAll = async () => {
+        const amt = Number(bonusAmount);
+        if (!amt || amt <= 0) return toast.error("Enter a valid coin amount");
+        if (!bonusReason.trim()) return toast.error("Please provide a reason for the bonus");
+        if (!confirm(`Give +${amt} coins to ALL users? This cannot be undone.`)) return;
+        setSendingBonus(true);
+        setBonusResult(null);
+        try {
+            const res = await api.post("/admin/users/bonus-all", {
+                amount: amt,
+                reason: bonusReason,
+                message: bonusMessage || undefined
+            });
+            setBonusResult(res.data);
+            setBonusAmount("");
+            setBonusReason("");
+            setBonusMessage("");
+            toast.success(`✅ ${res.data.usersRewarded} users received +${amt} coins!`);
+            fetchUsers();
+        } catch (err: any) {
+            toast.error(err.response?.data?.error || "Failed to distribute bonus");
+        } finally {
+            setSendingBonus(false);
+        }
+    };
+
     return (
         <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -81,6 +114,104 @@ export function CoinManagement() {
             transition={{ delay: 0.3 }}
             className="space-y-4"
         >
+            {/* Global Bonus Banner */}
+            <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/60 via-emerald-900/20 to-emerald-950/60 p-6 space-y-5">
+                <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                        <Globe className="h-5 w-5 text-emerald-400" />
+                    </div>
+                    <div>
+                        <h3 className="text-sm font-black text-white uppercase tracking-tight">Give Bonus to All Users</h3>
+                        <p className="text-[9px] font-bold text-emerald-500/50 uppercase tracking-widest">
+                            Distributes coins to every registered user + sends each a notification
+                        </p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Amount */}
+                    <div className="space-y-1.5">
+                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 block">Coins per User *</label>
+                        <div className="relative">
+                            <Coins className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-emerald-400" />
+                            <input
+                                type="number"
+                                min={1}
+                                value={bonusAmount}
+                                onChange={e => setBonusAmount(e.target.value)}
+                                placeholder="e.g. 50"
+                                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-emerald-500/20 bg-black/40 text-sm font-black text-emerald-400 placeholder:text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 tracking-widest"
+                            />
+                        </div>
+                        <div className="flex gap-1.5">
+                            {[10, 25, 50, 100].map(v => (
+                                <button key={v} onClick={() => setBonusAmount(String(v))}
+                                    className="flex-1 py-1 rounded-lg bg-white/5 border border-white/10 text-[9px] font-black uppercase text-gray-400 hover:bg-emerald-500/10 hover:text-emerald-400 transition-all">
+                                    {v}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Reason */}
+                    <div className="space-y-1.5">
+                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 block">Reason * (shown to users)</label>
+                        <input
+                            type="text"
+                            value={bonusReason}
+                            onChange={e => setBonusReason(e.target.value)}
+                            placeholder="e.g. Platform launch bonus, Holiday gift..."
+                            className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-black/40 text-xs font-bold text-white placeholder:text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 tracking-wide"
+                        />
+                    </div>
+
+                    {/* Optional custom message */}
+                    <div className="space-y-1.5">
+                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 block">Custom Notification Message (optional)</label>
+                        <input
+                            type="text"
+                            value={bonusMessage}
+                            onChange={e => setBonusMessage(e.target.value)}
+                            placeholder="Leave blank for default message..."
+                            className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-black/40 text-xs font-bold text-white placeholder:text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 tracking-wide"
+                        />
+                    </div>
+                </div>
+
+                {/* Summary + Submit */}
+                <div className="flex flex-col sm:flex-row items-center gap-4">
+                    {bonusAmount && Number(bonusAmount) > 0 && (
+                        <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black text-emerald-400 uppercase tracking-widest">
+                            <Zap className="h-3 w-3" />
+                            {Number(bonusAmount)} coins × {users.length} users = {Number(bonusAmount) * users.length} total coins
+                        </div>
+                    )}
+                    <button
+                        onClick={handleBonusAll}
+                        disabled={sendingBonus || !bonusAmount || !bonusReason.trim()}
+                        className="sm:ml-auto flex items-center gap-2 px-8 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-black text-[10px] uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20"
+                    >
+                        {sendingBonus ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+                        {sendingBonus ? "Distributing..." : "Give Bonus to All"}
+                    </button>
+                </div>
+
+                {/* Success result */}
+                {bonusResult && (
+                    <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                        <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                        <div>
+                            <p className="text-xs font-black text-white">
+                                ✅ {bonusResult.usersRewarded} users each received {bonusResult.totalCoinsDistributed / bonusResult.usersRewarded} coins
+                            </p>
+                            <p className="text-[9px] font-bold text-emerald-500/60 uppercase tracking-widest">
+                                {bonusResult.totalCoinsDistributed} total coins distributed · All users notified
+                            </p>
+                        </div>
+                    </div>
+                )}
+            </div>
+
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
@@ -124,8 +255,8 @@ export function CoinManagement() {
                                     key={user._id}
                                     onClick={() => setSelectedUser(user)}
                                     className={`w-full flex items-center justify-between px-5 py-3.5 transition-all text-left ${selectedUser?._id === user._id
-                                            ? "bg-yellow-500/10 border-l-2 border-yellow-500"
-                                            : "hover:bg-white/[0.04] border-l-2 border-transparent"
+                                        ? "bg-yellow-500/10 border-l-2 border-yellow-500"
+                                        : "hover:bg-white/[0.04] border-l-2 border-transparent"
                                         }`}
                                 >
                                     <div className="min-w-0 flex-1">
@@ -169,8 +300,8 @@ export function CoinManagement() {
                                 <button
                                     onClick={() => setMode("add")}
                                     className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all ${mode === "add"
-                                            ? "bg-emerald-500/20 text-emerald-400"
-                                            : "bg-white/5 text-gray-500 hover:bg-white/10"
+                                        ? "bg-emerald-500/20 text-emerald-400"
+                                        : "bg-white/5 text-gray-500 hover:bg-white/10"
                                         }`}
                                 >
                                     <ArrowUpRight className="w-3.5 h-3.5" />
@@ -179,8 +310,8 @@ export function CoinManagement() {
                                 <button
                                     onClick={() => setMode("remove")}
                                     className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all ${mode === "remove"
-                                            ? "bg-red-500/20 text-red-400"
-                                            : "bg-white/5 text-gray-500 hover:bg-white/10"
+                                        ? "bg-red-500/20 text-red-400"
+                                        : "bg-white/5 text-gray-500 hover:bg-white/10"
                                         }`}
                                 >
                                     <ArrowDownRight className="w-3.5 h-3.5" />
@@ -231,8 +362,8 @@ export function CoinManagement() {
                                 onClick={handleSubmit}
                                 disabled={sending || amount <= 0}
                                 className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 ${mode === "add"
-                                        ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/30"
-                                        : "bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30"
+                                    ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/30"
+                                    : "bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30"
                                     }`}
                             >
                                 {sending ? (

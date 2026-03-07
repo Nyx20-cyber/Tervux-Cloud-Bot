@@ -36,6 +36,69 @@ const userSchema = new mongoose.Schema({
     isBanned: {
         type: Boolean,
         default: false
+    },
+    referralCode: {
+        type: String,
+        unique: true,
+        sparse: true,
+        trim: true
+    },
+    referralCodeExpiresAt: {
+        type: Date,
+        default: null
+    },
+    referredByPaid: {
+        type: Boolean,
+        default: false
+    },
+    hasGeneratedCode: {
+        type: Boolean,
+        default: false
+    },
+    referredBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null
+    },
+    isReferralKing: {
+        type: Boolean,
+        default: false
+    },
+    referralKingSince: {
+        type: Date,
+        default: null
+    },
+    weeklyReferralCount: {
+        type: Number,
+        default: 0
+    },
+    lastDailyClaim: {
+        type: Date,
+        default: null
+    },
+    dailyClaimCount: {
+        type: Number,
+        default: 0
+    },
+    badges: {
+        type: [String],
+        default: ["pioneer"] // All new users get Pioneer automatically
+    },
+    isVIP: {
+        type: Boolean,
+        default: false
+    },
+    totalDeployments: {
+        type: Number,
+        default: 0
+    },
+    totalReferrals: {
+        type: Number,
+        default: 0
+    },
+    totalCoinsSpent: {
+        type: Number,
+        default: 0
     }
 }, {
     timestamps: true

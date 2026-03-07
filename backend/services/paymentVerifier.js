@@ -4,6 +4,7 @@ import Plan from "../models/Plan.js";
 import Notification from "../models/Notification.js";
 import { checkTransactionStatus } from "./paymentService.js";
 import { emitToUser } from "./socketService.js";
+import { getSettings } from "../models/SystemSettings.js";
 
 /**
  * Background Payment Verifier
@@ -58,7 +59,54 @@ export async function verifyPendingPayments() {
                             if (user) {
                                 user.coins = (user.coins || 0) + (plan.coinsAmount || 0);
                                 await user.save();
+                                emitToUser(user._id, "balance_update", { coins: user.coins });
                                 console.log(`   ✅ [${payment.fastlipaTransactionId}] Added ${plan.coinsAmount} coins to user ${user._id}`);
+
+                                // Referral deferred reward logic
+                                if (user.referredBy && !user.referredByPaid) {
+                                    const settings = await getSettings();
+                                    const bonusAmount = settings.referralBonus || 10;
+                                    const referrer = await User.findById(user.referredBy);
+                                    if (referrer) {
+                                        referrer.coins = (referrer.coins || 0) + bonusAmount;
+                                        referrer.totalReferrals = (referrer.totalReferrals || 0) + 1;
+                                        referrer.weeklyReferralCount = (referrer.weeklyReferralCount || 0) + 1;
+
+                                        let earnedNewBadge = false;
+                                        let earnedVIP = false;
+
+                                        // Badge check
+                                        if (referrer.totalReferrals >= 10 && !referrer.badges.includes("social_butterfly")) {
+                                            referrer.badges.push("social_butterfly");
+                                            referrer.badges = referrer.badges.filter(b => b !== "pioneer");
+                                            earnedNewBadge = true;
+                                        }
+                                        if (referrer.totalReferrals >= 50 && !referrer.isVIP) {
+                                            referrer.isVIP = true;
+                                            earnedVIP = true;
+                                        }
+
+                                        await referrer.save();
+                                        emitToUser(referrer._id, "balance_update", { coins: referrer.coins });
+
+                                        // Update user to prevent multiple rewards
+                                        user.referredByPaid = true;
+                                        await user.save();
+
+                                        // Notify Referrer
+                                        let badgeMsg = earnedNewBadge ? "\n\nYou also unlocked the 'Social Butterfly' badge! 🦋" : "";
+                                        let vipMsg = earnedVIP ? "\n\n🎉 Incredible! You have unlocked VIP Status! 💎" : "";
+
+                                        const referralNotify = await Notification.create({
+                                            userId: referrer._id,
+                                            title: "Referral Reward Earned! ✅",
+                                            message: `Success! A user you referred just made their first purchase. You've earned ${bonusAmount} free coins 🪙!${badgeMsg}${vipMsg}`,
+                                            type: "success"
+                                        });
+                                        emitToUser(referrer._id, "new_notification", referralNotify);
+                                        console.log(`   🎁 [${payment.fastlipaTransactionId}] Awarded 10 referral coins to ${referrer._id}`);
+                                    }
+                                }
 
                                 // Notification
                                 await Notification.create({

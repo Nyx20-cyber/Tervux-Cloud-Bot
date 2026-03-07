@@ -2,17 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Activity, ShieldCheck, RefreshCcw, Network, PauseCircle, PlayCircle, Trash2, Coins, Rocket } from "lucide-react";
+import { Activity, ShieldCheck, RefreshCcw, Network, Coins, Rocket, Megaphone, Info, AlertTriangle, Wrench, Sparkles, Tag, ChevronRight } from "lucide-react";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { io } from "socket.io-client";
 import { Button } from "@/components/ui/button";
-import { format } from "date-fns";
 import Link from "next/link";
-import { toast } from "sonner";
 import { api } from "@/store/useAuthStore";
-import { ChevronRight, Megaphone, Info, AlertTriangle, Wrench, Sparkles, Tag } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
+import { DailyCheckIn } from "@/components/dashboard/DailyCheckIn";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
+import { Loader2, TrendingUp, CreditCard, UserPlus, Bell, Settings, ArrowUpRight, History } from "lucide-react";
 
 interface AnnouncementRecord {
     _id: string;
@@ -24,23 +26,25 @@ interface AnnouncementRecord {
     createdAt: string;
 }
 
-const typeConfig: Record<string, { icon: any; color: string; bg: string; border: string }> = {
-    info: { icon: Info, color: "text-sky-400", bg: "bg-sky-500/20", border: "border-sky-500/30" },
-    warning: { icon: AlertTriangle, color: "text-amber-400", bg: "bg-amber-500/20", border: "border-amber-500/30" },
-    maintenance: { icon: Wrench, color: "text-orange-400", bg: "bg-orange-500/20", border: "border-orange-500/30" },
-    update: { icon: Sparkles, color: "text-violet-400", bg: "bg-violet-500/20", border: "border-violet-500/30" },
-    promo: { icon: Tag, color: "text-emerald-400", bg: "bg-emerald-500/20", border: "border-emerald-500/30" },
-};
+interface DashboardStats {
+    referralGrowth: { date: string, count: number }[];
+    coinUsage: { date: string, amount: number }[];
+    summary: { totalCoins: number, referralCount: number };
+}
 
 export default function DashboardPage() {
     const { sessions, isLoading, fetchSessions, updateSessionLocally } = useSessionStore();
-    const { user, checkAuth } = useAuthStore();
+    const { user, setUser } = useAuthStore();
+    const { language } = useLocaleStore();
+    const t = translations[language];
     const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
+    const [referralBonus, setReferralBonus] = useState(10);
+    const [stats, setStats] = useState<DashboardStats | null>(null);
+    const [isStatsLoading, setIsStatsLoading] = useState(true);
 
     useEffect(() => {
         fetchSessions();
 
-        // Fetch active announcements
         const fetchAnnouncements = async () => {
             try {
                 const res = await api.get("/announcements");
@@ -51,6 +55,28 @@ export default function DashboardPage() {
         };
         fetchAnnouncements();
 
+        const fetchReferralInfo = async () => {
+            try {
+                const res = await api.get("/referral");
+                setReferralBonus(res.data.referralBonus || 10);
+            } catch (err) {
+                console.error("Failed to fetch referral info:", err);
+            }
+        };
+        fetchReferralInfo();
+
+        const fetchDashboardStats = async () => {
+            try {
+                const res = await api.get("/dashboard/stats");
+                setStats(res.data);
+            } catch (err) {
+                console.error("Failed to fetch dashboard stats:", err);
+            } finally {
+                setIsStatsLoading(false);
+            }
+        };
+        fetchDashboardStats();
+
         const backendUrl = process.env.NEXT_PUBLIC_API_URL || "";
         const socket = io(backendUrl, {
             auth: { token: localStorage.getItem("token") }
@@ -60,6 +86,12 @@ export default function DashboardPage() {
             updateSessionLocally(data.sessionId, { status: data.status });
         });
 
+        socket.on("balance_update", (data: { coins: number }) => {
+            if (user) {
+                setUser({ ...user, coins: data.coins });
+            }
+        });
+
         return () => {
             socket.disconnect();
         };
@@ -67,138 +99,288 @@ export default function DashboardPage() {
 
     const activeSessionsCount = sessions.filter(s => s.status === "active").length;
 
+    const containerVariants = {
+        hidden: { opacity: 0 },
+        visible: {
+            opacity: 1,
+            transition: { staggerChildren: 0.1 }
+        }
+    };
+
+    const itemVariants = {
+        hidden: { opacity: 0, y: 20 },
+        visible: { opacity: 1, y: 0 }
+    };
+
+    const shortcuts = [
+        { icon: CreditCard, label: language === "sw" ? "Sarafu" : "Top Up", path: "/dashboard/billing", color: "text-emerald-400", bg: "bg-emerald-400/10" },
+        { icon: UserPlus, label: language === "sw" ? "Alika" : "Refer", path: "/dashboard/referrals", color: "text-violet-400", bg: "bg-violet-400/10" },
+        { icon: Rocket, label: language === "sw" ? "Usambazaji" : "Deploy", path: "/dashboard/deployments", color: "text-primary", bg: "bg-primary/10" },
+        { icon: Bell, label: language === "sw" ? "Taarifa" : "Alerts", path: "/dashboard/notifications", color: "text-orange-400", bg: "bg-orange-400/10" },
+        { icon: Settings, label: language === "sw" ? "Mipangilio" : "Settings", path: "/dashboard/configurations", color: "text-blue-400", bg: "bg-blue-400/10" },
+        { icon: History, label: language === "sw" ? "Historia" : "Usage", path: "/dashboard/billing", color: "text-gray-400", bg: "bg-gray-400/10" },
+    ];
+
     return (
         <DashboardLayout>
-            <div className="space-y-8 animate-fade-in">
-                <div>
-                    <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
-                        <Activity className="h-8 w-8 text-primary" />
-                        Dashboard Overview
-                    </h1>
-                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">Manage your WhatsApp connections</p>
+            <motion.div
+                variants={containerVariants}
+                initial="hidden"
+                animate="visible"
+                className="space-y-8 max-w-7xl mx-auto"
+            >
+                {/* Modern Header */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                    <motion.div variants={itemVariants}>
+                        <h1 className="text-4xl font-black tracking-tight text-white flex items-center gap-4">
+                            <div className="p-3 rounded-2xl bg-primary/10 border border-primary/20">
+                                <Activity className="h-8 w-8 text-primary" />
+                            </div>
+                            <span className="bg-gradient-to-r from-white to-white/40 bg-clip-text text-transparent">{t.dashboard}</span>
+                        </h1>
+                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-2 ml-1 opacity-70">
+                            {language === "sw" ? "PANELI YAKO KUU YA USIMAMIZI" : "YOUR CENTRAL MANAGEMENT COMMAND"}
+                        </p>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="flex items-center gap-4 p-1.5 pr-6 rounded-full bg-white/5 border border-white/10 backdrop-blur-xl">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/40 flex items-center justify-center font-black text-black">
+                            {user?.name?.[0] || 'U'}
+                        </div>
+                        <div>
+                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest leading-none mb-1">{t.welcome_back}</p>
+                            <p className="text-sm font-black text-white uppercase tracking-tight">{user?.name || "Member"}</p>
+                        </div>
+                    </motion.div>
                 </div>
+
+                <motion.div variants={itemVariants}>
+                    <DailyCheckIn />
+                </motion.div>
 
                 {/* Stats Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="p-4 rounded-xl border border-yellow-500/30 bg-yellow-500/10 flex flex-col items-center text-center space-y-1 hover:bg-yellow-500/20 transition-colors cursor-default backdrop-blur-md">
-                        <Coins className="h-4 w-4 text-yellow-500 mb-1" />
-                        <p className="text-[8px] font-bold uppercase tracking-widest text-yellow-500/70">Coin Balance 🪙</p>
-                        <p className="text-xs font-bold text-yellow-500 tracking-widest">{user?.coins || 0}</p>
+                    {[
+                        { icon: Coins, label: language === "sw" ? "SALIO LA SARAFU" : "COIN BALANCE", value: user?.coins || 0, color: "text-yellow-500", detail: "🪙", pulse: true },
+                        { icon: ShieldCheck, label: language === "sw" ? "USALAMA" : "ENCRYPTION", value: "AES-256", color: "text-sky-400", detail: "🔐" },
+                        { icon: RefreshCcw, label: language === "sw" ? "MUDA WA KAZI" : "UPTIME", value: "99.9%", color: "text-emerald-400", detail: "⚡" },
+                        { icon: Network, label: language === "sw" ? "BO TI HAI" : "ACTIVE BOTS", value: activeSessionsCount, color: "text-primary", detail: "🤖" },
+                    ].map((stat, i) => (
+                        <motion.div
+                            key={i}
+                            variants={itemVariants}
+                            whileHover={{ scale: 1.02, y: -2 }}
+                            className="p-6 rounded-3xl border border-white/10 bg-[#0A0A0A]/40 backdrop-blur-2xl relative overflow-hidden group"
+                        >
+                            <div className={`absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity`}>
+                                <stat.icon size={64} />
+                            </div>
+                            <stat.icon className={`h-5 w-5 ${stat.color} mb-4 ${stat.pulse ? 'animate-pulse' : ''}`} />
+                            <div className="space-y-1 relative z-10">
+                                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-gray-500">{stat.label}</p>
+                                <p className="text-2xl font-black text-white tracking-tight">
+                                    {stat.value} <span className="text-sm opacity-50 ml-1">{stat.detail}</span>
+                                </p>
+                            </div>
+                        </motion.div>
+                    ))}
+                </div>
+
+                {/* Interactive Charts Section */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <motion.div variants={itemVariants} className="p-8 rounded-3xl border border-white/5 bg-[#0D0D0D]/60 backdrop-blur-3xl min-h-[350px] relative overflow-hidden group">
+                        <div className="flex items-center justify-between mb-8">
+                            <div>
+                                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">{language === "sw" ? "Mwenendo wa Mwaliko" : "Referral Growth"}</h3>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Last 7 Days Activity</p>
+                            </div>
+                            <div className="p-2 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400">
+                                <TrendingUp size={16} />
+                            </div>
+                        </div>
+
+                        {isStatsLoading ? (
+                            <div className="flex items-center justify-center h-48">
+                                <Loader2 className="animate-spin text-primary" />
+                            </div>
+                        ) : (
+                            <div className="h-56 w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={stats?.referralGrowth || []}>
+                                        <defs>
+                                            <linearGradient id="colorRef" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                                                <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff05" />
+                                        <XAxis dataKey="date" stroke="#ffffff20" fontSize={10} axisLine={false} tickLine={false} dy={10} />
+                                        <Tooltip
+                                            contentStyle={{ backgroundColor: '#111', border: '1px solid #ffffff10', borderRadius: '12px' }}
+                                            itemStyle={{ color: '#8b5cf6', fontSize: '12px', fontWeight: 'bold' }}
+                                        />
+                                        <Area type="monotone" dataKey="count" stroke="#8b5cf6" strokeWidth={2} fillOpacity={1} fill="url(#colorRef)" />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            </div>
+                        )}
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="p-8 rounded-3xl border border-white/5 bg-[#0D0D0D]/60 backdrop-blur-3xl min-h-[350px] relative overflow-hidden">
+                        <div className="flex items-center justify-between mb-8">
+                            <div>
+                                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">{language === "sw" ? "Ununuzi wa Sarafu" : "Coin Purchase Trend"}</h3>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Daily Investment Recap</p>
+                            </div>
+                            <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary">
+                                <Coins size={16} />
+                            </div>
+                        </div>
+
+                        {isStatsLoading ? (
+                            <div className="flex items-center justify-center h-48">
+                                <Loader2 className="animate-spin text-primary" />
+                            </div>
+                        ) : (
+                            <div className="h-56 w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={stats?.coinUsage || []}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff05" />
+                                        <XAxis dataKey="date" stroke="#ffffff20" fontSize={10} axisLine={false} tickLine={false} dy={10} />
+                                        <Tooltip
+                                            contentStyle={{ backgroundColor: '#111', border: '1px solid #ffffff10', borderRadius: '12px' }}
+                                            itemStyle={{ color: '#00f2ff', fontSize: '12px', fontWeight: 'bold' }}
+                                        />
+                                        <Line type="stepAfter" dataKey="amount" stroke="#00f2ff" strokeWidth={3} dot={{ r: 4, fill: '#00f2ff' }} activeDot={{ r: 6, stroke: '#000', strokeWidth: 2 }} />
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            </div>
+                        )}
+                    </motion.div>
+                </div>
+
+                {/* Quick Shortcuts */}
+                <div className="space-y-4">
+                    <div className="flex items-center gap-2 px-2">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        <h2 className="text-xs font-black text-white uppercase tracking-[0.3em] opacity-60">
+                            {language === "sw" ? "Njia za Mkato" : "Quick Commands"}
+                        </h2>
                     </div>
-                    <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 hover:bg-white/10 transition-colors cursor-default backdrop-blur-md">
-                        <ShieldCheck className="h-4 w-4 text-gray-400 mb-1" />
-                        <p className="text-[8px] font-bold uppercase tracking-widest text-gray-500">Encryption</p>
-                        <p className="text-xs font-semibold text-white tracking-widest">AES-256</p>
-                    </div>
-                    <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 hover:bg-white/10 transition-colors cursor-default backdrop-blur-md">
-                        <RefreshCcw className="h-4 w-4 text-gray-400 mb-1" />
-                        <p className="text-[8px] font-bold uppercase tracking-widest text-gray-500">Uptime</p>
-                        <p className="text-xs font-semibold text-white tracking-widest">99.9%</p>
-                    </div>
-                    <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col items-center text-center space-y-1 hover:bg-primary/10 transition-colors cursor-default backdrop-blur-md">
-                        <Network className="h-4 w-4 text-primary mb-1 animate-pulse" />
-                        <p className="text-[8px] font-bold uppercase tracking-widest text-primary/70">Connected Devices</p>
-                        <p className="text-xs font-bold text-primary tracking-widest">{activeSessionsCount}</p>
+                    <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+                        {shortcuts.map((s, i) => (
+                            <Link key={i} href={s.path}>
+                                <motion.div
+                                    variants={itemVariants}
+                                    whileHover={{ y: -5, scale: 1.02 }}
+                                    className="p-4 rounded-2xl border border-white/5 bg-[#0D0D0D]/40 backdrop-blur-xl flex flex-col items-center text-center gap-3 group hover:bg-white/5 transition-colors"
+                                >
+                                    <div className={`p-3 rounded-xl ${s.bg} ${s.color} group-hover:scale-110 transition-transform`}>
+                                        <s.icon size={18} />
+                                    </div>
+                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest group-hover:text-white transition-colors">
+                                        {s.label}
+                                    </span>
+                                </motion.div>
+                            </Link>
+                        ))}
                     </div>
                 </div>
 
-                {/* Announcements Section */}
-                <AnimatePresence>
-                    {announcements.length > 0 && (
+                {/* Main Content Area */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-12">
+                    <div className="lg:col-span-2 space-y-8">
+                        {/* Announcements Section */}
                         <div className="space-y-4">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 px-2">
                                 <Megaphone className="h-5 w-5 text-primary" />
-                                <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Announcements</h2>
+                                <h2 className="text-lg font-black tracking-tight text-white uppercase">{language === "sw" ? "Matangazo" : "Broadcasts"}</h2>
                             </div>
                             <div className="grid gap-4">
-                                {announcements.map((announcement, idx) => {
+                                {announcements.length === 0 ? (
+                                    <div className="p-8 text-center border border-white/5 rounded-3xl bg-white/5">
+                                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">No active broadcasts</p>
+                                    </div>
+                                ) : announcements.map((announcement, idx) => {
                                     const tc = typeConfig[announcement.type] || typeConfig.info;
                                     const Icon = tc.icon;
                                     return (
-                                        <motion.div
-                                            key={announcement._id}
-                                            initial={{ opacity: 0, x: -20 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            transition={{ delay: idx * 0.1 }}
-                                            className={`p-4 rounded-2xl border ${tc.border} ${tc.bg} backdrop-blur-md flex gap-4 items-start`}
-                                        >
-                                            <div className={`p-2 rounded-xl bg-black/20 border ${tc.border} shrink-0`}>
+                                        <motion.div key={announcement._id} variants={itemVariants} className={`p-6 rounded-3xl border ${tc.border} bg-[#0D0D0D]/40 backdrop-blur-xl flex gap-5 items-start hover:bg-[#111] transition-colors group`}>
+                                            <div className={`p-3.5 rounded-2xl bg-black/60 border ${tc.border} shrink-0 group-hover:scale-110 transition-transform`}>
                                                 <Icon className={`w-5 h-5 ${tc.color}`} />
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <h3 className="text-sm font-bold text-white tracking-wide">{announcement.title}</h3>
-                                                    <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">
-                                                        {format(new Date(announcement.createdAt), "MMM dd")}
-                                                    </span>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <h3 className="text-sm font-black text-white uppercase tracking-wide">{announcement.title}</h3>
+                                                    <span className="text-[9px] font-black text-white/40 uppercase tracking-[0.2em]">{new Date(announcement.createdAt).toLocaleDateString()}</span>
                                                 </div>
-                                                <p className="text-xs text-white/70 font-medium leading-relaxed">
-                                                    {announcement.message}
-                                                </p>
+                                                <p className="text-[11px] text-white/60 font-medium leading-relaxed">{announcement.message}</p>
                                             </div>
                                         </motion.div>
                                     );
                                 })}
                             </div>
                         </div>
-                    )}
-                </AnimatePresence>
-
-                {/* Deployed Sessions Summary */}
-                <div className="space-y-4 pt-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <h2 className="text-lg font-semibold tracking-tight text-white uppercase flex items-center gap-2">
-                            <Rocket className="h-5 w-5 text-primary" />
-                            Deployed Bots
-                        </h2>
-                        <Button asChild variant="outline" className="border-white/10 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-widest">
-                            <Link href="/dashboard/deployments">
-                                Manage Deployments <ChevronRight className="w-4 h-4 ml-2" />
-                            </Link>
-                        </Button>
                     </div>
 
-                    {isLoading && sessions.length === 0 ? (
-                        <div className="p-8 text-center text-gray-500 text-xs font-bold uppercase tracking-widest border border-white/10 border-dashed rounded-xl bg-white/5">
-                            Loading active bots...
-                        </div>
-                    ) : sessions.filter(s => !!s.expiresAt).length === 0 ? (
-                        <div className="p-8 text-center border border-white/10 border-dashed rounded-xl bg-white/5 flex flex-col items-center space-y-3">
-                            <p className="text-gray-500 text-xs font-bold uppercase tracking-widest text-center">No bots are currently deployed.</p>
-                            <p className="text-gray-600 text-[10px] font-bold uppercase tracking-widest text-center max-w-sm">
-                                Go to the Deployments page to use your coins 🪙 and activate a paired device.
+                    <div className="space-y-6">
+                        {/* Quick Tip Premium */}
+                        <motion.div
+                            variants={itemVariants}
+                            whileHover={{ scale: 1.01 }}
+                            className="p-8 rounded-[2.5rem] border border-primary/20 bg-primary/5 space-y-6 relative overflow-hidden group"
+                        >
+                            <div className="absolute -top-10 -right-10 w-32 h-32 bg-primary/10 rounded-full blur-3xl" />
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20">
+                                    <Sparkles className="h-5 w-5 text-primary" />
+                                </div>
+                                <h3 className="text-xs font-black text-white uppercase tracking-[0.3em]">{language === "sw" ? "Kidokezo cha Haraka" : "Quick Tip"}</h3>
+                            </div>
+                            <p className="text-xs text-white/80 font-medium leading-[1.8] relative z-10">
+                                {language === "sw"
+                                    ? `Alika marafiki kwa kutumia kodi yako ya mwaliko na upate sarafu ${referralBonus} 🪙 kila mmoja anapofanya malipo yake ya kwanza!`
+                                    : `Invite friends using your unique referral code and earn ${referralBonus} coins 🪙 whenever they make their first successful purchase!`}
                             </p>
-                            <Button asChild variant="outline" className="mt-2 border-primary/50 text-white hover:text-black hover:bg-primary uppercase tracking-widest text-[10px]">
-                                <Link href="/dashboard/deployments">View All Devices</Link>
+                            <Button asChild variant="link" className="p-0 h-auto text-[10px] font-black uppercase tracking-[0.2em] text-primary hover:gap-2 transition-all">
+                                <Link href="/dashboard/referrals" className="flex items-center gap-2">
+                                    {t.referrals} <ArrowUpRight className="w-3 h-3" />
+                                </Link>
                             </Button>
-                        </div>
-                    ) : (
-                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                            {sessions
-                                .filter(s => !!s.expiresAt)
-                                .map(session => (
-                                    <div key={session._id} className="p-5 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-between backdrop-blur-md transition-all hover:bg-white/10">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-full flex items-center justify-center bg-primary/20 text-primary">
-                                                <Network className="w-4 h-4" />
-                                            </div>
-                                            <div>
-                                                <p className="text-sm font-bold text-white tracking-widest">{session.phone || 'Unknown'}</p>
-                                                <p className="text-[9px] font-bold uppercase tracking-widest text-primary">Deployed</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="flex h-2 w-2 relative">
-                                                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${session.status === 'active' ? 'bg-primary' : session.status === 'paused' ? 'bg-amber-500' : 'bg-destructive'}`}></span>
-                                                <span className={`relative inline-flex rounded-full h-2 w-2 ${session.status === 'active' ? 'bg-primary' : session.status === 'paused' ? 'bg-amber-500' : 'bg-destructive'}`}></span>
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))}
-                        </div>
-                    )}
+                        </motion.div>
+
+                        <motion.div variants={itemVariants} className="p-8 rounded-[2.5rem] border border-white/5 bg-[#0D0D0D]/60 backdrop-blur-xl group">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+                                    <Wrench className="h-5 w-5 text-gray-400" />
+                                </div>
+                                <h3 className="text-xs font-black text-white uppercase tracking-[0.3em]">{language === "sw" ? "Msaada" : "Support"}</h3>
+                            </div>
+                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-[0.2em] leading-relaxed mb-6">
+                                {language === "sw"
+                                    ? "Ungana nasi kupitia jopo la msaada au telegram yetu."
+                                    : "Need help? Connect with our team via the support panel or our official Telegram."}
+                            </p>
+                            <div className="p-5 rounded-2xl bg-black/40 border border-white/5 text-center group-hover:border-emerald-500/20 transition-colors">
+                                <p className="text-[9px] font-black text-gray-600 uppercase tracking-[0.2em] mb-1">{language === "sw" ? "Hali ya Mfumo" : "Service Status"}</p>
+                                <p className="text-[11px] font-black text-emerald-500 uppercase tracking-widest flex items-center justify-center gap-2">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Operational
+                                </p>
+                            </div>
+                        </motion.div>
+                    </div>
                 </div>
-            </div>
-        </DashboardLayout >
+            </motion.div>
+        </DashboardLayout>
     );
 }
+
+const tcConfig: any = { icon: Info, color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/10" };
+const typeConfig: Record<string, { icon: any; color: string; bg: string; border: string }> = {
+    info: { icon: Info, color: "text-sky-400", bg: "bg-sky-500/5", border: "border-sky-500/10" },
+    warning: { icon: AlertTriangle, color: "text-amber-400", bg: "bg-amber-500/5", border: "border-amber-500/10" },
+    maintenance: { icon: Wrench, color: "text-orange-400", bg: "bg-orange-500/5", border: "border-orange-500/10" },
+    update: { icon: Sparkles, color: "text-violet-400", bg: "bg-violet-500/5", border: "border-violet-500/10" },
+    promo: { icon: Tag, color: "text-emerald-400", bg: "bg-emerald-500/5", border: "border-emerald-500/10" },
+};
+
