@@ -14,7 +14,7 @@ import webhookRoutes from "./routes/webhooks.js";
 import { authenticate } from "./middleware/auth.js";
 import Plan from "./models/Plan.js";
 import Announcement from "./models/Announcement.js";
-import { getSettings } from "./models/SystemSettings.js";
+import { getCachedPublicSettings } from "./models/SystemSettings.js";
 import { sessionManager } from "./services/whatsappService.js";
 import User from "./models/User.js";
 
@@ -24,7 +24,7 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-only-secret-do-not-use-in-prod
 // Maintenance Mode Middleware
 app.use(async (req, res, next) => {
     try {
-        const settings = await getSettings();
+        const settings = await getCachedPublicSettings();
         if (settings.maintenanceMode) {
             const isAllowedDuringMaintenance =
                 req.path.startsWith("/api/admin") ||
@@ -124,7 +124,7 @@ app.get("/api/stats", async (req, res) => {
 // Public platform configuration
 app.get("/api/config", async (req, res) => {
     try {
-        const settings = await getSettings();
+        const settings = await getCachedPublicSettings();
         res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
         res.set("Pragma", "no-cache");
         res.set("Expires", "0");

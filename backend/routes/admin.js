@@ -6,7 +6,7 @@ import Payment from "../models/Payment.js";
 import Plan from "../models/Plan.js";
 import Announcement from "../models/Announcement.js";
 import Notification from "../models/Notification.js";
-import SystemSettings, { getSettings } from "../models/SystemSettings.js";
+import SystemSettings, { getCachedPublicSettings, getSettings, invalidateSettingsCache } from "../models/SystemSettings.js";
 import FastLipaWebhookLog from "../models/FastLipaWebhookLog.js";
 import { sessionManager } from "../services/whatsappService.js";
 import { emitToUser, emitUpdate } from "../services/socketService.js";
@@ -807,6 +807,8 @@ router.put("/settings", authenticate, requireAdmin, async (req, res) => {
 
         settings.lastUpdatedBy = req.user._id;
         await settings.save();
+        await invalidateSettingsCache();
+        await getCachedPublicSettings();
 
         emitUpdate("admin_settings_updated", { settings });
         emitUpdate("platform_settings_updated", {

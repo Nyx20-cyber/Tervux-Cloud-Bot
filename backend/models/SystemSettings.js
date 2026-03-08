@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { delKey, getJson, setJson } from "../lib/redis.js";
 
 const systemSettingsSchema = new mongoose.Schema({
     maintenanceMode: {
@@ -37,7 +38,24 @@ const systemSettingsSchema = new mongoose.Schema({
     timestamps: true
 });
 
+systemSettingsSchema.post("save", () => {
+    invalidateSettingsCache().catch(() => {});
+});
+
 const SystemSettings = mongoose.model("SystemSettings", systemSettingsSchema);
+const SETTINGS_CACHE_KEY = "system_settings:public:v1";
+const SETTINGS_CACHE_TTL_SECONDS = Number(process.env.SETTINGS_CACHE_TTL_SECONDS || 30);
+
+const toPublicSettings = (settingsDocOrObj) => ({
+    maintenanceMode: !!settingsDocOrObj.maintenanceMode,
+    registrationEnabled: !!settingsDocOrObj.registrationEnabled,
+    supportPhone: settingsDocOrObj.supportPhone,
+    siteName: settingsDocOrObj.siteName,
+    commandFooter: settingsDocOrObj.commandFooter,
+    kingBonusCoins: Number(settingsDocOrObj.kingBonusCoins || 100),
+    referralBonus: Number(settingsDocOrObj.referralBonus || 10),
+    updatedAt: settingsDocOrObj.updatedAt || null
+});
 
 // Ensure a single settings document exists
 export const getSettings = async () => {
@@ -46,6 +64,20 @@ export const getSettings = async () => {
         settings = await SystemSettings.create({});
     }
     return settings;
+};
+
+export const getCachedPublicSettings = async () => {
+    const cached = await getJson(SETTINGS_CACHE_KEY);
+    if (cached) return cached;
+
+    const settings = await getSettings();
+    const payload = toPublicSettings(settings);
+    await setJson(SETTINGS_CACHE_KEY, payload, SETTINGS_CACHE_TTL_SECONDS);
+    return payload;
+};
+
+export const invalidateSettingsCache = async () => {
+    await delKey(SETTINGS_CACHE_KEY);
 };
 
 export default SystemSettings;

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import User from "../models/User.js";
 import Notification from "../models/Notification.js";
-import { getSettings } from "../models/SystemSettings.js";
+import { getCachedPublicSettings } from "../models/SystemSettings.js";
 import { generateToken, authenticate } from "../middleware/auth.js";
 import { emitToUser } from "../services/socketService.js";
 import { authLimiter } from "../middleware/rateLimiter.js";
@@ -20,7 +20,7 @@ router.post("/register", authLimiter, async (req, res) => {
     try {
         const { email, password, name, referralCode } = req.body;
 
-        const settings = await getSettings();
+        const settings = await getCachedPublicSettings();
         if (!settings.registrationEnabled) {
             return res.status(403).json({ error: "Registration is currently disabled by the administrator" });
         }

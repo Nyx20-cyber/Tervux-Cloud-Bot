@@ -9,6 +9,7 @@ import { verifyPendingPayments } from "./services/paymentVerifier.js";
 import { runWeeklyKingCeremony } from "./services/referralKingService.js";
 import { runResellerNudge } from "./services/resellerNudgeService.js";
 import { runGroupPromotionBroadcast } from "./services/groupPromotionBroadcastService.js";
+import { closeRedis, initRedis } from "./lib/redis.js";
 import cron from "node-cron";
 
 const httpServer = createServer(app);
@@ -19,6 +20,7 @@ async function start() {
     try {
         // 1. Connect to MongoDB
         await connectDB();
+        await initRedis();
 
         // 2. Seed plans if needed
         const Plan = (await import("./models/Plan.js")).default;
@@ -129,6 +131,7 @@ process.on("uncaughtException", (err) => {
 const shutdown = async () => {
     console.log("🛑 Server shutting down...");
     await shutdownWhatsAppService();
+    await closeRedis();
     setTimeout(() => process.exit(0), 1000);
 };
 
