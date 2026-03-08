@@ -1,0 +1,42 @@
+name: Deploy Backend to VPS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "deploy/**"
+      - ".github/workflows/deploy-backend-vps.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend-vps
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare SSH key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy on VPS
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" << 'EOF'
+            set -e
+            cd ~/Tervux-Cloud-Bot
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+
+            cd deploy
+            docker-compose -f docker-compose.production.yml --env-file .env up -d --build backend nginx
+            docker-compose -f docker-compose.production.yml ps
+          EOF
