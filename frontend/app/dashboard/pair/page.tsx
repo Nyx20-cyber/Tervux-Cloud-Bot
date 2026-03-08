@@ -482,16 +482,16 @@ export default function PairPage() {
 
     return (
         <DashboardLayout>
-            <div className="grid lg:grid-cols-12 gap-6 lg:gap-8 max-w-7xl mx-auto h-full animate-fade-in">
+            <div className="grid lg:grid-cols-12 gap-4 sm:gap-6 lg:gap-8 max-w-7xl mx-auto h-full animate-fade-in">
                 {/* Left: Pairing Console */}
                 <div className="lg:col-span-7 space-y-6 lg:space-y-8 animate-slide-left">
                     <div className="group relative">
                         {/* Glowing Border Effect */}
                         <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/30 to-primary/0 rounded-3xl blur opacity-20 transition duration-1000"></div>
 
-                        <div className="relative p-4 sm:p-6 lg:p-8 rounded-3xl border border-border bg-card/50 backdrop-blur-2xl shadow-xl overflow-hidden">
+                        <div className="relative p-3 sm:p-6 lg:p-8 rounded-2xl sm:rounded-3xl border border-border bg-card/50 backdrop-blur-2xl shadow-xl overflow-hidden">
                             {/* Header */}
-                            <div className="flex items-center justify-between mb-8">
+                            <div className="flex items-center justify-between mb-5 sm:mb-8">
                                 <div className="space-y-1">
                                     <h2 className="text-base sm:text-lg lg:text-xl font-semibold tracking-tight text-white flex items-center gap-3">
                                         <Terminal className="h-5 w-5 text-primary" />
@@ -509,17 +509,17 @@ export default function PairPage() {
                             </div>
 
                             {/* Action Toggle */}
-                            <div className="inline-flex p-1 bg-white/5 rounded-xl mb-8 border border-white/10">
+                            <div className="inline-flex p-1 bg-white/5 rounded-xl mb-5 sm:mb-8 border border-white/10 w-full sm:w-auto">
                                 <button
                                     onClick={() => setMethod("qr")}
-                                    className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all duration-300 ${method === 'qr' ? 'bg-primary text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
+                                    className={`flex-1 sm:flex-none px-4 sm:px-6 py-2 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all duration-300 ${method === 'qr' ? 'bg-primary text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
                                     disabled={status === "loading" || status === "waiting"}
                                 >
                                     {t.qr_code}
                                 </button>
                                 <button
                                     onClick={() => setMethod("code")}
-                                    className={`px-6 py-2 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all duration-300 ${method === 'code' ? 'bg-primary text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
+                                    className={`flex-1 sm:flex-none px-4 sm:px-6 py-2 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all duration-300 ${method === 'code' ? 'bg-primary text-black shadow-lg' : 'text-gray-400 hover:text-white'}`}
                                     disabled={status === "loading" || status === "waiting"}
                                 >
                                     {t.pairing_code}
@@ -546,7 +546,7 @@ export default function PairPage() {
                                                     placeholder="2557..."
                                                     value={phone}
                                                     onChange={(e) => setPhone(e.target.value)}
-                                                    className="w-full h-14 pl-11 bg-white/5 border border-white/10 hover:border-white/20 focus:border-primary/50 text-base font-semibold tracking-tight text-white placeholder:text-gray-700 transition-all rounded-xl outline-none focus:ring-1 focus:ring-primary/50"
+                                                    className="w-full h-12 sm:h-14 pl-11 bg-white/5 border border-white/10 hover:border-white/20 focus:border-primary/50 text-sm sm:text-base font-semibold tracking-tight text-white placeholder:text-gray-700 transition-all rounded-xl outline-none focus:ring-1 focus:ring-primary/50"
                                                 />
                                             </div>
                                             <p className="text-[9px] text-gray-600 font-medium uppercase tracking-wider ml-1">
@@ -556,7 +556,7 @@ export default function PairPage() {
 
                                         <Button
                                             onClick={handlePair}
-                                            className="w-full h-14 rounded-xl bg-primary hover:bg-primary/90 text-black font-bold uppercase tracking-widest text-[11px] shadow-lg shadow-primary/20 transition-all flex items-center justify-center gap-2 group mt-4 hover:scale-[1.01]"
+                                            className="w-full h-12 sm:h-14 rounded-xl bg-primary hover:bg-primary/90 text-black font-bold uppercase tracking-widest text-[10px] sm:text-[11px] shadow-lg shadow-primary/20 transition-all flex items-center justify-center gap-2 group mt-4 hover:scale-[1.01]"
                                         >
                                             {method === "qr" ? t.generate_qr : t.get_pairing_code}
                                             <Zap className="h-3.5 w-3.5 group-hover:translate-x-1 transition-transform" />
@@ -622,21 +622,30 @@ export default function PairPage() {
                                         </div>
 
                                         <div className="flex justify-center min-h-[200px] items-center">
-                                            <div className="bg-gradient-to-b from-white/5 to-transparent border border-white/10 p-4 rounded-xl shadow-2xl transition-all">
+                                            <div className="border border-white/10 p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-black/20 transition-all">
                                                 {method === "qr" ? (
                                                     qrCode ? (
-                                                        <QRCodeSVG value={qrCode} size={250} />
+                                                        <div className="bg-white p-2 sm:p-3 rounded-xl shadow-none">
+                                                            <QRCodeSVG
+                                                                value={qrCode}
+                                                                size={220}
+                                                                includeMargin
+                                                                bgColor="#FFFFFF"
+                                                                fgColor="#111111"
+                                                                level="M"
+                                                            />
+                                                        </div>
                                                     ) : (
-                                                        <div className="flex flex-col items-center justify-center gap-3 w-[250px] h-[250px] bg-gray-100/50 rounded-lg text-gray-400">
+                                                        <div className="flex flex-col items-center justify-center gap-3 w-[220px] h-[220px] bg-gray-100/80 rounded-lg text-gray-500">
                                                             <Loader2 className="h-6 w-6 animate-spin" />
                                                             <span className="text-[10px] font-bold uppercase tracking-widest">{t.pair_awaiting_payload}</span>
                                                         </div>
                                                     )
                                                 ) : (
-                                                    <div className="w-full min-h-[56px] flex flex-col items-center justify-center gap-4 p-4">
-                                                        <div className="flex gap-2 items-center justify-center">
-                                                            {pairingCode ? pairingCode.split('').map((char, i) => (
-                                                                <div key={i} className={`w-10 h-14 ${char === '-' ? 'bg-transparent text-gray-500 border-none' : 'bg-black/50 border border-primary/30 text-primary shadow-lg shadow-primary/10'} rounded-lg flex items-center justify-center text-2xl font-black backdrop-blur-sm`}>
+                                                    <div className="w-full min-h-[56px] flex flex-col items-center justify-center gap-3 sm:gap-4 p-3 sm:p-4">
+                                                            <div className="flex flex-wrap gap-1.5 sm:gap-2 items-center justify-center max-w-full">
+                                                                {pairingCode ? pairingCode.split('').map((char, i) => (
+                                                                <div key={i} className={`w-7 sm:w-10 h-10 sm:h-14 ${char === '-' ? 'bg-transparent text-gray-500 border-none' : 'bg-black/50 border border-primary/30 text-primary'} rounded-md sm:rounded-lg flex items-center justify-center text-lg sm:text-2xl font-black backdrop-blur-sm`}>
                                                                     {char}
                                                                 </div>
                                                             )) : (
@@ -647,10 +656,10 @@ export default function PairPage() {
                                                             )}
                                                         </div>
                                                         {pairingCode && (
-                                                            <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-[10px] uppercase tracking-wider text-primary">
-                                                                <Sparkles className="h-3 w-3" />
-                                                                Secure one-time pairing token
-                                                            </div>
+                                                        <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-[9px] sm:text-[10px] uppercase tracking-wider text-primary">
+                                                            <Sparkles className="h-3 w-3" />
+                                                            Secure one-time pairing token
+                                                        </div>
                                                         )}
                                                     </div>
                                                 )}
@@ -663,7 +672,7 @@ export default function PairPage() {
                                                     <Button variant="outline" onClick={handleCopy} className="h-8 px-4 rounded-full border border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary hover:text-primary text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all">
                                                         <Copy className="h-3 w-3 mr-2" /> {t.copy_code}
                                                     </Button>
-                                                    <Button variant="outline" onClick={handleShareCode} className="h-8 px-4 rounded-full border border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary hover:text-primary text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all">
+                                                    <Button variant="outline" onClick={handleShareCode} className="h-8 px-4 rounded-full border border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary hover:text-primary text-[9px] sm:text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all">
                                                         <Share2 className="h-3 w-3 mr-2" /> Share
                                                     </Button>
                                                 </div>
@@ -709,7 +718,7 @@ export default function PairPage() {
                     </div>
 
                     {/* Signal Stats Display */}
-                    <div className="grid grid-cols-3 gap-4 mt-6">
+                    <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-4 sm:mt-6">
                         <div className="p-4 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center text-center space-y-1 hover:bg-white/10 transition-colors cursor-default">
                             <Activity className="h-3.5 w-3.5 text-gray-500" />
                             <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600">{t.latency}</p>
@@ -729,28 +738,28 @@ export default function PairPage() {
                 </div>
 
                 {/* Right: Disclaimer/Features */}
-                <div className="lg:col-span-5 space-y-6 animate-slide-right hidden lg:block">
-                    <div className="p-8 rounded-3xl border border-border bg-card/50 backdrop-blur-md h-full">
+                <div className="lg:col-span-5 space-y-4 sm:space-y-6 animate-slide-right">
+                    <div className="p-4 sm:p-8 rounded-2xl sm:rounded-3xl border border-border bg-card/50 backdrop-blur-md h-full">
                         <div className="space-y-1 mb-8">
-                            <h2 className="text-lg font-semibold text-white tracking-tight uppercase">{t.usage_terms_safety}</h2>
+                            <h2 className="text-base sm:text-lg font-semibold text-white tracking-tight uppercase">{t.usage_terms_safety}</h2>
                             <p className="text-[10px] font-semibold text-amber-500 tracking-widest uppercase">{t.risk_disclaimer}</p>
                         </div>
 
-                        <div className="space-y-6">
-                            <div className="space-y-3 p-6 rounded-2xl bg-white/5 border border-white/10 text-amber-500">
+                        <div className="space-y-4 sm:space-y-6">
+                            <div className="space-y-2.5 sm:space-y-3 p-4 sm:p-6 rounded-xl sm:rounded-2xl bg-white/5 border border-white/10 text-amber-500">
                                 <div className="flex items-center gap-2">
                                     <AlertCircle className="w-4 h-4" />
                                     <span className="text-[10px] font-bold uppercase tracking-widest">{t.account_responsibility}</span>
                                 </div>
-                                <p className="text-xs text-gray-400 leading-relaxed font-medium">{t.account_responsibility_desc}</p>
+                                <p className="text-[11px] sm:text-xs text-gray-400 leading-relaxed font-medium">{t.account_responsibility_desc}</p>
                             </div>
 
-                            <div className="space-y-3 p-6 rounded-2xl bg-primary/5 border border-primary/10">
+                            <div className="space-y-2.5 sm:space-y-3 p-4 sm:p-6 rounded-xl sm:rounded-2xl bg-primary/5 border border-primary/10">
                                 <div className="flex items-center gap-2 text-primary">
                                     <ShieldCheck className="w-4 h-4" />
                                     <span className="text-[10px] font-bold uppercase tracking-widest">{t.data_protection_risk}</span>
                                 </div>
-                                <p className="text-xs text-gray-400 leading-relaxed font-medium">{t.data_protection_risk_desc}</p>
+                                <p className="text-[11px] sm:text-xs text-gray-400 leading-relaxed font-medium">{t.data_protection_risk_desc}</p>
                             </div>
                         </div>
                     </div>

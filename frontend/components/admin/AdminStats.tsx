@@ -100,7 +100,7 @@ export function AdminStats({ stats }: AdminStatsProps) {
 
     return (
         <motion.div
-            className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"
+            className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3"
             variants={containerVariants}
             initial="hidden"
             animate="visible"
@@ -113,16 +113,16 @@ export function AdminStats({ stats }: AdminStatsProps) {
                         key={card.key}
                         variants={cardVariants}
                         whileHover={{ scale: 1.04, y: -4 }}
-                        className={`relative p-4 rounded-2xl border ${card.border} bg-gradient-to-br ${card.gradient} backdrop-blur-xl flex flex-col items-center text-center space-y-2 cursor-default overflow-hidden group transition-shadow hover:shadow-lg hover:shadow-black/20`}
+                        className={`relative p-3 sm:p-4 rounded-xl sm:rounded-2xl border ${card.border} bg-gradient-to-br ${card.gradient} backdrop-blur-xl flex flex-col items-center text-center space-y-1.5 sm:space-y-2 cursor-default overflow-hidden group transition-shadow hover:shadow-lg hover:shadow-black/20`}
                     >
                         {/* Glow effect */}
                         <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br ${card.gradient} blur-xl -z-10`} />
 
-                        <Icon className={`h-5 w-5 ${card.iconColor} ${card.pulse ? "animate-pulse" : ""}`} />
+                        <Icon className={`h-4 w-4 sm:h-5 sm:w-5 ${card.iconColor} ${card.pulse ? "animate-pulse" : ""}`} />
                         <p className="text-[8px] font-black uppercase tracking-widest text-gray-500 opacity-70">
                             {card.label}
                         </p>
-                        <p className={`text-sm font-black tracking-widest ${card.text}`}>
+                        <p className={`text-xs sm:text-sm font-black tracking-widest ${card.text}`}>
                             {card.format(value)}
                         </p>
                     </motion.div>

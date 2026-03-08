@@ -105,12 +105,12 @@ export default function NotificationsPage() {
 
     return (
         <DashboardLayout>
-            <div className="space-y-8 animate-fade-in max-w-4xl mx-auto">
+            <div className="space-y-6 sm:space-y-8 animate-fade-in max-w-4xl mx-auto">
                 {/* Header Section */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
                     <div>
-                        <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
-                            <Bell className="h-8 w-8 text-primary" />
+                        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-2.5 sm:gap-3">
+                            <Bell className="h-6 w-6 sm:h-8 sm:w-8 text-primary" />
                             {t.notifications_center}
                         </h1>
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">
@@ -122,7 +122,7 @@ export default function NotificationsPage() {
                             <Button
                                 onClick={markAllAsRead}
                                 variant="outline"
-                                className="border-primary/20 bg-primary/5 text-primary hover:bg-primary hover:text-black uppercase text-[10px] font-black tracking-widest h-12 px-6 rounded-xl transition-all"
+                                className="border-primary/20 bg-primary/5 text-primary hover:bg-primary hover:text-black uppercase text-[10px] font-black tracking-widest h-10 sm:h-12 px-4 sm:px-6 rounded-xl transition-all"
                             >
                                 <Check className="w-4 h-4 mr-2" />
                                 {t.mark_all_read}
@@ -132,11 +132,11 @@ export default function NotificationsPage() {
                 </div>
 
                 {/* Filter Tabs */}
-                <div className="flex items-center gap-3 border-b border-white/5 pb-6">
+                <div className="flex items-center gap-2 sm:gap-3 border-b border-white/5 pb-4 sm:pb-6 overflow-x-auto no-scrollbar">
                     <button
                         onClick={() => setFilter("all")}
                         className={cn(
-                            "px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all",
+                            "px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] transition-all shrink-0",
                             filter === "all"
                                 ? "bg-primary text-black shadow-xl shadow-primary/20"
                                 : "text-gray-500 hover:text-white hover:bg-white/5"
@@ -147,7 +147,7 @@ export default function NotificationsPage() {
                     <button
                         onClick={() => setFilter("unread")}
                         className={cn(
-                            "px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-3",
+                            "px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] transition-all flex items-center gap-2 sm:gap-3 shrink-0",
                             filter === "unread"
                                 ? "bg-primary text-black shadow-xl shadow-primary/20"
                                 : "text-gray-500 hover:text-white hover:bg-white/5"
@@ -166,7 +166,7 @@ export default function NotificationsPage() {
                 {/* Notifications List */}
                 <div className="space-y-4 min-h-[400px]">
                     {isLoading ? (
-                        <div className="p-20 text-center flex flex-col items-center gap-4">
+                        <div className="p-12 sm:p-20 text-center flex flex-col items-center gap-4">
                             <div className="w-10 h-10 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
                             <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest">{t.loading_history}</p>
                         </div>
@@ -174,7 +174,7 @@ export default function NotificationsPage() {
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            className="p-20 border border-white/10 border-dashed rounded-[2.5rem] bg-white/[0.02] flex flex-col items-center text-center space-y-5"
+                            className="p-10 sm:p-20 border border-white/10 border-dashed rounded-[1.5rem] sm:rounded-[2.5rem] bg-white/[0.02] flex flex-col items-center text-center space-y-4 sm:space-y-5"
                         >
                             <div className="p-8 rounded-full bg-white/5 group hover:bg-primary/5 transition-colors">
                                 <Bell className="w-16 h-16 text-gray-800 group-hover:text-primary/40 transition-colors" />
@@ -196,15 +196,15 @@ export default function NotificationsPage() {
                                         exit={{ opacity: 0, scale: 0.95 }}
                                         transition={{ delay: idx * 0.05 }}
                                         className={cn(
-                                            "group p-6 rounded-[2rem] border transition-all duration-300 relative overflow-hidden",
+                                            "group p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] border transition-all duration-300 relative overflow-hidden",
                                             !n.isRead
                                                 ? "bg-primary/5 border-primary/20 shadow-xl shadow-primary/5"
                                                 : "bg-white/[0.02] border-white/10 hover:border-white/20"
                                         )}
                                     >
-                                        <div className="flex items-start gap-6 relative z-10">
+                                        <div className="flex items-start gap-3 sm:gap-6 relative z-10">
                                             <div className={cn(
-                                                "p-4 rounded-2xl flex-shrink-0 transition-all group-hover:scale-110",
+                                                "p-2.5 sm:p-4 rounded-xl sm:rounded-2xl flex-shrink-0 transition-all group-hover:scale-110",
                                                 !n.isRead ? "bg-primary/20 shadow-lg shadow-primary/10" : "bg-white/5"
                                             )}>
                                                 {getIcon(n.type)}
@@ -213,24 +213,24 @@ export default function NotificationsPage() {
                                             <div className="flex-1 space-y-1.5 min-w-0">
                                                 <div className="flex items-center justify-between gap-4">
                                                     <h3 className={cn(
-                                                        "text-[13px] font-black uppercase tracking-widest truncate",
+                                                        "text-[11px] sm:text-[13px] font-black uppercase tracking-widest truncate",
                                                         !n.isRead ? "text-white" : "text-gray-500"
                                                     )}>
                                                         {n.title}
                                                     </h3>
-                                                    <span className="text-[10px] font-bold text-gray-600 uppercase tracking-widest whitespace-nowrap bg-black/20 px-2 py-0.5 rounded-lg border border-white/5">
+                                                    <span className="text-[9px] sm:text-[10px] font-bold text-gray-600 uppercase tracking-widest whitespace-nowrap bg-black/20 px-2 py-0.5 rounded-lg border border-white/5">
                                                         {formatRelativeTime(new Date(n.createdAt), language)}
                                                     </span>
                                                 </div>
                                                 <p className={cn(
-                                                    "text-[12px] font-medium leading-relaxed max-w-2xl",
+                                                    "text-[10px] sm:text-[12px] font-medium leading-relaxed max-w-2xl",
                                                     !n.isRead ? "text-gray-200" : "text-gray-600"
                                                 )}>
                                                     {n.message}
                                                 </p>
                                             </div>
 
-                                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <div className="flex items-center gap-1 sm:gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                                 {!n.isRead && (
                                                     <Button
                                                         variant="ghost"

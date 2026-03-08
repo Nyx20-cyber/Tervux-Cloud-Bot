@@ -142,18 +142,18 @@ export function UserManagement() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5 }}
-            className="space-y-4"
+            className="space-y-3 sm:space-y-4"
         >
             {/* Header with search */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                     <UserCircle className="h-5 w-5 text-violet-400" />
-                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{t.admin_user_management}</h2>
+                    <h2 className="text-base sm:text-lg font-semibold tracking-tight text-white uppercase">{t.admin_user_management}</h2>
                     <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-400 border border-violet-500/30">
                         {total}
                     </span>
                 </div>
-                <div className="relative max-w-xs w-full">
+                <div className="relative w-full sm:max-w-xs">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                     <input
                         type="text"
@@ -166,14 +166,14 @@ export function UserManagement() {
             </div>
 
             {/* Table */}
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden backdrop-blur-xl">
+            <div className="rounded-xl sm:rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden backdrop-blur-xl">
                 {isLoading ? (
                     <div className="flex justify-center p-12">
                         <Loader2 className="w-6 h-6 text-primary animate-spin" />
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left">
+                        <table className="w-full min-w-[860px] text-sm text-left">
                             <thead className="text-[9px] text-gray-500 uppercase tracking-widest bg-white/[0.03] border-b border-white/10">
                                 <tr>
                                     <th className="px-5 py-4 font-black">{t.users}</th>
@@ -225,7 +225,7 @@ export function UserManagement() {
                                                 {format(new Date(user.createdAt), "MMM dd, yyyy")}
                                             </td>
                                             <td className="px-5 py-4">
-                                                <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <div className="flex items-center justify-end gap-1.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                                     {actionLoading === user._id ? (
                                                         <Loader2 className="w-4 h-4 text-primary animate-spin" />
                                                     ) : (

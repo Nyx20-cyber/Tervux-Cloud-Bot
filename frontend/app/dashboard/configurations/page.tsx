@@ -135,28 +135,28 @@ function ConfigurationsContent() {
 
     return (
         <DashboardLayout>
-            <div className="space-y-8 animate-fade-in">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-6 sm:space-y-8 animate-fade-in">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
                     <div>
-                        <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
-                            <Settings2 className="h-8 w-8 text-primary" />
+                        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-2.5 sm:gap-3">
+                            <Settings2 className="h-6 w-6 sm:h-8 sm:w-8 text-primary" />
                             {t.bot_configurations}
                         </h1>
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">{t.customize_deployed}</p>
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-8">
                     {/* Session Sidebar */}
                     <div className="lg:col-span-4 space-y-4">
-                        <div className="bg-white/5 border border-white/10 p-5 rounded-2xl backdrop-blur-md space-y-4">
+                        <div className="bg-white/5 border border-white/10 p-4 sm:p-5 rounded-xl sm:rounded-2xl backdrop-blur-md space-y-3 sm:space-y-4">
                             <div className="relative group">
                                 <Search className="absolute left-3 top-3 h-4 w-4 text-gray-500 group-focus-within:text-primary transition-colors" />
                                 <Input
                                     placeholder={t.search_sessions}
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="pl-10 h-10 bg-black/20 border-white/10 text-white text-[10px] font-bold uppercase tracking-widest rounded-xl focus-visible:ring-primary"
+                                    className="pl-10 h-10 bg-black/20 border-white/10 text-white text-[9px] sm:text-[10px] font-bold uppercase tracking-widest rounded-xl focus-visible:ring-primary"
                                 />
                             </div>
 
@@ -175,16 +175,16 @@ function ConfigurationsContent() {
                                                 router.push(`/dashboard/configurations?session=${session._id}`);
                                             }}
                                             className={cn(
-                                                "w-full p-4 rounded-xl flex items-center justify-between transition-all border",
+                                                "w-full p-3 sm:p-4 rounded-xl flex items-center justify-between transition-all border",
                                                 selectedSession?._id === session._id
                                                     ? "bg-primary border-primary text-black"
                                                     : "bg-white/5 border-white/10 hover:bg-white/10 text-white"
                                             )}
                                         >
                                             <div className="flex items-center gap-3">
-                                                <Smartphone className="w-4 h-4" />
+                                                <Smartphone className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                                 <div className="text-left">
-                                                    <p className="text-[10px] font-bold uppercase tracking-widest">{session.phone || "-"}</p>
+                                                    <p className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest">{session.phone || "-"}</p>
                                                     <p className={cn("text-[8px] font-bold uppercase tracking-tighter opacity-60", selectedSession?._id === session._id ? "text-black" : "text-gray-500")}>
                                                         {t.last_updated}: {new Date(session.updatedAt).toLocaleDateString(language === "sw" ? 'sw-TZ' : 'en-US')}
                                                     </p>
@@ -201,10 +201,10 @@ function ConfigurationsContent() {
                     {/* Configuration Area */}
                     <div className="lg:col-span-8">
                         {selectedSession ? (
-                            <div className="bg-white/5 border border-white/10 p-6 sm:p-8 rounded-2xl backdrop-blur-md space-y-8">
-                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
+                            <div className="bg-white/5 border border-white/10 p-4 sm:p-8 rounded-xl sm:rounded-2xl backdrop-blur-md space-y-6 sm:space-y-8">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 border-b border-white/10 pb-4 sm:pb-6">
                                     <div>
-                                        <h3 className="text-xl font-bold text-white uppercase tracking-tight">{t.settings_for} {selectedSession.phone || "-"}</h3>
+                                        <h3 className="text-base sm:text-xl font-bold text-white uppercase tracking-tight">{t.settings_for} {selectedSession.phone || "-"}</h3>
                                         <p className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mt-1">{t.status_label}: {selectedSession.status}</p>
                                     </div>
                                     <Button
@@ -218,7 +218,7 @@ function ConfigurationsContent() {
                                     </Button>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                                     {Object.entries(config).map(([key, value]) => (
                                         <div key={key} className="space-y-3">
                                             <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest ml-1">
@@ -234,7 +234,7 @@ function ConfigurationsContent() {
                                                             onClick={() => setConfig({ ...config, [key]: true })}
                                                             disabled={isRestricted}
                                                             className={cn(
-                                                                "flex-1 h-full rounded-lg transition-all font-bold text-[9px] uppercase tracking-widest",
+                                                            "flex-1 h-full rounded-lg transition-all font-bold text-[8px] sm:text-[9px] uppercase tracking-widest",
                                                                 isRestricted && "opacity-60 cursor-not-allowed pointer-events-none",
                                                                 config[key] ? "bg-primary text-black" : "text-gray-500 hover:text-white"
                                                             )}
@@ -245,7 +245,7 @@ function ConfigurationsContent() {
                                                             onClick={() => setConfig({ ...config, [key]: false })}
                                                             disabled={isRestricted}
                                                             className={cn(
-                                                                "flex-1 h-full rounded-lg transition-all font-bold text-[9px] uppercase tracking-widest",
+                                                            "flex-1 h-full rounded-lg transition-all font-bold text-[8px] sm:text-[9px] uppercase tracking-widest",
                                                                 isRestricted && "opacity-60 cursor-not-allowed pointer-events-none",
                                                                 !config[key] ? "bg-destructive text-white" : "text-gray-500 hover:text-white"
                                                             )}
@@ -306,7 +306,7 @@ function ConfigurationsContent() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="flex flex-col items-center justify-center p-12 bg-white/5 border border-white/10 rounded-2xl text-center space-y-6 min-h-[400px] backdrop-blur-md">
+                            <div className="flex flex-col items-center justify-center p-8 sm:p-12 bg-white/5 border border-white/10 rounded-xl sm:rounded-2xl text-center space-y-5 sm:space-y-6 min-h-[320px] sm:min-h-[400px] backdrop-blur-md">
                                 <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
                                     <Bot className="w-8 h-8 text-gray-600" />
                                 </div>

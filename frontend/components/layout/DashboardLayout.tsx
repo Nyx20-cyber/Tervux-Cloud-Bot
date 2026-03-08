@@ -111,7 +111,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
             {/* Mobile Sidebar */}
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-                <SheetContent side="left" className="p-0 border-r border-border bg-card/90 backdrop-blur-2xl w-64">
+                <SheetContent side="left" className="p-0 border-r border-border bg-card/90 backdrop-blur-2xl w-[84vw] max-w-[280px]">
                     <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
                     <Sidebar isMobile />
                 </SheetContent>
@@ -120,7 +120,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             <div className="flex-1 flex flex-col h-screen overflow-hidden relative z-10">
                 <Header onMenuClick={() => setMobileMenuOpen(true)} />
                 <main className="flex-1 overflow-y-auto w-full no-scrollbar">
-                    <div className="mx-auto max-w-7xl p-4 lg:p-8 animate-fade-in relative z-10 w-full min-h-full">
+                    <div className="mx-auto max-w-7xl p-3 sm:p-4 lg:p-8 pb-24 sm:pb-28 lg:pb-24 animate-fade-in relative z-10 w-full min-h-full">
                         {maintenanceChecked ? (
                             children
                         ) : (

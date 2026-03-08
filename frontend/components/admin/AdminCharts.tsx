@@ -76,13 +76,13 @@ export function AdminCharts({ recentPayments, stats }: AdminChartsProps) {
     }, [stats, t]);
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
             {/* Revenue Area Chart */}
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
-                className="rounded-[2.5rem] border border-white/5 bg-black/40 backdrop-blur-2xl p-8 space-y-6 overflow-hidden relative group"
+                className="rounded-2xl sm:rounded-[2.5rem] border border-white/5 bg-black/40 backdrop-blur-2xl p-4 sm:p-8 space-y-4 sm:space-y-6 overflow-hidden relative group"
             >
                 <div className="flex items-center justify-between relative z-10">
                     <div className="flex items-center gap-3">
@@ -93,7 +93,7 @@ export function AdminCharts({ recentPayments, stats }: AdminChartsProps) {
                     </div>
                 </div>
                 {revenueByDay.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={240}>
+                    <ResponsiveContainer width="100%" height={220}>
                         <AreaChart data={revenueByDay}>
                             <defs>
                                 <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
@@ -142,7 +142,7 @@ export function AdminCharts({ recentPayments, stats }: AdminChartsProps) {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.4 }}
-                className="rounded-[2.5rem] border border-white/5 bg-black/40 backdrop-blur-2xl p-8 space-y-6 overflow-hidden relative group"
+                className="rounded-2xl sm:rounded-[2.5rem] border border-white/5 bg-black/40 backdrop-blur-2xl p-4 sm:p-8 space-y-4 sm:space-y-6 overflow-hidden relative group"
             >
                 <div className="flex items-center justify-between relative z-10">
                     <div className="flex items-center gap-3">
@@ -153,7 +153,7 @@ export function AdminCharts({ recentPayments, stats }: AdminChartsProps) {
                     </div>
                 </div>
                 {barData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={240}>
+                    <ResponsiveContainer width="100%" height={220}>
                         <BarChart data={barData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" vertical={false} />
                             <XAxis

@@ -1,14 +1,16 @@
 /** @type {import('next').NextConfig} */
+const backendBase = process.env.BACKEND_URL || "http://localhost:5000";
+
 const nextConfig = {
     async rewrites() {
         return [
             {
                 source: '/api/:path*',
-                destination: 'http://localhost:5000/api/:path*', // Proxy to Backend
+                destination: `${backendBase}/api/:path*`,
             },
             {
                 source: '/socket.io/:path*',
-                destination: 'http://localhost:5000/socket.io/:path*', // Proxy Socket.IO
+                destination: `${backendBase}/socket.io/:path*`,
             }
         ];
     },

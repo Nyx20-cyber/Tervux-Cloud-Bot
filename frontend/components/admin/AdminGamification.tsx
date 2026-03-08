@@ -188,10 +188,10 @@ export function AdminGamification() {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
             <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center">
                 <div>
-                    <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2 uppercase">
+                    <h2 className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2 uppercase">
                         <Crown className="w-5 h-5 text-yellow-500" />
                         {t.admin_badges_vip_management}
                     </h2>
@@ -210,16 +210,16 @@ export function AdminGamification() {
                 </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
+            <div className="grid gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="bg-white/5 border border-white/10 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl">
                     <p className="text-[9px] font-black uppercase tracking-widest text-gray-500">Users</p>
                     <p className="mt-2 text-xl font-black text-white">{users.length}</p>
                 </div>
-                <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
+                <div className="bg-white/5 border border-white/10 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl">
                     <p className="text-[9px] font-black uppercase tracking-widest text-gray-500">{t.vip_rank}</p>
                     <p className="mt-2 text-xl font-black text-zinc-200">{stats.vipCount}</p>
                 </div>
-                <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
+                <div className="bg-white/5 border border-white/10 p-3.5 sm:p-4 rounded-xl sm:rounded-2xl">
                     <p className="text-[9px] font-black uppercase tracking-widest text-gray-500">Badges</p>
                     <p className="mt-2 text-[10px] font-bold text-gray-300 uppercase tracking-wider">
                         🌱 {stats.pioneerCount} · 🦋 {stats.butterflyCount} · 🤖 {stats.botMasterCount}
@@ -232,7 +232,7 @@ export function AdminGamification() {
                     <Loader2 className="w-6 h-6 text-primary animate-spin" />
                 </div>
             ) : (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {filteredUsers.map((user) => {
                     const hasPioneer = user.badges?.includes("pioneer");
                     const hasButterfly = user.badges?.includes("social_butterfly");
@@ -245,7 +245,7 @@ export function AdminGamification() {
                             layout
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
-                            className="bg-white/5 border border-white/10 p-5 rounded-2xl flex flex-col gap-4 relative overflow-hidden"
+                            className="bg-white/5 border border-white/10 p-4 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col gap-4 relative overflow-hidden"
                         >
                             {isUpdating && (
                                 <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-10 flex items-center justify-center">

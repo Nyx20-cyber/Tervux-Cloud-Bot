@@ -157,29 +157,29 @@ export default function DashboardPage() {
                 variants={containerVariants}
                 initial="hidden"
                 animate="visible"
-                className="space-y-8 max-w-7xl mx-auto"
+                className="space-y-6 sm:space-y-8 max-w-7xl mx-auto"
             >
                 {/* Modern Header */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-6">
                     <motion.div variants={itemVariants}>
-                        <h1 className="text-4xl font-black tracking-tight text-white flex items-center gap-4">
-                            <div className="p-3 rounded-2xl bg-primary/10 border border-primary/20">
-                                <Activity className="h-8 w-8 text-primary" />
+                        <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-white flex items-center gap-2.5 sm:gap-4">
+                            <div className="p-2 sm:p-3 rounded-xl sm:rounded-2xl bg-primary/10 border border-primary/20">
+                                <Activity className="h-5 w-5 sm:h-8 sm:w-8 text-primary" />
                             </div>
                             <span className="bg-gradient-to-r from-white to-white/40 bg-clip-text text-transparent">{t.dashboard}</span>
                         </h1>
-                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-2 ml-1 opacity-70">
+                        <p className="text-[9px] sm:text-xs font-bold text-gray-500 uppercase tracking-widest mt-1.5 sm:mt-2 ml-1 opacity-70">
                             {t.dashboard_central_command}
                         </p>
                     </motion.div>
 
-                    <motion.div variants={itemVariants} className="flex items-center gap-4 p-1.5 pr-6 rounded-full bg-white/5 border border-white/10 backdrop-blur-xl">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-primary/40 flex items-center justify-center font-black text-black">
+                    <motion.div variants={itemVariants} className="flex items-center gap-3 p-1.5 pr-4 sm:pr-6 rounded-full bg-white/5 border border-white/10 backdrop-blur-xl w-fit">
+                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-primary to-primary/40 flex items-center justify-center font-black text-black text-xs sm:text-sm">
                             {user?.name?.[0] || 'U'}
                         </div>
                         <div>
-                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest leading-none mb-1">{t.welcome_back}</p>
-                            <p className="text-sm font-black text-white uppercase tracking-tight">{user?.name || t.member}</p>
+                            <p className="text-[8px] sm:text-[10px] font-bold text-gray-500 uppercase tracking-widest leading-none mb-1">{t.welcome_back}</p>
+                            <p className="text-xs sm:text-sm font-black text-white uppercase tracking-tight">{user?.name || t.member}</p>
                         </div>
                     </motion.div>
                 </div>
@@ -189,7 +189,7 @@ export default function DashboardPage() {
                 </motion.div>
 
                 {/* Stats Grid */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                     {[
                         { icon: Coins, label: t.stat_coin_balance, value: user?.coins || 0, color: "text-yellow-500", detail: "🪙", pulse: true },
                         { icon: ShieldCheck, label: t.encryption, value: "AES-256", color: "text-sky-400", detail: "🔐" },
@@ -200,16 +200,16 @@ export default function DashboardPage() {
                             key={i}
                             variants={itemVariants}
                             whileHover={{ scale: 1.02, y: -2 }}
-                            className="p-6 rounded-3xl border border-white/10 bg-[#0A0A0A]/40 backdrop-blur-2xl relative overflow-hidden group"
+                            className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-white/10 bg-[#0A0A0A]/40 backdrop-blur-2xl relative overflow-hidden group"
                         >
-                            <div className={`absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity`}>
+                            <div className={`absolute top-0 right-0 p-2 sm:p-4 opacity-5 group-hover:opacity-10 transition-opacity`}>
                                 <stat.icon size={64} />
                             </div>
-                            <stat.icon className={`h-5 w-5 ${stat.color} mb-4 ${stat.pulse ? 'animate-pulse' : ''}`} />
+                            <stat.icon className={`h-4 w-4 sm:h-5 sm:w-5 ${stat.color} mb-2.5 sm:mb-4 ${stat.pulse ? 'animate-pulse' : ''}`} />
                             <div className="space-y-1 relative z-10">
                                 <p className="text-[9px] font-black uppercase tracking-[0.2em] text-gray-500">{stat.label}</p>
-                                <p className="text-2xl font-black text-white tracking-tight">
-                                    {stat.value} <span className="text-sm opacity-50 ml-1">{stat.detail}</span>
+                                <p className="text-lg sm:text-2xl font-black text-white tracking-tight">
+                                    {stat.value} <span className="text-xs sm:text-sm opacity-50 ml-1">{stat.detail}</span>
                                 </p>
                             </div>
                         </motion.div>
@@ -217,11 +217,11 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Interactive Charts Section */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <motion.div variants={itemVariants} className="p-8 rounded-3xl border border-white/5 bg-[#0D0D0D]/60 backdrop-blur-3xl min-h-[350px] relative overflow-hidden group">
-                        <div className="flex items-center justify-between mb-8">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+                    <motion.div variants={itemVariants} className="p-4 sm:p-8 rounded-2xl sm:rounded-3xl border border-white/5 bg-[#0D0D0D]/60 backdrop-blur-3xl min-h-[300px] sm:min-h-[350px] relative overflow-hidden group">
+                        <div className="flex items-center justify-between mb-5 sm:mb-8">
                             <div>
-                                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">{t.referral_growth}</h3>
+                                <h3 className="text-[11px] sm:text-sm font-black text-white uppercase tracking-[0.16em] sm:tracking-[0.2em]">{t.referral_growth}</h3>
                                 <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">{t.last_7_days_activity}</p>
                             </div>
                             <div className="p-2 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400">
@@ -256,10 +256,10 @@ export default function DashboardPage() {
                         )}
                     </motion.div>
 
-                    <motion.div variants={itemVariants} className="p-8 rounded-3xl border border-white/5 bg-[#0D0D0D]/60 backdrop-blur-3xl min-h-[350px] relative overflow-hidden">
-                        <div className="flex items-center justify-between mb-8">
+                    <motion.div variants={itemVariants} className="p-4 sm:p-8 rounded-2xl sm:rounded-3xl border border-white/5 bg-[#0D0D0D]/60 backdrop-blur-3xl min-h-[300px] sm:min-h-[350px] relative overflow-hidden">
+                        <div className="flex items-center justify-between mb-5 sm:mb-8">
                             <div>
-                                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">{t.coin_purchase_trend}</h3>
+                                <h3 className="text-[11px] sm:text-sm font-black text-white uppercase tracking-[0.16em] sm:tracking-[0.2em]">{t.coin_purchase_trend}</h3>
                                 <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">{t.daily_investment_recap}</p>
                             </div>
                             <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary">
@@ -290,25 +290,25 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Quick Shortcuts */}
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                     <div className="flex items-center gap-2 px-2">
                         <Sparkles className="h-4 w-4 text-primary" />
                         <h2 className="text-xs font-black text-white uppercase tracking-[0.3em] opacity-60">
                             {t.quick_commands}
                         </h2>
                     </div>
-                    <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+                    <div className="grid grid-cols-3 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 sm:gap-4">
                         {shortcuts.map((s, i) => (
                             <Link key={i} href={s.path}>
                                 <motion.div
                                     variants={itemVariants}
                                     whileHover={{ y: -5, scale: 1.02 }}
-                                    className="p-4 rounded-2xl border border-white/5 bg-[#0D0D0D]/40 backdrop-blur-xl flex flex-col items-center text-center gap-3 group hover:bg-white/5 transition-colors"
+                                    className="p-3 sm:p-4 rounded-xl sm:rounded-2xl border border-white/5 bg-[#0D0D0D]/40 backdrop-blur-xl flex flex-col items-center text-center gap-2 sm:gap-3 group hover:bg-white/5 transition-colors"
                                 >
-                                    <div className={`p-3 rounded-xl ${s.bg} ${s.color} group-hover:scale-110 transition-transform`}>
-                                        <s.icon size={18} />
+                                    <div className={`p-2 sm:p-3 rounded-lg sm:rounded-xl ${s.bg} ${s.color} group-hover:scale-110 transition-transform`}>
+                                        <s.icon size={16} />
                                     </div>
-                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest group-hover:text-white transition-colors">
+                                    <span className="text-[8px] sm:text-[10px] font-black text-gray-400 uppercase tracking-wide sm:tracking-widest group-hover:text-white transition-colors leading-tight">
                                         {s.label}
                                     </span>
                                 </motion.div>
@@ -318,33 +318,33 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Main Content Area */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-12">
-                    <div className="lg:col-span-2 space-y-8">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 sm:gap-8 pb-10 sm:pb-12">
+                    <div className="lg:col-span-2 space-y-5 sm:space-y-8">
                         {/* Announcements Section */}
-                        <div className="space-y-4">
+                        <div className="space-y-3 sm:space-y-4">
                             <div className="flex items-center gap-2 px-2">
-                                <Megaphone className="h-5 w-5 text-primary" />
-                                <h2 className="text-lg font-black tracking-tight text-white uppercase">{t.broadcasts}</h2>
+                                <Megaphone className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+                                <h2 className="text-sm sm:text-lg font-black tracking-tight text-white uppercase">{t.broadcasts}</h2>
                             </div>
                             <div className="grid gap-4">
                                 {announcements.length === 0 ? (
-                                    <div className="p-8 text-center border border-white/5 rounded-3xl bg-white/5">
+                                    <div className="p-5 sm:p-8 text-center border border-white/5 rounded-2xl sm:rounded-3xl bg-white/5">
                                         <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">{t.no_active_broadcasts}</p>
                                     </div>
                                 ) : announcements.map((announcement) => {
                                     const tc = typeConfig[announcement.type] || typeConfig.info;
                                     const Icon = tc.icon;
                                     return (
-                                        <motion.div key={announcement._id} variants={itemVariants} className={`p-6 rounded-3xl border ${tc.border} bg-[#0D0D0D]/40 backdrop-blur-xl flex gap-5 items-start hover:bg-[#111] transition-colors group`}>
-                                            <div className={`p-3.5 rounded-2xl bg-black/60 border ${tc.border} shrink-0 group-hover:scale-110 transition-transform`}>
-                                                <Icon className={`w-5 h-5 ${tc.color}`} />
+                                        <motion.div key={announcement._id} variants={itemVariants} className={`p-4 sm:p-6 rounded-2xl sm:rounded-3xl border ${tc.border} bg-[#0D0D0D]/40 backdrop-blur-xl flex gap-3 sm:gap-5 items-start hover:bg-[#111] transition-colors group`}>
+                                            <div className={`p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-black/60 border ${tc.border} shrink-0 group-hover:scale-110 transition-transform`}>
+                                                <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${tc.color}`} />
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <h3 className="text-sm font-black text-white uppercase tracking-wide">{announcement.title}</h3>
+                                                <div className="flex items-center justify-between mb-1.5 sm:mb-2 gap-2">
+                                                    <h3 className="text-xs sm:text-sm font-black text-white uppercase tracking-wide">{announcement.title}</h3>
                                                     <span className="text-[9px] font-black text-white/40 uppercase tracking-[0.2em]">{new Date(announcement.createdAt).toLocaleDateString()}</span>
                                                 </div>
-                                                <p className="text-[11px] text-white/60 font-medium leading-relaxed">{announcement.message}</p>
+                                                <p className="text-[10px] sm:text-[11px] text-white/60 font-medium leading-relaxed">{announcement.message}</p>
                                             </div>
                                         </motion.div>
                                     );

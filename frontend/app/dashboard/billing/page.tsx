@@ -136,12 +136,12 @@ function BillingContent() {
     };
 
     return (
-        <div className="space-y-8 animate-fade-in max-w-6xl mx-auto">
+        <div className="space-y-6 sm:space-y-8 animate-fade-in max-w-6xl mx-auto">
             {/* Header */}
             <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/10 to-white/[0.02] backdrop-blur-xl p-6 sm:p-8">
-                <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
-                    <div className="p-2.5 rounded-2xl bg-primary/15 border border-primary/30">
-                        <CircleDollarSign className="h-7 w-7 text-primary" />
+                <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-2.5 sm:gap-3">
+                    <div className="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-primary/15 border border-primary/30">
+                        <CircleDollarSign className="h-6 w-6 sm:h-7 sm:w-7 text-primary" />
                     </div>
                     {t.billing_title}
                 </h1>
@@ -151,7 +151,7 @@ function BillingContent() {
             </div>
 
             {/* Plans Grid */}
-            <div id="plans-section" className="grid md:grid-cols-3 gap-6">
+            <div id="plans-section" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                 {isLoading ? (
                     <div className="col-span-3 flex justify-center py-12">
                         <Loader2 className="w-8 h-8 text-primary animate-spin" />
@@ -164,19 +164,19 @@ function BillingContent() {
                             </div>
                         )}
                         <div className={`absolute -inset-0.5 rounded-3xl blur-xl opacity-0 group-hover:opacity-100 transition duration-500 ${plan._id === bestValuePlanId ? "bg-primary/35" : "bg-white/20"}`} />
-                        <div className={`relative p-7 rounded-3xl border h-full flex flex-col transition-all duration-500 hover:-translate-y-1.5 backdrop-blur-xl ${plan._id === bestValuePlanId
+                        <div className={`relative p-5 sm:p-7 rounded-2xl sm:rounded-3xl border h-full flex flex-col transition-all duration-500 hover:-translate-y-1.5 backdrop-blur-xl ${plan._id === bestValuePlanId
                                 ? "border-primary/40 bg-gradient-to-b from-primary/10 to-black/40"
                                 : "border-white/10 bg-card/60"
                             }`}>
                             <div className="flex items-start justify-between gap-3">
-                                <h3 className="text-lg font-black text-white uppercase tracking-tight leading-tight">{plan.name}</h3>
+                                <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight leading-tight">{plan.name}</h3>
                                 <div className="text-[9px] font-black uppercase tracking-[0.15em] text-primary bg-primary/15 border border-primary/30 px-2.5 py-1 rounded-full">
                                     {plan.coinsAmount} {t.coins_included_short}
                                 </div>
                             </div>
 
                             <div className="mt-5 flex items-end gap-2">
-                                <div className="text-4xl font-black text-white tabular-nums leading-none">
+                                <div className="text-3xl sm:text-4xl font-black text-white tabular-nums leading-none">
                                     {plan.price.toLocaleString()}
                                 </div>
                                 <span className="pb-1 text-xs font-bold text-gray-500 uppercase tracking-widest">TZS</span>
@@ -189,12 +189,12 @@ function BillingContent() {
                                 </p>
                             </div>
 
-                            <ul className="mt-5 space-y-3.5 flex-1">
+                            <ul className="mt-4 sm:mt-5 space-y-3 flex-1">
                                 <li className="flex items-center gap-3 group/item">
                                     <div className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 group-hover/item:scale-110 transition-transform">
                                         <CheckCircle2 className="w-3.5 h-3.5 stroke-[2.5]" />
                                     </div>
-                                    <span className="text-[11px] font-bold text-gray-300 uppercase tracking-wider">
+                                    <span className="text-[10px] sm:text-[11px] font-bold text-gray-300 uppercase tracking-wider">
                                         {t.unlimited_messages}
                                     </span>
                                 </li>
@@ -218,7 +218,7 @@ function BillingContent() {
 
                             <Button
                                 onClick={() => { setSelectedPlan(plan); setIsCheckoutOpen(true); }}
-                                className={`mt-7 w-full border transition-all font-black uppercase tracking-[0.16em] text-[10px] h-12 rounded-2xl ${plan._id === bestValuePlanId
+                                className={`mt-6 sm:mt-7 w-full border transition-all font-black uppercase tracking-[0.14em] sm:tracking-[0.16em] text-[10px] h-11 sm:h-12 rounded-xl sm:rounded-2xl ${plan._id === bestValuePlanId
                                         ? "bg-primary text-black hover:bg-primary/90 border-primary"
                                         : "bg-white/5 border-white/10 hover:border-primary text-white hover:text-black hover:bg-primary"
                                     }`}
@@ -233,10 +233,10 @@ function BillingContent() {
 
             {/* Checkout Dialog */}
             <Dialog open={isCheckoutOpen} onOpenChange={setIsCheckoutOpen}>
-                <DialogContent className="sm:max-w-lg bg-zinc-950 border-white/10 backdrop-blur-2xl rounded-3xl p-0 overflow-hidden">
+                <DialogContent className="sm:max-w-lg bg-zinc-950 border-white/10 backdrop-blur-2xl rounded-2xl sm:rounded-3xl p-0 overflow-hidden">
                     <div className="p-6 sm:p-8 bg-gradient-to-b from-white/[0.03] to-transparent">
                     <DialogHeader>
-                        <DialogTitle className="text-xl font-black text-white uppercase tracking-widest">{t.confirm_payment}</DialogTitle>
+                        <DialogTitle className="text-lg sm:text-xl font-black text-white uppercase tracking-widest">{t.confirm_payment}</DialogTitle>
                         <DialogDescription className="text-[11px] font-bold text-gray-500 uppercase tracking-widest leading-relaxed pt-2">
                             {tr("billing_confirm_desc", {
                                 name: selectedPlan?.name || "",
@@ -272,7 +272,7 @@ function BillingContent() {
                                 placeholder={t.billing_phone_placeholder}
                                 value={phoneNumber}
                                 onChange={(e) => setPhoneNumber(e.target.value)}
-                                className="bg-black/50 border-white/10 text-white placeholder:text-gray-700 focus-visible:ring-primary h-14 rounded-2xl font-mono text-lg tracking-widest"
+                                className="bg-black/50 border-white/10 text-white placeholder:text-gray-700 focus-visible:ring-primary h-12 sm:h-14 rounded-xl sm:rounded-2xl font-mono text-base sm:text-lg tracking-widest"
                             />
                             <p className="text-[9px] font-bold uppercase tracking-widest text-gray-600">
                                 {t.billing_secure_checkout}
@@ -281,7 +281,7 @@ function BillingContent() {
                     </div>
 
                     <div className="flex flex-col gap-3">
-                        <Button onClick={handleCheckout} disabled={isProcessing} className="w-full h-14 bg-primary text-black hover:bg-primary/90 font-black uppercase tracking-[0.2em] text-[11px] rounded-2xl shadow-xl shadow-primary/20">
+                        <Button onClick={handleCheckout} disabled={isProcessing} className="w-full h-12 sm:h-14 bg-primary text-black hover:bg-primary/90 font-black uppercase tracking-[0.16em] sm:tracking-[0.2em] text-[10px] sm:text-[11px] rounded-xl sm:rounded-2xl shadow-xl shadow-primary/20">
                             {isProcessing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {t.processing}</> : t.pay_now}
                         </Button>
                         <Button variant="ghost" onClick={() => !isProcessing && setIsCheckoutOpen(false)} disabled={isProcessing} className="w-full h-12 text-[10px] text-gray-500 font-bold uppercase tracking-widest hover:text-white hover:bg-white/5 rounded-xl">

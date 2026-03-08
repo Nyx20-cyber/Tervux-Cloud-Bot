@@ -131,14 +131,14 @@ export function AdminReferral() {
     }
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-5 sm:space-y-8">
             {/* Header */}
             <div className="flex items-center gap-3">
-                <div className="p-3 rounded-2xl bg-yellow-500/10 border border-yellow-500/20">
-                    <Crown className="h-6 w-6 text-yellow-400" />
+                <div className="p-2.5 sm:p-3 rounded-xl sm:rounded-2xl bg-yellow-500/10 border border-yellow-500/20">
+                    <Crown className="h-5 w-5 sm:h-6 sm:w-6 text-yellow-400" />
                 </div>
                 <div>
-                    <h2 className="text-xl font-black text-white uppercase tracking-tight">{t.admin_referral_management}</h2>
+                    <h2 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight">{t.admin_referral_management}</h2>
                     <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{t.admin_king_ceremony_leaderboard_settings}</p>
                 </div>
                 <button onClick={fetchData} className="ml-auto p-2 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white transition-colors">
@@ -147,7 +147,7 @@ export function AdminReferral() {
             </div>
 
             {/* Stats Row */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 {[
                     { label: t.total_referrals, value: data?.totalReferrals ?? 0, icon: Users, color: "primary" },
                     { label: t.admin_king_bonus_coins, value: `${data?.kingBonusCoins} 🪙`, icon: Crown, color: "yellow-400" },
@@ -156,7 +156,7 @@ export function AdminReferral() {
                     { label: t.admin_this_weeks_leader, value: data?.topWeekly ? `${data.topWeekly.weeklyReferralCount} ${t.referrals}` : t.admin_no_one_yet, icon: TrendingUp, color: "primary" },
                 ].map((stat, i) => (
                     <motion.div key={i} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
-                        className="p-5 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-3">
+                        className="p-4 sm:p-5 rounded-xl sm:rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-3">
                         <div className="flex items-center gap-2">
                             <stat.icon className={`h-4 w-4 text-${stat.color}`} />
                             <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest">{stat.label}</p>
@@ -166,7 +166,7 @@ export function AdminReferral() {
                 ))}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
                 {/* Left: Settings + Actions */}
                 <div className="space-y-5">
                     {/* Reward Coins Settings */}

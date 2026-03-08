@@ -43,22 +43,22 @@ export default function DeploymentsPage() {
 
     return (
         <DashboardLayout>
-            <div className="space-y-8 animate-fade-in">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-6 sm:space-y-8 animate-fade-in">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
                     <div>
-                        <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
-                            <ShieldCheck className="h-8 w-8 text-primary" />
+                        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-2.5 sm:gap-3">
+                            <ShieldCheck className="h-6 w-6 sm:h-8 sm:w-8 text-primary" />
                             {t.deployments}
                         </h1>
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">{t.manage_pause_deploy}</p>
                     </div>
-                    <div className="flex items-center gap-3 bg-white/5 border border-white/10 p-3 rounded-2xl backdrop-blur-md">
-                        <div className="p-2 rounded-xl bg-yellow-500/20 text-yellow-500">
-                            <Coins className="w-5 h-5" />
+                    <div className="flex items-center gap-2.5 bg-white/5 border border-white/10 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl backdrop-blur-md w-fit">
+                        <div className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-yellow-500/20 text-yellow-500">
+                            <Coins className="w-4 h-4 sm:w-5 sm:h-5" />
                         </div>
                         <div>
                             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{t.available_coins} 🪙</p>
-                            <p className="text-sm font-bold text-white tracking-widest">{user?.coins || 0}</p>
+                            <p className="text-xs sm:text-sm font-bold text-white tracking-widest">{user?.coins || 0}</p>
                         </div>
                     </div>
                 </div>
@@ -78,7 +78,7 @@ export default function DeploymentsPage() {
                             </Button>
                         </div>
                     ) : (
-                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        <div className="grid gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-3">
                             {sessions.map(session => (
                                 <SessionCard key={session._id} session={session} />
                             ))}
@@ -167,7 +167,7 @@ function SessionCard({ session }: { session: any }) {
     };
 
     return (
-        <div className={`p-5 rounded-2xl border ${isActive ? 'border-primary/30 bg-primary/5' : isError ? 'border-destructive/30 bg-destructive/5' : isPaused ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-white/5'} flex flex-col gap-4 backdrop-blur-md transition-all`}>
+        <div className={`p-4 sm:p-5 rounded-xl sm:rounded-2xl border ${isActive ? 'border-primary/30 bg-primary/5' : isError ? 'border-destructive/30 bg-destructive/5' : isPaused ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-white/5'} flex flex-col gap-3 sm:gap-4 backdrop-blur-md transition-all`}>
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -175,7 +175,7 @@ function SessionCard({ session }: { session: any }) {
                         <Network className="w-4 h-4" />
                     </div>
                     <div>
-                        <p className="text-sm font-bold text-white tracking-widest">{session.phone || t.unknown_phone}</p>
+                        <p className="text-xs sm:text-sm font-bold text-white tracking-widest">{session.phone || t.unknown_phone}</p>
                         <p className={`text-[9px] font-bold uppercase tracking-widest ${isActive ? 'text-primary' : isError ? 'text-destructive' : isPaused ? 'text-amber-500' : 'text-gray-500'}`}>
                             {session.status}
                         </p>
@@ -201,11 +201,11 @@ function SessionCard({ session }: { session: any }) {
             )}
 
             {/* Actions */}
-            <div className="flex gap-2 mt-auto pt-2">
+            <div className="flex gap-2 mt-auto pt-1.5 sm:pt-2">
                 <Button
                     variant="outline" size="sm"
                     onClick={() => setIsPauseDialogOpen(true)}
-                    className="flex-1 border-white/10 bg-white/5 hover:bg-white/10 text-[10px] uppercase font-bold tracking-widest h-8 text-white transition-colors"
+                    className="flex-1 border-white/10 bg-white/5 hover:bg-white/10 text-[9px] sm:text-[10px] uppercase font-bold tracking-widest h-8 text-white transition-colors"
                 >
                     {isPaused ? <PlayCircle className="w-3 h-3 mr-2" /> : <PauseCircle className="w-3 h-3 mr-2" />}
                     {isPaused ? t.resume : t.pause}
@@ -221,7 +221,7 @@ function SessionCard({ session }: { session: any }) {
             {isSubExpired && (
                 <Button
                     onClick={() => setIsDeployDialogOpen(true)}
-                    className="w-full bg-primary text-black font-bold uppercase tracking-widest text-[10px] h-8 mt-2 hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
+                    className="w-full bg-primary text-black font-bold uppercase tracking-widest text-[9px] sm:text-[10px] h-9 mt-2 hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
                 >
                     <Rocket className="w-3 h-3 mr-2" />
                     {t.deploy_bot_cost}

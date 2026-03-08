@@ -99,10 +99,10 @@ export function GlobalSettings() {
         <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="grid gap-6 md:grid-cols-2"
+            className="grid gap-4 sm:gap-6 md:grid-cols-2"
         >
             {/* General Settings */}
-            <div className="p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-6">
+            <div className="p-4 sm:p-6 rounded-xl sm:rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-5 sm:space-y-6">
                 <div className="flex items-center gap-3">
                     <div className="p-2 rounded-xl bg-primary/20 border border-primary/30">
                         <Globe className="w-5 h-5 text-primary" />
@@ -134,7 +134,7 @@ export function GlobalSettings() {
             </div>
 
             {/* Access Controls */}
-            <div className="p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-6">
+            <div className="p-4 sm:p-6 rounded-xl sm:rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-5 sm:space-y-6">
                 <div className="flex items-center gap-3">
                     <div className="p-2 rounded-xl bg-orange-500/20 border border-orange-500/30">
                         <ShieldAlert className="w-5 h-5 text-orange-400" />
@@ -189,7 +189,7 @@ export function GlobalSettings() {
             </div>
 
             {/* Rewards & Incentives */}
-            <div className="p-6 rounded-2xl border border-yellow-500/20 bg-yellow-500/5 backdrop-blur-md space-y-6">
+            <div className="p-4 sm:p-6 rounded-xl sm:rounded-2xl border border-yellow-500/20 bg-yellow-500/5 backdrop-blur-md space-y-5 sm:space-y-6">
                 <div className="flex items-center gap-3">
                     <div className="p-2 rounded-xl bg-yellow-500/20 border border-yellow-500/30">
                         <Settings className="w-5 h-5 text-yellow-500" />
@@ -232,7 +232,7 @@ export function GlobalSettings() {
                 <button
                     onClick={() => setConfirmOpen(true)}
                     disabled={saving}
-                    className="flex items-center gap-2 px-6 py-3 rounded-xl bg-primary/20 border border-primary/30 text-primary text-[10px] font-black uppercase tracking-widest hover:bg-primary/30 transition-all disabled:opacity-50"
+                    className="w-full sm:w-auto justify-center flex items-center gap-2 px-6 py-3 rounded-xl bg-primary/20 border border-primary/30 text-primary text-[10px] font-black uppercase tracking-widest hover:bg-primary/30 transition-all disabled:opacity-50"
                 >
                     {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                     {t.admin_save_all_settings}

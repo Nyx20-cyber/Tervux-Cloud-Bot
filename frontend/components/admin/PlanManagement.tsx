@@ -177,20 +177,20 @@ export function PlanManagement() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="space-y-4"
+            className="space-y-3 sm:space-y-4"
         >
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                     <Package className="h-5 w-5 text-sky-400" />
-                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{t.plans}</h2>
+                    <h2 className="text-base sm:text-lg font-semibold tracking-tight text-white uppercase">{t.plans}</h2>
                     <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">
                         {plans.length}
                     </span>
                 </div>
                 <button
                     onClick={openCreate}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/20 border border-primary/30 text-primary text-[10px] font-black uppercase tracking-widest hover:bg-primary/30 transition-all"
+                    className="w-full sm:w-auto justify-center flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/20 border border-primary/30 text-primary text-[10px] font-black uppercase tracking-widest hover:bg-primary/30 transition-all"
                 >
                     <Plus className="h-3.5 w-3.5" />
                     {t.admin_new_plan}
@@ -207,7 +207,7 @@ export function PlanManagement() {
                     <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">{t.admin_no_plans_created_yet}</p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     <AnimatePresence>
                         {plans.map(plan => (
                             <motion.div
@@ -215,7 +215,7 @@ export function PlanManagement() {
                                 initial={{ opacity: 0, scale: 0.95 }}
                                 animate={{ opacity: 1, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.95 }}
-                                className={`relative rounded-2xl border backdrop-blur-xl p-5 space-y-4 transition-all group ${plan.isActive
+                                className={`relative rounded-xl sm:rounded-2xl border backdrop-blur-xl p-4 sm:p-5 space-y-4 transition-all group ${plan.isActive
                                         ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"
                                         : "border-red-500/20 bg-red-500/5 opacity-60"
                                     }`}

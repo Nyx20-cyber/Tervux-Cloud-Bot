@@ -116,10 +116,10 @@ export function CoinManagement() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="space-y-4"
+            className="space-y-3 sm:space-y-4"
         >
             {/* Global Bonus Banner */}
-            <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/60 via-emerald-900/20 to-emerald-950/60 p-6 space-y-5">
+            <div className="rounded-xl sm:rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/60 via-emerald-900/20 to-emerald-950/60 p-4 sm:p-6 space-y-4 sm:space-y-5">
                 <div className="flex items-center gap-3">
                     <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
                         <Globe className="h-5 w-5 text-emerald-400" />
@@ -132,7 +132,7 @@ export function CoinManagement() {
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
                     {/* Amount */}
                     <div className="space-y-1.5">
                         <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 block">{t.admin_coins_per_user} *</label>
@@ -230,9 +230,9 @@ export function CoinManagement() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
                 {/* User List */}
-                <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl overflow-hidden">
+                <div className="lg:col-span-2 rounded-xl sm:rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl overflow-hidden">
                     {/* Search */}
                     <div className="p-4 border-b border-white/10">
                         <div className="relative">

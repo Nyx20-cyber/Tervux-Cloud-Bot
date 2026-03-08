@@ -114,17 +114,17 @@ export default function AdminDashboard() {
 
     return (
         <DashboardLayout>
-            <div className="space-y-8 animate-fade-in pr-0 sm:pr-4">
+            <div className="space-y-6 sm:space-y-8 animate-fade-in pr-0 sm:pr-4">
                 {/* Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="space-y-1">
-                        <div className="flex items-center gap-3 text-red-500">
+                        <div className="flex items-center gap-2.5 sm:gap-3 text-red-500">
                             <div className="p-2 rounded-xl bg-red-500/10 border border-red-500/20">
-                                <AlertTriangle className="h-6 w-6" />
+                                <AlertTriangle className="h-5 w-5 sm:h-6 sm:w-6" />
                             </div>
                             <span className="text-[10px] font-black uppercase tracking-[0.3em] font-mono">{t.admin_panel}</span>
                         </div>
-                        <h1 className="text-4xl font-black text-white uppercase tracking-tight">
+                        <h1 className="text-2xl sm:text-4xl font-black text-white uppercase tracking-tight">
                             {t.admin_panel}
                         </h1>
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest italic opacity-70">
@@ -136,7 +136,7 @@ export default function AdminDashboard() {
                         whileTap={{ scale: 0.95 }}
                         onClick={handleRefresh}
                         disabled={isLoading}
-                        className="flex items-center gap-2 px-6 py-3 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-white transition-all disabled:opacity-50 backdrop-blur-xl"
+                        className="w-full sm:w-auto justify-center flex items-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-white transition-all disabled:opacity-50 backdrop-blur-xl"
                     >
                         <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
                         {t.refresh}
@@ -144,7 +144,7 @@ export default function AdminDashboard() {
                 </div>
 
                 {/* Navigation Tabs */}
-                <div className="flex items-center gap-2 border-b border-white/5 pb-6 overflow-x-auto no-scrollbar scroll-smooth">
+                <div className="flex items-center gap-2 border-b border-white/5 pb-4 sm:pb-6 overflow-x-auto no-scrollbar scroll-smooth">
                     {ADMIN_TABS.map((tab) => {
                         const Icon = tab.icon;
                         const isActive = activeTab === tab.id;
@@ -153,7 +153,7 @@ export default function AdminDashboard() {
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
                                 className={cn(
-                                    "flex items-center gap-3 px-6 py-4 rounded-[1.25rem] transition-all duration-300 shrink-0 border group",
+                                    "flex items-center gap-2 sm:gap-3 px-4 sm:px-6 py-2.5 sm:py-4 rounded-xl sm:rounded-[1.25rem] transition-all duration-300 shrink-0 border group",
                                     isActive
                                         ? "bg-primary border-primary text-black shadow-lg shadow-primary/20"
                                         : "bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white"
@@ -163,7 +163,7 @@ export default function AdminDashboard() {
                                     "w-4 h-4",
                                     isActive ? "text-black" : "text-gray-500 group-hover:text-primary transition-colors"
                                 )} />
-                                <span className="text-[10px] font-black uppercase tracking-widest">{tab.label}</span>
+                                <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest">{tab.label}</span>
                             </button>
                         );
                     })}
@@ -171,7 +171,7 @@ export default function AdminDashboard() {
 
                 <div className="min-h-[400px]">
                     {isLoading && !stats ? (
-                        <div className="flex flex-col items-center justify-center p-24 bg-black/20 border border-white/5 rounded-[3rem] space-y-6">
+                        <div className="flex flex-col items-center justify-center p-12 sm:p-24 bg-black/20 border border-white/5 rounded-2xl sm:rounded-[3rem] space-y-5 sm:space-y-6">
                             <div className="relative">
                                 <div className="absolute inset-0 bg-primary/20 blur-2xl rounded-full animate-pulse"></div>
                                 <Loader2 className="w-12 h-12 text-primary animate-spin relative z-10" />

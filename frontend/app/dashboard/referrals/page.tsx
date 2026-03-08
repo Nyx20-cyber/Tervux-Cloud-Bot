@@ -139,10 +139,10 @@ export default function ReferralsPage() {
 
     return (
         <DashboardLayout>
-            <div className="space-y-8 animate-fade-in max-w-6xl mx-auto">
+            <div className="space-y-6 sm:space-y-8 animate-fade-in max-w-6xl mx-auto">
                 <div>
-                    <h1 className="text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-3">
-                        <Users className="h-8 w-8 text-primary" />
+                    <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-white uppercase flex items-center gap-2.5 sm:gap-3">
+                        <Users className="h-6 w-6 sm:h-8 sm:w-8 text-primary" />
                         {t.referrals}
                     </h1>
                     <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">{t.invite_friends_tip}</p>
@@ -153,7 +153,7 @@ export default function ReferralsPage() {
                         initial={{ opacity: 0, y: -10 }}
                         animate={{ opacity: 1, y: 0 }}
                         className={cn(
-                            "relative overflow-hidden rounded-3xl border p-6",
+                            "relative overflow-hidden rounded-2xl sm:rounded-3xl border p-4 sm:p-6",
                             king
                                 ? "bg-gradient-to-r from-yellow-950/60 via-amber-900/30 to-yellow-950/60 border-yellow-500/40"
                                 : "bg-white/5 border-white/10"
@@ -165,7 +165,7 @@ export default function ReferralsPage() {
                                 <Crown className="h-40 w-40 text-yellow-400" />
                             </div>
                         )}
-                        <div className="relative z-10 flex flex-col md:flex-row md:items-center gap-4">
+                        <div className="relative z-10 flex flex-col md:flex-row md:items-center gap-3 sm:gap-4">
                             <div className={cn(
                                 "p-4 rounded-2xl flex-shrink-0",
                                 king ? "bg-yellow-500/20" : "bg-white/5"
@@ -181,7 +181,7 @@ export default function ReferralsPage() {
                                 </p>
                                 {king ? (
                                     <>
-                                        <h2 className="text-xl font-black text-white tracking-tight">
+                                        <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
                                             {maskName(king.name)}
                                             <span className="ml-2 text-yellow-400">👑</span>
                                         </h2>
@@ -202,19 +202,19 @@ export default function ReferralsPage() {
                             </div>
                             {king && (
                                 <div className="text-right flex-shrink-0">
-                                    <p className="text-3xl font-black text-yellow-400">+{referralInfo.kingBonusCoins}</p>
+                                    <p className="text-2xl sm:text-3xl font-black text-yellow-400">+{referralInfo.kingBonusCoins}</p>
                                     <p className="text-[9px] font-black text-yellow-500/50 uppercase tracking-widest">COINS 🪙</p>
                                 </div>
                             )}
                         </div>
                     </motion.div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
                     {/* Stats & Code Section */}
                     <div className="lg:col-span-2 space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                             {/* Stats Card: Referrals */}
-                            <div className="p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md flex flex-col justify-between group relative overflow-hidden">
+                            <div className="p-4 sm:p-6 rounded-xl sm:rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md flex flex-col justify-between group relative overflow-hidden">
                                 <div className="absolute -right-4 -top-4 opacity-5 group-hover:opacity-10 transition-opacity">
                                     <Star className="h-24 w-24 text-primary" />
                                 </div>
@@ -225,18 +225,18 @@ export default function ReferralsPage() {
                                         </div>
                                         <div>
                                             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{t.network_impact}</p>
-                                            <h3 className="text-xl font-bold text-white uppercase tracking-tight">{t.active_referrals}</h3>
+                                            <h3 className="text-lg sm:text-xl font-bold text-white uppercase tracking-tight">{t.active_referrals}</h3>
                                         </div>
                                     </div>
                                     <div className="flex items-baseline gap-2 pt-2">
-                                        <span className="text-4xl font-black text-white">{referralInfo.referralCount}</span>
+                                        <span className="text-3xl sm:text-4xl font-black text-white">{referralInfo.referralCount}</span>
                                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{t.successful_invites}</span>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Stats Card: Earnings */}
-                            <div className="p-6 rounded-2xl border border-yellow-500/20 bg-yellow-500/5 backdrop-blur-md flex flex-col justify-between group relative overflow-hidden">
+                            <div className="p-4 sm:p-6 rounded-xl sm:rounded-2xl border border-yellow-500/20 bg-yellow-500/5 backdrop-blur-md flex flex-col justify-between group relative overflow-hidden">
                                 <div className="absolute -right-4 -top-4 opacity-5 group-hover:opacity-10 transition-opacity">
                                     <Coins className="h-24 w-24 text-yellow-500" />
                                 </div>
@@ -247,11 +247,11 @@ export default function ReferralsPage() {
                                         </div>
                                         <div>
                                             <p className="text-[10px] font-bold text-yellow-500/50 uppercase tracking-widest">{t.coins_earned} 🪙</p>
-                                            <h3 className="text-xl font-bold text-white uppercase tracking-tight">{t.coins_rewarded_title}</h3>
+                                            <h3 className="text-lg sm:text-xl font-bold text-white uppercase tracking-tight">{t.coins_rewarded_title}</h3>
                                         </div>
                                     </div>
                                     <div className="flex items-baseline gap-2 pt-2">
-                                        <span className="text-4xl font-black text-yellow-500">{referralInfo.referralCoinsEarned}</span>
+                                        <span className="text-3xl sm:text-4xl font-black text-yellow-500">{referralInfo.referralCoinsEarned}</span>
                                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{t.lifetime_reward}</span>
                                     </div>
                                 </div>
@@ -270,13 +270,13 @@ export default function ReferralsPage() {
                             <CardContent className="space-y-4">
                                 {referralInfo.referralCode ? (
                                     <div className="space-y-4">
-                                        <div className="flex flex-col md:flex-row items-center gap-4">
-                                            <div className="flex-1 w-full p-4 bg-black/40 border border-white/10 rounded-2xl font-mono text-4xl font-black tracking-[0.3em] text-primary text-center shadow-inner">
+                                        <div className="flex flex-col md:flex-row items-center gap-3 sm:gap-4">
+                                            <div className="flex-1 w-full p-3 sm:p-4 bg-black/40 border border-white/10 rounded-xl sm:rounded-2xl font-mono text-2xl sm:text-4xl font-black tracking-[0.2em] sm:tracking-[0.3em] text-primary text-center shadow-inner">
                                                 {referralInfo.referralCode}
                                             </div>
                                             <Button
                                                 variant="outline"
-                                                className="w-full md:w-auto h-16 px-8 rounded-2xl border-white/10 bg-white/5 hover:bg-primary hover:text-black transition-all group font-black uppercase tracking-widest text-[10px]"
+                                                className="w-full md:w-auto h-12 sm:h-16 px-6 sm:px-8 rounded-xl sm:rounded-2xl border-white/10 bg-white/5 hover:bg-primary hover:text-black transition-all group font-black uppercase tracking-widest text-[10px]"
                                                 onClick={() => copyToClipboard(referralInfo.referralCode!)}
                                             >
                                                 <Copy className="h-4 w-4 mr-2" />
@@ -302,7 +302,7 @@ export default function ReferralsPage() {
                                             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{t.no_active_code_found}</p>
                                         </div>
                                         <Button
-                                            className="w-full h-16 bg-primary hover:bg-primary/90 text-black font-black uppercase tracking-widest shadow-[0_0_20px_rgba(var(--primary),0.3)]"
+                                            className="w-full h-12 sm:h-16 bg-primary hover:bg-primary/90 text-black font-black uppercase tracking-widest shadow-[0_0_20px_rgba(var(--primary),0.3)]"
                                             onClick={handleGenerate}
                                             disabled={isGenerating}
                                         >
@@ -407,13 +407,13 @@ export default function ReferralsPage() {
                 </div>
 
                 {/* Instructions Section */}
-                <div className="space-y-4 pt-4">
+                <div className="space-y-3 sm:space-y-4 pt-2 sm:pt-4">
                     <div className="flex items-center gap-2">
-                        <Info className="h-5 w-5 text-primary" />
-                        <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{t.how_it_works}</h2>
+                        <Info className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+                        <h2 className="text-base sm:text-lg font-semibold tracking-tight text-white uppercase">{t.how_it_works}</h2>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <div className="p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-3 relative overflow-hidden group">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                        <div className="p-4 sm:p-6 rounded-xl sm:rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-3 relative overflow-hidden group">
                             <div className="absolute -right-4 -bottom-4 opacity-5 text-8xl font-black text-white group-hover:opacity-10 transition-opacity">1</div>
                             <div className="h-8 w-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-black relative z-10">1</div>
                             <div className="relative z-10 space-y-1">

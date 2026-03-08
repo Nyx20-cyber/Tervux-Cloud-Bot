@@ -44,12 +44,12 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
     }, [user?.coins]);
 
     return (
-        <header className="h-16 border-b border-border bg-card/50 backdrop-blur-xl flex items-center justify-between px-4 lg:px-8 z-20 relative">
-            <div className="flex items-center gap-4">
-                <Button variant="ghost" size="icon" className="lg:hidden text-white" onClick={onMenuClick}>
-                    <Menu className="h-5 w-5" />
+        <header className="h-14 sm:h-16 border-b border-border bg-card/50 backdrop-blur-xl flex items-center justify-between px-3 sm:px-4 lg:px-8 z-20 relative">
+            <div className="flex items-center gap-2 sm:gap-4">
+                <Button variant="ghost" size="icon" className="lg:hidden text-white h-8 w-8 sm:h-9 sm:w-9" onClick={onMenuClick}>
+                    <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
                 </Button>
-                    <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-primary/5 border border-primary/10 backdrop-blur-md">
+                <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-primary/5 border border-primary/10 backdrop-blur-md">
                     <div className="relative flex h-1.5 w-1.5">
                         <motion.span
                             animate={{ opacity: [0.4, 1, 0.4], scale: [1, 1.2, 1] }}
@@ -62,7 +62,11 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                 </div>
             </div>
 
-            <div className="flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-2 sm:gap-3 text-sm">
+                <div className="flex lg:hidden items-center gap-1 bg-yellow-500/10 px-2 py-1 rounded-full border border-yellow-500/20">
+                    <Coins className="h-3 w-3 text-yellow-500" />
+                    <span className="text-[9px] font-bold tracking-wide text-yellow-500 uppercase">{user?.coins || 0}</span>
+                </div>
                 <div className="hidden lg:flex items-center gap-2 bg-yellow-500/10 px-3 py-1.5 rounded-full border border-yellow-500/20 mr-2">
                     <Coins className="h-3 w-3 text-yellow-500" />
                     <span className="text-[10px] font-bold tracking-widest text-yellow-500 uppercase">{user?.coins || 0} {t.coins_word}</span>
@@ -71,8 +75,8 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                 {/* Language Toggle */}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-9 px-3 text-white bg-white/5 border border-white/5 rounded-xl transition-all hover:bg-white/5">
-                            <span className="mr-2 text-base">{language === "en" ? "🇺🇸" : "🇹🇿"}</span>
+                        <Button variant="ghost" size="sm" className="h-8 sm:h-9 px-2.5 sm:px-3 text-white bg-white/5 border border-white/5 rounded-lg sm:rounded-xl transition-all hover:bg-white/5">
+                            <span className="mr-1.5 sm:mr-2 text-sm sm:text-base">{language === "en" ? "🇺🇸" : "🇹🇿"}</span>
                             <span className="text-[10px] font-bold tracking-widest">{language.toUpperCase()}</span>
                         </Button>
                     </DropdownMenuTrigger>
@@ -179,10 +183,10 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                 <motion.button
                     whileTap={{ scale: 0.95 }}
                     onClick={() => logout()}
-                    className="flex items-center h-8 px-4 rounded-full border border-red-500/20 bg-red-500/10 text-red-500 transition-all cursor-pointer"
+                    className="flex items-center h-8 px-2 sm:px-4 rounded-full border border-red-500/20 bg-red-500/10 text-red-500 transition-all cursor-pointer"
                 >
-                    <LogOut className="h-3 w-3 mr-2" />
-                    <span className="text-[10px] font-black uppercase tracking-widest">{t.logout}</span>
+                    <LogOut className="h-3 w-3 sm:mr-2" />
+                    <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">{t.logout}</span>
                 </motion.button>
             </div>
         </header>

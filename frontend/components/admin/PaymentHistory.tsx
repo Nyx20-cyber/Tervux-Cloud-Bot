@@ -168,20 +168,20 @@ export function PaymentHistory() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="space-y-4"
+            className="space-y-3 sm:space-y-4"
         >
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                     <Receipt className="h-5 w-5 text-primary" />
-                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{t.admin_payment_history}</h2>
+                    <h2 className="text-base sm:text-lg font-semibold tracking-tight text-white uppercase">{t.admin_payment_history}</h2>
                     <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
                         {total}
                     </span>
                 </div>
 
                 {/* Summary card */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                     <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-primary/20 bg-primary/5">
                         <CreditCard className="h-3.5 w-3.5 text-primary" />
                         <span className="text-[10px] font-black uppercase tracking-widest text-primary">
@@ -201,7 +201,7 @@ export function PaymentHistory() {
             {/* Filters */}
             <div className="flex flex-col sm:flex-row gap-3">
                 {/* Search */}
-                <div className="relative flex-1 max-w-xs">
+                <div className="relative flex-1 sm:max-w-xs">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                     <input
                         type="text"
@@ -213,13 +213,13 @@ export function PaymentHistory() {
                 </div>
 
                 {/* Status filter pills */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                     <Filter className="h-3.5 w-3.5 text-gray-500 mr-1" />
                     {statuses.map((s) => (
                         <button
                             key={s}
                             onClick={() => { setStatusFilter(s); setPage(1); }}
-                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${statusFilter === s
+                            className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[8px] sm:text-[9px] font-black uppercase tracking-widest transition-all ${statusFilter === s
                                     ? "bg-primary/20 text-primary border border-primary/30"
                                     : "bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10 hover:text-gray-300"
                                 }`}
@@ -231,14 +231,14 @@ export function PaymentHistory() {
             </div>
 
             {/* Table */}
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden backdrop-blur-xl">
+            <div className="rounded-xl sm:rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden backdrop-blur-xl">
                 {isLoading ? (
                     <div className="flex justify-center p-12">
                         <Loader2 className="w-6 h-6 text-primary animate-spin" />
                     </div>
                 ) : (
                     <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left">
+                        <table className="w-full min-w-[1120px] text-sm text-left">
                             <thead className="text-[9px] text-gray-500 uppercase tracking-widest bg-white/[0.03] border-b border-white/10">
                                 <tr>
                                     <th className="px-5 py-4 font-black">{t.admin_date}</th>

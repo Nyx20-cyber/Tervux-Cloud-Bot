@@ -127,20 +127,20 @@ export function AnnouncementSystem() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="space-y-4"
+            className="space-y-3 sm:space-y-4"
         >
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                     <Megaphone className="h-5 w-5 text-orange-400" />
-                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{t.announcements}</h2>
+                    <h2 className="text-base sm:text-lg font-semibold tracking-tight text-white uppercase">{t.announcements}</h2>
                     <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500/30">
                         {activeCount} {t.admin_active}
                     </span>
                 </div>
                 <button
                     onClick={openCreate}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/20 border border-primary/30 text-primary text-[10px] font-black uppercase tracking-widest hover:bg-primary/30 transition-all"
+                    className="w-full sm:w-auto justify-center flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/20 border border-primary/30 text-primary text-[10px] font-black uppercase tracking-widest hover:bg-primary/30 transition-all"
                 >
                     <Plus className="h-3.5 w-3.5" />
                     {t.admin_new_announcement}
@@ -157,7 +157,7 @@ export function AnnouncementSystem() {
                     <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">{t.admin_no_announcements_yet}</p>
                 </div>
             ) : (
-                <div className="space-y-3">
+                <div className="space-y-2.5 sm:space-y-3">
                     <AnimatePresence>
                         {announcements.map(a => {
                             const tc = typeConfig[a.type] || typeConfig.info;
@@ -168,12 +168,12 @@ export function AnnouncementSystem() {
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     exit={{ opacity: 0, y: -10 }}
-                                    className={`rounded-2xl border backdrop-blur-xl p-5 transition-all group ${a.isActive
+                                    className={`rounded-xl sm:rounded-2xl border backdrop-blur-xl p-4 sm:p-5 transition-all group ${a.isActive
                                         ? "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"
                                         : "border-white/5 bg-white/[0.01] opacity-50"
                                         }`}
                                 >
-                                    <div className="flex items-start gap-4">
+                                    <div className="flex items-start gap-3 sm:gap-4">
                                         {/* Type icon */}
                                         <div className={`p-2.5 rounded-xl ${tc.bg} border ${tc.border} shrink-0`}>
                                             <Icon className={`w-4 h-4 ${tc.color}`} />
@@ -205,7 +205,7 @@ export function AnnouncementSystem() {
                                         </div>
 
                                         {/* Actions */}
-                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                        <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
                                             <button
                                                 onClick={() => toggleActive(a)}
                                                 title={a.isActive ? t.admin_hide : t.admin_publish}
