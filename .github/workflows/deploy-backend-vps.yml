@@ -32,11 +32,24 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.VPS_PORT }}" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" << 'EOF'
             set -e
             cd ~/Tervux-Cloud-Bot
+
+            # Preserve server-local runtime config before repo reset
+            mkdir -p /tmp/tervux-deploy-backup
+            [ -f deploy/env/backend.env ] && cp deploy/env/backend.env /tmp/tervux-deploy-backup/backend.env || true
+            [ -f deploy/nginx/nginx.conf ] && cp deploy/nginx/nginx.conf /tmp/tervux-deploy-backup/nginx.conf || true
+
             git fetch origin main
             git checkout main
-            git pull --ff-only origin main
+            git reset --hard origin/main
+
+            # Restore server-local runtime config
+            [ -f /tmp/tervux-deploy-backup/backend.env ] && cp /tmp/tervux-deploy-backup/backend.env deploy/env/backend.env || true
+            [ -f /tmp/tervux-deploy-backup/nginx.conf ] && cp /tmp/tervux-deploy-backup/nginx.conf deploy/nginx/nginx.conf || true
 
             cd deploy
+            # Clean stale/orphan containers created by old compose runs (v1/v2 mixed naming)
+            docker ps -a --format '{{.Names}}' | grep -E '^[a-f0-9]{12}_tervux-(mongo|redis|backend|nginx)$' | xargs -r docker rm -f || true
+
             docker compose -f docker-compose.production.yml --env-file .env up -d mongo redis
             docker compose -f docker-compose.production.yml --env-file .env up -d --build backend
             docker compose -f docker-compose.production.yml --env-file .env up -d nginx
