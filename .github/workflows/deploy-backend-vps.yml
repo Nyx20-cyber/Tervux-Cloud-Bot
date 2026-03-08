@@ -37,6 +37,8 @@ jobs:
             git pull --ff-only origin main
 
             cd deploy
-            docker-compose -f docker-compose.production.yml --env-file .env up -d --build backend nginx
+            # Workaround for docker-compose v1.29 + newer Docker daemon KeyError('ContainerConfig')
+            docker-compose -f docker-compose.production.yml --env-file .env rm -sf backend nginx || true
+            docker-compose -f docker-compose.production.yml --env-file .env up -d --build --force-recreate backend nginx
             docker-compose -f docker-compose.production.yml ps
           EOF
