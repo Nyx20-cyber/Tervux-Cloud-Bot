@@ -17,6 +17,10 @@ const systemSettingsSchema = new mongoose.Schema({
         type: String,
         default: "Tervux Cloud"
     },
+    commandFooter: {
+        type: String,
+        default: "╭──────────────────────────────╮\n│ *Powered by 𝕋𝔼ℝ𝕍𝕌𝕏 𝕒𝕟𝕕 𝔸𝕃𝕃𝔸ℕ𝕄𝕆𝕏 🤖*\n│ 🌐 *bot.tervux.com*\n╰──────────────────────────────╯"
+    },
     kingBonusCoins: {
         type: Number,
         default: 100

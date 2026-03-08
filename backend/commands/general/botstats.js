@@ -34,9 +34,8 @@ export const botstats = async (sock, m, args) => {
 📊 *ℍ𝕖𝕒𝕡:* ${heapMB}MB
 📈 *𝕃𝕠𝕒𝕕:* [${memoryBar}] ${memoryPercent.toFixed(0)}%
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 𝕎𝕙𝕒𝕥𝕤𝔸𝕡𝕡 𝔹𝕠𝕥*
-_𝕊𝕖𝕝𝕗-𝕙𝕠𝕤𝕥𝕖𝕕 𝕡𝕖𝕣𝕤𝕠𝕟𝕒𝕝 𝕒𝕤𝕤𝕚𝕤𝕥𝕒𝕟𝕥_`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 ℂ𝕃𝕆𝕌𝔻 𝔹𝕆𝕋 is running smoothly!*`;
 
     } catch (error) {
         console.error("Stats command error:", error);

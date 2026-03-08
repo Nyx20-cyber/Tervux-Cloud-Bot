@@ -1,11 +1,15 @@
 import { default as makeWASocket, DisconnectReason, Browsers, delay as baileysDelay, fetchLatestWaWebVersion } from "@whiskeysockets/baileys";
 import pino from "pino";
+import path from "path";
+import { fileURLToPath } from "url";
+import { readFile } from "fs/promises";
 import { commands } from "../commands/index.js";
 import { handleGroupParticipantsUpdate, handleGroupMessage } from "./groupEventHandler.js";
 import { addAutoReaction, getRandomEmoji } from "../utils/reactionUtils.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import WhatsAppAuth from "../models/WhatsAppAuth.js";
 import Notification from "../models/Notification.js";
+import { getSettings } from "../models/SystemSettings.js";
 import { useMongoDBAuthState } from "./mongoAuthState.js";
 import { queueService } from "./queueService.js";
 import { emitToUser, emitUpdate } from "./socketService.js";
@@ -13,6 +17,28 @@ import { emitToUser, emitUpdate } from "./socketService.js";
 // Cache the WhatsApp Web protocol version at module load
 // The version hardcoded in Baileys is outdated and gets rejected with 405
 let cachedWaVersion = null;
+let cachedWelcomeVideoBuffer = null;
+let cachedCommandFooter = null;
+let cachedCommandFooterAt = 0;
+const COMMAND_FOOTER_CACHE_TTL = 30_000;
+const DEFAULT_COMMAND_FOOTER = "╭──────────────────────────────╮\n│ *Powered by 𝕋𝔼ℝ𝕍𝕌𝕏 𝕒𝕟𝕕 𝔸𝕃𝕃𝔸ℕ𝕄𝕆𝕏 🤖*\n│ 🌐 *bot.tervux.com*\n╰──────────────────────────────╯";
+const LEGACY_COMMAND_FOOTERS = new Set([
+    "💠 Powered by TERVUX & ALLANMOX",
+    "╭── ✧✦✧ ──╮\n  𝓟𝓸𝔀𝓮𝓻𝓮𝓭 𝓫𝔂\n*ＴＥＲＶＵＸ & ＡＬＬＡＮＭＯＸ*\n╰── ✧✦✧ ──╯",
+    "╭───『 💠 *𝕋𝔼ℝ𝕍𝕌𝕏 ℂ𝕆ℝ𝔼* 』───╮\n│ *Powered by TERVUX & ALLANMOX*\n│ 🌐 *bot.tervux.com*\n╰──────────────────────────────╯",
+    "╭───『 🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 ℂ𝕃𝕆𝕌𝔻 𝔹𝕆𝕋* 』───╮\n│ *Powered by 𝕋𝔼ℝ𝕍𝕌𝕏 𝕒𝕟𝕕 𝔸𝕃𝕃𝔸ℕ𝕄𝕆𝕏*\n│ 🌐 *bot.tervux.com*\n╰──────────────────────────────╯",
+    "╭───『 🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 ℂ𝕃𝕆𝕌𝔻 𝔹𝕆𝕋* 』───╮\n│ *Powered by 𝕋𝔼ℝ𝕍𝕌𝕏 𝕒𝕟𝕕 𝔸𝕃𝕃𝔸ℕ𝕄𝕆𝕏 🤖*\n│ 🌐 *bot.tervux.com*\n╰──────────────────────────────╯"
+]);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const WELCOME_VIDEO_PATH = path.join(__dirname, "../assets/tervux-welcome-video.mp4");
+
+async function getWelcomeVideoBuffer() {
+    if (cachedWelcomeVideoBuffer) return cachedWelcomeVideoBuffer;
+    cachedWelcomeVideoBuffer = await readFile(WELCOME_VIDEO_PATH);
+    return cachedWelcomeVideoBuffer;
+}
+
 async function getWaVersion() {
     if (cachedWaVersion) return cachedWaVersion;
     try {
@@ -24,6 +50,32 @@ async function getWaVersion() {
         cachedWaVersion = [2, 3000, 1034408607]; // Known working version
     }
     return cachedWaVersion;
+}
+
+async function getCommandFooterText() {
+    const now = Date.now();
+    if (cachedCommandFooter && now - cachedCommandFooterAt < COMMAND_FOOTER_CACHE_TTL) {
+        return cachedCommandFooter;
+    }
+
+    try {
+        const settings = await getSettings();
+        const configured = String(settings?.commandFooter || "").trim();
+        if (!configured || LEGACY_COMMAND_FOOTERS.has(configured)) {
+            cachedCommandFooter = DEFAULT_COMMAND_FOOTER;
+            if (settings && settings.commandFooter !== DEFAULT_COMMAND_FOOTER) {
+                settings.commandFooter = DEFAULT_COMMAND_FOOTER;
+                await settings.save();
+            }
+        } else {
+            cachedCommandFooter = configured;
+        }
+    } catch {
+        cachedCommandFooter = DEFAULT_COMMAND_FOOTER;
+    }
+
+    cachedCommandFooterAt = now;
+    return cachedCommandFooter;
 }
 // Pre-fetch on module load
 getWaVersion();
@@ -505,7 +557,7 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
                         console.log(`⚡ [${sessionId}] Command: ${commandName}`);
                         const result = await commands[commandName](sock, m, args);
                         if (result) {
-                            const footer = `\n\n━━━━━━━━━━━━━━━━━━━━\n💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏 𝔹𝕠𝕥*`;
+                            const footer = `\n\n${await getCommandFooterText()}`;
                             if (typeof result === "string") {
                                 await sock.sendMessage(m.key.remoteJid, { text: result + footer });
                             } else if (typeof result === "object") {
@@ -848,16 +900,45 @@ ${text}
                 // Send Welcome Message to user's WhatsApp DM
                 try {
                     const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
-                    const welcomeMsg = `╔══════════════════════════════════╗
-║ 🟢 *𝕋𝔼ℝ𝕍𝕌𝕏 ℂ𝕃𝕆𝕌𝔻 𝔹𝕆𝕋 𝕃𝕀ℕ𝕂𝔼𝔻* 🟢 ║
-╚══════════════════════════════════╝
+                    const welcomeMsg = `╔═━──────────━═╗
+   ✦ TERVUX CLOUD BOT ✦
+╚═━──────────━═╝
 
-Welcome! Your WhatsApp is now securely paired with Tervux Core.
+❖ Your phone is now connected successfully.
 
-To activate 24/7 cloud features like Auto-Reply and Anti-Delete, please return to your Dashboard and select a Subscription Protocol.
+┏━━ NEXT STEPS ━━┓
+1) Billing
+   https://bot.tervux.com/dashboard/billing
+   Buy coins for your account.
 
-✨ *tervux.com/dashboard/billing*`;
-                    await sock.sendMessage(userJid, { text: welcomeMsg });
+2) Deployments
+   Deploy your bot for 50 coins 🪙
+   Duration: 30 days.
+
+3) Configurations
+   Open settings and configure your bot features.
+┗━━━━━━━━━━━━━━┛
+
+✧ Need help?
+Visit: https://bot.tervux.com
+Use the support button to contact us on WhatsApp.
+
+╭── ✧✦✧ ──╮
+  𝓟𝓸𝔀𝓮𝓻𝓮𝓭 𝓫𝔂
+ *ＴＥＲＶＵＸ & ＡＬＬＡＮＭＯＸ*
+╰── ✧✦✧ ──╯`;
+
+                    try {
+                        const welcomeVideo = await getWelcomeVideoBuffer();
+                        await sock.sendMessage(userJid, {
+                            video: welcomeVideo,
+                            caption: welcomeMsg
+                        });
+                    } catch (videoError) {
+                        console.warn(`[${sessionId}] Welcome video unavailable, sending text only:`, videoError.message);
+                        await sock.sendMessage(userJid, { text: welcomeMsg });
+                    }
+
                     console.log(`[${sessionId}] Welcome message sent to user DM.`);
                 } catch (msgErr) {
                     console.error(`[${sessionId}] Failed to send DM:`, msgErr);

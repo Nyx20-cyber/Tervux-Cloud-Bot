@@ -1,6 +1,5 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { getRepoStats } from "../../utils/githubStats.js";
 import { getCachedConfig } from "../../services/configService.js";
 
 export const help = async (sock, m, args) => {
@@ -18,28 +17,13 @@ export const help = async (sock, m, args) => {
     console.error("❌ Failed to load logo for help command:", e.message);
   }
 
-  // Fetch GitHub Stats
-  const stats = await getRepoStats();
-
-  // Fallback if stats fail
-  const githubSection = stats ?
-    `╭───『 📊 *𝔾𝕀𝕋ℍ𝕌𝔹 𝕊𝕋𝔸𝕋𝕊* 』───╮
-│ ⭐ *Stars:* ${stats.stars}
-│ 🍴 *Forks:* ${stats.forks}
-│ 🐞 *Issues:* ${stats.issues}
-│ 📅 *Created:* ${stats.createdAt}
-│ 🔄 *Updated:* ${stats.updatedAt}
-╰──────────────────────────────╯` : "";
-
-  const caption = `╭───『 🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 𝔹𝕆𝕋-V2.0* 』───╮
+  const caption = `╭───『 🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 ℂ𝕃𝕆𝕌𝔻 𝔹𝕆𝕋* 』───╮
 │
 │ ✨ *Prefix:* ${p}
 │ 📅 *Date:* ${new Date().toLocaleDateString()}
 │ 👑 *Creator:* Nyaganya Malima
 │ 🌐 *Portfolio:* nyaganya.tervux.com
 ╰──────────────────────────────╯
-
-${githubSection}
 
 ╭───『 🎮 *𝔽𝕌ℕ ℤ𝕆ℕ𝔼* 』───╮
 │ 💘 ➾ *${p}ship* @user1 @user2

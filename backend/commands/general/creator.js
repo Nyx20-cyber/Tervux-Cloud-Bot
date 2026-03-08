@@ -67,10 +67,7 @@ products that solve real-world problems.
 ⚡ _"I build products before I finish_
 _learning the technology – learning_
 _by doing is my superpower!"_
-
-╔══════════════════════════════════╗
-║    💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏* 💠    ║
-╚══════════════════════════════════╝`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
     if (creatorBuffer) {
         return { image: creatorBuffer, caption, linkPreview: null };

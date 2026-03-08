@@ -10,5 +10,5 @@ export const ping = async (sock, m, args) => {
 🟢 *𝕊𝕥𝕒𝕥𝕦𝕤:* Bot is online!
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 𝔹𝕠𝕥 is alive and ready!*`;
+🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 ℂ𝕃𝕆𝕌𝔻 𝔹𝕆𝕋 is alive and ready!*`;
 };

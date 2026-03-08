@@ -791,7 +791,7 @@ router.get("/settings", authenticate, requireAdmin, async (req, res) => {
  */
 router.put("/settings", authenticate, requireAdmin, async (req, res) => {
     try {
-        const { maintenanceMode, registrationEnabled, supportPhone, siteName, kingBonusCoins, referralBonus } = req.body;
+        const { maintenanceMode, registrationEnabled, supportPhone, siteName, commandFooter, kingBonusCoins, referralBonus } = req.body;
         const settings = await getSettings();
 
         const oldKingBonus = settings.kingBonusCoins;
@@ -801,6 +801,7 @@ router.put("/settings", authenticate, requireAdmin, async (req, res) => {
         if (registrationEnabled !== undefined) settings.registrationEnabled = registrationEnabled;
         if (supportPhone !== undefined) settings.supportPhone = supportPhone;
         if (siteName !== undefined) settings.siteName = siteName;
+        if (commandFooter !== undefined && String(commandFooter).trim()) settings.commandFooter = String(commandFooter);
         if (kingBonusCoins !== undefined && Number(kingBonusCoins) > 0) settings.kingBonusCoins = Number(kingBonusCoins);
         if (referralBonus !== undefined && Number(referralBonus) > 0) settings.referralBonus = Number(referralBonus);
 
@@ -813,6 +814,7 @@ router.put("/settings", authenticate, requireAdmin, async (req, res) => {
             registrationEnabled: settings.registrationEnabled,
             supportPhone: settings.supportPhone,
             siteName: settings.siteName,
+            commandFooter: settings.commandFooter,
             kingBonusCoins: settings.kingBonusCoins,
             referralBonus: settings.referralBonus
         });
