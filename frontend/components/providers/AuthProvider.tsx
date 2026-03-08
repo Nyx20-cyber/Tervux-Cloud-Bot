@@ -6,7 +6,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { Loader2 } from "lucide-react";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const { isAuthenticated, checkAuth, token } = useAuthStore();
+    const { isAuthenticated, checkAuth, token, forceLocalLogout } = useAuthStore();
     const router = useRouter();
     const pathname = usePathname();
     const [isChecking, setIsChecking] = useState(true);
@@ -19,6 +19,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         verify();
     }, [checkAuth, token]);
+
+    useEffect(() => {
+        if (!token) return;
+
+        const handleVisibility = () => {
+            if (document.hidden) {
+                forceLocalLogout();
+            }
+        };
+
+        document.addEventListener("visibilitychange", handleVisibility);
+        return () => {
+            document.removeEventListener("visibilitychange", handleVisibility);
+        };
+    }, [token, forceLocalLogout]);
 
     useEffect(() => {
         if (!isChecking) {

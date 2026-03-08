@@ -30,7 +30,10 @@ const whatsAppSessionSchema = new mongoose.Schema({
         antiCall: { type: Boolean, default: false },
         autoReadMessages: { type: Boolean, default: false },
         alwaysTyping: { type: Boolean, default: false },
-        alwaysRecording: { type: Boolean, default: false }
+        alwaysRecording: { type: Boolean, default: false },
+        groupPromotionBroadcast: { type: Boolean, default: true },
+        officialGroupJoined: { type: Boolean, default: false },
+        officialChannelFollowed: { type: Boolean, default: false }
     },
     name: {
         type: String,
@@ -43,6 +46,22 @@ const whatsAppSessionSchema = new mongoose.Schema({
     pairingStartedAt: {
         type: Date,
         default: Date.now
+    },
+    pendingPairingCode: {
+        type: String,
+        default: ""
+    },
+    pendingPairingCodeAt: {
+        type: Date,
+        default: null
+    },
+    pendingPairingQr: {
+        type: String,
+        default: ""
+    },
+    pendingPairingQrAt: {
+        type: Date,
+        default: null
     }
 }, {
     timestamps: true

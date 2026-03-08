@@ -14,12 +14,13 @@ import { api } from "@/store/useAuthStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
+import { useRouter } from "next/navigation";
 
 export default function DeploymentsPage() {
     const { language } = useLocaleStore();
     const t = translations[language];
     const { sessions, isLoading, fetchSessions, updateSessionLocally } = useSessionStore();
-    const { user } = useAuthStore();
+    const { user, token } = useAuthStore();
 
     useEffect(() => {
         fetchSessions();
@@ -28,7 +29,7 @@ export default function DeploymentsPage() {
         const socket = io(backendUrl, {
             transports: ["websocket", "polling"],
             path: "/socket.io",
-            auth: { token: localStorage.getItem("token") }
+            auth: { token }
         });
 
         socket.on("session_update", (data: { sessionId: string; status: string; isLive?: boolean }) => {
@@ -38,7 +39,7 @@ export default function DeploymentsPage() {
         return () => {
             socket.disconnect();
         };
-    }, [fetchSessions, updateSessionLocally]);
+    }, [fetchSessions, updateSessionLocally, token]);
 
     return (
         <DashboardLayout>
@@ -94,6 +95,7 @@ function SessionCard({ session }: { session: any }) {
     const t = translations[language];
     const { updateSessionLocally, fetchSessions, updateSessionStatus, deploySession } = useSessionStore();
     const { user, updateCoins } = useAuthStore();
+    const router = useRouter();
 
     const [isDeploying, setIsDeploying] = useState(false);
     const isPaused = session.status === "paused";
@@ -120,7 +122,16 @@ function SessionCard({ session }: { session: any }) {
             updateCoins(res.data.user.coins);
             setIsDeployDialogOpen(false);
         } catch (error: any) {
-            toast.error(error.response?.data?.error || t.failed_deploy_bot_insufficient);
+            const rawMsg = String(error?.response?.data?.error || error?.message || "");
+            const isInsufficient = error?.response?.status === 402 || /insufficient coins/i.test(rawMsg);
+            if (isInsufficient) {
+                toast.error(t.deploy_insufficient_redirect);
+                toast.message(t.deploy_redirect_billing);
+                setIsDeployDialogOpen(false);
+                router.push("/dashboard/billing");
+            } else {
+                toast.error(rawMsg || t.failed_deploy_bot_insufficient);
+            }
         } finally {
             setIsDeploying(false);
         }

@@ -39,7 +39,7 @@ const ADMIN_TAB_IDS = [
 ] as const;
 
 export default function AdminDashboard() {
-    const { user } = useAuthStore();
+    const { user, forceLocalLogout } = useAuthStore();
     const router = useRouter();
     const { language } = useLocaleStore();
     const t = translations[language];
@@ -71,8 +71,16 @@ export default function AdminDashboard() {
         try {
             const res = await api.get("/admin/stats");
             setStats(res.data);
-        } catch (err) {
-            console.error(err);
+        } catch (err: any) {
+            const status = err?.response?.status;
+            if (status === 401) {
+                forceLocalLogout();
+                return;
+            }
+            if (status === 403) {
+                router.replace("/dashboard");
+                return;
+            }
         } finally {
             setIsLoading(false);
         }
@@ -86,7 +94,11 @@ export default function AdminDashboard() {
     };
 
     useEffect(() => {
-        if (user && user.role !== "admin") {
+        if (!user) {
+            router.replace("/login");
+            return;
+        }
+        if (user.role !== "admin") {
             router.replace("/dashboard");
             return;
         }

@@ -12,6 +12,7 @@ import { io } from "socket.io-client";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
+import { useAuthStore } from "@/store/useAuthStore";
 
 interface Notification {
     _id: string;
@@ -24,6 +25,7 @@ interface Notification {
 
 export default function NotificationsPage() {
     const { language } = useLocaleStore();
+    const token = useAuthStore((s) => s.token);
     const t = translations[language];
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -45,7 +47,7 @@ export default function NotificationsPage() {
         fetchNotifications();
 
         const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "", {
-            auth: { token: localStorage.getItem("token") }
+            auth: { token }
         });
 
         socket.on("new_notification", (notification: Notification) => {
@@ -55,7 +57,7 @@ export default function NotificationsPage() {
         return () => {
             socket.disconnect();
         };
-    }, [fetchNotifications]);
+    }, [fetchNotifications, token]);
 
     const markAsRead = async (id: string) => {
         try {

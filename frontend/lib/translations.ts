@@ -595,10 +595,13 @@ export const translations = {
         pair_phone_too_short: "Phone number is too short. Please include country code (e.g. 255712345678).",
         pair_timeout: "Connection timed out. The server took too long. Please try again.",
         pair_code_copied: "Code copied to clipboard",
+        pair_redirect_deployments: "Connected. Redirecting you to Deployments to deploy your bot.",
         pair_phone_hint: "* Omit leading zero. Include country prefix.",
         pair_awaiting_payload: "Awaiting Payload...",
         pair_awaiting_code: "Awaiting Code...",
         try_again: "Try Again",
+        deploy_insufficient_redirect: "Not enough coins to deploy this bot.",
+        deploy_redirect_billing: "Redirecting you to Coins page to top up.",
 
         // Gamification
         pioneer_badge: "Pioneer",
@@ -1215,10 +1218,13 @@ export const translations = {
         pair_phone_too_short: "Namba ya simu ni fupi mno. Tafadhali jumuisha kodi ya nchi (mf. 255712345678).",
         pair_timeout: "Muda wa muunganisho umeisha. Server imechukua muda mrefu mno. Tafadhali jaribu tena.",
         pair_code_copied: "Kodi imenakiliwa",
+        pair_redirect_deployments: "Umeunganisha. Tunakupeleka kwenye Deployments u-deploy boti yako.",
         pair_phone_hint: "* Usiongeze sifuri ya mwanzo. Jumuisha kodi ya nchi.",
         pair_awaiting_payload: "Inasubiri data...",
         pair_awaiting_code: "Inasubiri kodi...",
         try_again: "Jaribu tena",
+        deploy_insufficient_redirect: "Sarafu hazitoshi ku-deploy boti hii.",
+        deploy_redirect_billing: "Tunakupeleka kwenye ukurasa wa Sarafu kuongeza salio.",
 
         // Gamification
         pioneer_badge: "Mwanzilishi",

@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Terminal, Copy, Zap, AlertCircle, Loader2, Check, ShieldCheck, Activity, RefreshCcw, Plus } from "lucide-react";
+import { Terminal, Copy, Zap, AlertCircle, Loader2, Check, ShieldCheck, Activity, RefreshCcw, Plus, Share2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { QRCodeSVG } from "qrcode.react";
 import { io, Socket } from "socket.io-client";
 import { toast } from "sonner";
+import confetti from "canvas-confetti";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useAuthStore, api } from "@/store/useAuthStore";
 import { useRouter } from "next/navigation";
@@ -25,6 +26,9 @@ export default function PairPage() {
     const [errorMsg, setErrorMsg] = useState("");
     const socketRef = useRef<Socket | null>(null);
     const socketWarningShownRef = useRef(false);
+    const statusWatchdogRef = useRef<NodeJS.Timeout | null>(null);
+    const idleStateHitsRef = useRef(0);
+    const successHandledRef = useRef(false);
 
     const [sessionId, setSessionId] = useState("");
     const fetchSessions = useSessionStore(state => state.fetchSessions);
@@ -32,14 +36,51 @@ export default function PairPage() {
     const { token } = useAuthStore();
     const router = useRouter();
 
+    const triggerPairingSuccess = (sid: string, msg?: string) => {
+        if (!sid || successHandledRef.current) return;
+        successHandledRef.current = true;
+        toast.success(msg || t.pair_success);
+        setStatus("linked");
+        setSessionId(sid);
+        fetchSessions();
+        confetti({
+            particleCount: 160,
+            spread: 90,
+            startVelocity: 42,
+            origin: { y: 0.6 }
+        });
+        setTimeout(() => {
+            confetti({
+                particleCount: 90,
+                spread: 72,
+                startVelocity: 36,
+                origin: { y: 0.7, x: 0.3 }
+            });
+            confetti({
+                particleCount: 90,
+                spread: 72,
+                startVelocity: 36,
+                origin: { y: 0.7, x: 0.7 }
+            });
+        }, 240);
+        setTimeout(() => {
+            toast.message(t.pair_redirect_deployments);
+            router.push(`/dashboard/deployments?sessionId=${sid}`);
+        }, 3000);
+    };
+
     useEffect(() => {
         if (!token) return;
 
-        // Prefer same-origin (Next proxy) to avoid CORS/mixed-content issues in production.
-        const backendUrl =
-            process.env.NEXT_PUBLIC_SOCKET_URL ||
-            (typeof window !== "undefined" ? window.location.origin : process.env.NEXT_PUBLIC_API_URL) ||
-            "http://localhost:5000";
+        // Build socket base URL robustly:
+        // - prefer NEXT_PUBLIC_SOCKET_URL
+        // - else derive from NEXT_PUBLIC_API_URL by removing trailing /api
+        // - else fallback to same-origin (Next proxy)
+        const rawSocketUrl = (process.env.NEXT_PUBLIC_SOCKET_URL || "").trim();
+        const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+        const derivedApiOrigin = rawApiUrl.replace(/\/api\/?$/, "");
+        const backendUrl = rawSocketUrl || derivedApiOrigin || "";
+
         const newSocket = io(backendUrl, {
             transports: ["polling", "websocket"],
             path: "/socket.io",
@@ -54,14 +95,17 @@ export default function PairPage() {
             socketWarningShownRef.current = false;
             console.log("Socket connected:", newSocket.id);
         });
-        newSocket.on("connect_error", () => {
-            // Connection attempts may fail transiently; avoid noisy console error spam.
+        newSocket.on("connect_error", (err) => {
+            // Keep a single concise warning and avoid endless loading state on hard failures.
+            if (!socketWarningShownRef.current) {
+                console.warn("Pair socket connect error:", err?.message || "unknown");
+            }
         });
         newSocket.io.on("reconnect_failed", () => {
             if (socketWarningShownRef.current) return;
             socketWarningShownRef.current = true;
             console.warn("Realtime socket connection failed after retries.");
-            toast.warning("Realtime connection issue. Pairing may be delayed; please retry.");
+            toast.warning("Realtime connection issue. Trying fallback delivery...");
         });
 
         newSocket.on("qr_update", (data: { qr: string; sessionId: string }) => {
@@ -77,11 +121,22 @@ export default function PairPage() {
         });
 
         newSocket.on("queue_update", (data: { position: number }) => {
+            if (!data?.position || data.position <= 0) return;
             setStatus(prev => {
                 if (prev === "waiting" || prev === "linked") return prev;
                 setQueuePosition(data.position);
                 return "queued";
             });
+        });
+        newSocket.on("pairing_retry", (data: { message?: string; attempt?: number; maxAttempts?: number }) => {
+            setStatus(prev => (prev === "linked" ? prev : "loading"));
+            if (data?.message) {
+                toast.message(
+                    data.attempt && data.maxAttempts
+                        ? `${data.message} (${data.attempt}/${data.maxAttempts})`
+                        : data.message
+                );
+            }
         });
 
         newSocket.on("queue_ready", (data: { message?: string }) => {
@@ -96,14 +151,7 @@ export default function PairPage() {
         });
 
         newSocket.on("pairing_success", (data: { message?: string; sessionId: string }) => {
-            toast.success(data.message || t.pair_success);
-            setStatus("linked");
-            setSessionId(data.sessionId);
-            fetchSessions();
-
-            setTimeout(() => {
-                router.push(`/dashboard/billing?sessionId=${data.sessionId}`);
-            }, 3000);
+            triggerPairingSuccess(data.sessionId, data.message || t.pair_success);
         });
 
         newSocket.on("pairing_error", (err: { error?: string }) => {
@@ -119,12 +167,231 @@ export default function PairPage() {
         });
 
         return () => {
+            if (statusWatchdogRef.current) {
+                clearTimeout(statusWatchdogRef.current);
+                statusWatchdogRef.current = null;
+            }
             newSocket.disconnect();
             socketRef.current = null;
         };
     }, [token, fetchSessions, router, t]);
 
+    useEffect(() => {
+        if (!sessionId) return;
+        if (!["loading", "waiting"].includes(status)) return;
+        if (successHandledRef.current) return;
+
+        let active = true;
+        const interval = setInterval(async () => {
+            if (!active) return;
+            try {
+                const res = await api.get(`/sessions/${sessionId}/status`);
+                const s = String(res?.data?.status || "").toLowerCase();
+                if (s === "active") {
+                    triggerPairingSuccess(sessionId, t.pair_success);
+                }
+            } catch {
+                // keep polling silently while pairing is in progress
+            }
+        }, 4000);
+
+        return () => {
+            active = false;
+            clearInterval(interval);
+        };
+    }, [sessionId, status, t]);
+
+    useEffect(() => {
+        if (!["loading", "waiting"].includes(status)) return;
+        if (successHandledRef.current) return;
+
+        const normalizedPhone = phone.replace(/\D/g, "");
+        if (!normalizedPhone) return;
+
+        let active = true;
+        const interval = setInterval(async () => {
+            if (!active) return;
+            try {
+                const res = await api.get("/sessions");
+                const sessions: Array<{ _id: string; status?: string; phone?: string }> = res?.data?.sessions || [];
+                const matched = sessions.find((s) => {
+                    const p = String(s?.phone || "").replace(/\D/g, "");
+                    return p === normalizedPhone || p.endsWith(normalizedPhone);
+                });
+                if (matched && String(matched.status || "").toLowerCase() === "active") {
+                    triggerPairingSuccess(matched._id, t.pair_success);
+                }
+            } catch {
+                // silent fallback
+            }
+        }, 5000);
+
+        return () => {
+            active = false;
+            clearInterval(interval);
+        };
+    }, [status, phone, t]);
+
+    useEffect(() => {
+        if (statusWatchdogRef.current) {
+            clearTimeout(statusWatchdogRef.current);
+            statusWatchdogRef.current = null;
+        }
+        if (!["loading", "queued", "waiting"].includes(status)) return;
+
+        statusWatchdogRef.current = setTimeout(() => {
+            setStatus((prev) => {
+                if (!["loading", "queued", "waiting"].includes(prev)) return prev;
+                setErrorMsg(t.pair_timeout);
+                toast.error(t.pair_timeout);
+                return "error";
+            });
+        }, 210000);
+
+        return () => {
+            if (statusWatchdogRef.current) {
+                clearTimeout(statusWatchdogRef.current);
+                statusWatchdogRef.current = null;
+            }
+        };
+    }, [status, t]);
+
+    useEffect(() => {
+        if (method !== "code") return;
+        if (!["loading", "waiting"].includes(status)) return;
+        if (pairingCode) return;
+
+        let active = true;
+        const interval = setInterval(async () => {
+            if (!active) return;
+            try {
+                const res = await api.get("/sessions/pair/latest-code");
+                const code = res?.data?.code;
+                if (typeof code === "string" && code.trim()) {
+                    setPairingCode(code);
+                    if (res?.data?.sessionId) setSessionId(res.data.sessionId);
+                    setStatus((prev) => (prev === "linked" ? prev : "waiting"));
+                }
+            } catch {
+                // keep polling until socket success/error or watchdog timeout
+            }
+        }, 2500);
+
+        return () => {
+            active = false;
+            clearInterval(interval);
+        };
+    }, [method, status, pairingCode]);
+
+    useEffect(() => {
+        if (method !== "qr") return;
+        if (!["loading", "waiting"].includes(status)) return;
+        if (qrCode) return;
+
+        let active = true;
+        const interval = setInterval(async () => {
+            if (!active) return;
+            try {
+                const res = await api.get("/sessions/pair/latest-qr");
+                const qr = res?.data?.qr;
+                if (typeof qr === "string" && qr.trim()) {
+                    setQrCode(qr);
+                    if (res?.data?.sessionId) setSessionId(res.data.sessionId);
+                    setStatus((prev) => (prev === "linked" ? prev : "waiting"));
+                }
+            } catch {
+                // keep polling until socket success/error or watchdog timeout
+            }
+        }, 2500);
+
+        return () => {
+            active = false;
+            clearInterval(interval);
+        };
+    }, [method, status, qrCode]);
+
+    useEffect(() => {
+        if (!["queued", "loading"].includes(status)) return;
+        let active = true;
+
+        const interval = setInterval(async () => {
+            if (!active) return;
+            try {
+                const res = await api.get("/sessions/pair/queue-status");
+                const position = Number(res?.data?.position);
+                if (!Number.isFinite(position)) return;
+
+                // 0 means pairing is currently processing for this user.
+                if (position === 0) {
+                    setStatus((prev) => (prev === "linked" || prev === "waiting" ? prev : "loading"));
+                    return;
+                }
+                // >0 means still queued.
+                if (position > 0) {
+                    setQueuePosition(position);
+                    setStatus((prev) => (prev === "linked" || prev === "waiting" ? prev : "queued"));
+                }
+            } catch {
+                // Silent fallback; realtime socket or watchdog still handles terminal states.
+            }
+        }, 3000);
+
+        return () => {
+            active = false;
+            clearInterval(interval);
+        };
+    }, [status]);
+
+    useEffect(() => {
+        if (!["loading", "waiting", "queued"].includes(status)) {
+            idleStateHitsRef.current = 0;
+            return;
+        }
+
+        let active = true;
+        const interval = setInterval(async () => {
+            if (!active) return;
+            try {
+                const res = await api.get("/sessions/pair/state");
+                const state = String(res?.data?.state || "");
+                const hasCode = !!res?.data?.hasCode;
+                const hasQr = !!res?.data?.hasQr;
+                if (state === "processing") {
+                    idleStateHitsRef.current = 0;
+                    return;
+                }
+                if (state === "queued") {
+                    idleStateHitsRef.current = 0;
+                    const position = Number(res?.data?.position);
+                    if (Number.isFinite(position) && position > 0) {
+                        setQueuePosition(position);
+                    }
+                    return;
+                }
+                if (state === "idle" && !hasCode && !hasQr) {
+                    idleStateHitsRef.current += 1;
+                    if (idleStateHitsRef.current >= 2) {
+                        setStatus((prev) => {
+                            if (!["loading", "waiting", "queued"].includes(prev)) return prev;
+                            setErrorMsg(t.pair_connect_failed);
+                            toast.error(t.pair_connect_failed);
+                            return "error";
+                        });
+                    }
+                }
+            } catch {
+                // keep silent; other fallbacks/watchdog handle it.
+            }
+        }, 4000);
+
+        return () => {
+            active = false;
+            clearInterval(interval);
+        };
+    }, [status, t]);
+
     const handlePair = async () => {
+        successHandledRef.current = false;
         if (phone.startsWith("+") || phone.startsWith("0")) {
             setErrorMsg(t.pair_invalid_format);
             setStatus("error");
@@ -153,7 +420,7 @@ export default function PairPage() {
         }, 180000);
 
         try {
-            const data = await createPairingReq(phone.replace(/\D/g, ""), method);
+            const data = await createPairingReq(phone.replace(/\D/g, ""), method, socketRef.current?.id || undefined);
             if (data.status === "queued") {
                 clearTimeout(loadingTimeout);
                 setQueuePosition(data.position);
@@ -178,6 +445,38 @@ export default function PairPage() {
             toast.success(t.pair_code_copied);
         } catch {
             toast.error("Failed to copy code. Please copy manually.");
+        }
+    };
+
+    const handleShareCode = async () => {
+        if (!pairingCode) return;
+        const text = `My TERVUX pairing code: ${pairingCode}`;
+        try {
+            if (typeof navigator !== "undefined" && navigator.share) {
+                await navigator.share({
+                    title: "TERVUX Pairing Code",
+                    text
+                });
+                return;
+            }
+            await navigator.clipboard.writeText(text);
+            toast.success("Pairing code copied for sharing.");
+        } catch {
+            toast.error("Unable to share right now. Please copy the code.");
+        }
+    };
+
+    const cancelCurrentPairing = async () => {
+        try {
+            await api.delete("/sessions/pair/queue");
+        } catch {
+            // best effort cancellation
+        } finally {
+            setQrCode("");
+            setPairingCode("");
+            setSessionId("");
+            setQueuePosition(0);
+            setStatus("idle");
         }
     };
 
@@ -266,11 +565,22 @@ export default function PairPage() {
                                 )}
 
                                 {status === "loading" && (
-                                    <div className="flex flex-col items-center justify-center gap-4 text-primary animate-fade-in py-12">
-                                        <Loader2 className="h-12 w-12 animate-spin" />
-                                        <p className="text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse">
+                                    <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-b from-primary/10 to-transparent px-6 py-12 flex flex-col items-center justify-center gap-4 text-primary animate-fade-in">
+                                        <div className="absolute inset-0 opacity-30 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.12),_transparent_55%)]"></div>
+                                        <div className="relative flex items-center justify-center w-16 h-16 rounded-full border border-primary/40 bg-primary/10">
+                                            <Loader2 className="h-8 w-8 animate-spin" />
+                                        </div>
+                                        <p className="text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse text-center">
                                             {t.preparing_connection}
                                         </p>
+                                        <p className="text-[10px] text-primary/70 text-center">Securing encrypted channel to WhatsApp...</p>
+                                        <Button
+                                            variant="ghost"
+                                            onClick={cancelCurrentPairing}
+                                            className="mt-2 h-8 px-4 rounded-full text-[10px] uppercase tracking-widest border border-white/10 text-white/80 hover:text-white hover:bg-white/10"
+                                        >
+                                            {t.cancel}
+                                        </Button>
                                     </div>
                                 )}
 
@@ -293,10 +603,7 @@ export default function PairPage() {
                                         </div>
                                         <Button
                                             variant="ghost"
-                                            onClick={async () => {
-                                                setStatus("idle");
-                                                try { await api.delete("/sessions/pair/queue"); } catch (e) { }
-                                            }}
+                                            onClick={cancelCurrentPairing}
                                             className="mt-4 h-10 w-32 rounded-xl text-gray-500 hover:text-white hover:bg-white/5 font-bold text-[9px] tracking-widest uppercase transition-all"
                                         >
                                             {t.cancel}
@@ -315,7 +622,7 @@ export default function PairPage() {
                                         </div>
 
                                         <div className="flex justify-center min-h-[200px] items-center">
-                                            <div className="bg-white p-4 rounded-xl shadow-2xl transition-all">
+                                            <div className="bg-gradient-to-b from-white/5 to-transparent border border-white/10 p-4 rounded-xl shadow-2xl transition-all">
                                                 {method === "qr" ? (
                                                     qrCode ? (
                                                         <QRCodeSVG value={qrCode} size={250} />
@@ -326,15 +633,23 @@ export default function PairPage() {
                                                         </div>
                                                     )
                                                 ) : (
-                                                    <div className="flex gap-2 min-h-[56px] items-center justify-center p-2">
-                                                        {pairingCode ? pairingCode.split('').map((char, i) => (
-                                                            <div key={i} className={`w-10 h-14 ${char === '-' ? 'bg-transparent text-gray-400 border-none' : 'bg-gray-100 border-2 border-transparent text-black shadow-sm'} rounded-lg flex items-center justify-center text-2xl font-black`}>
-                                                                {char}
-                                                            </div>
-                                                        )) : (
-                                                            <div className="flex flex-col items-center justify-center gap-3 text-gray-400 px-4">
-                                                                <Loader2 className="h-6 w-6 animate-spin" />
-                                                                <span className="text-[10px] font-bold uppercase tracking-widest">{t.pair_awaiting_code}</span>
+                                                    <div className="w-full min-h-[56px] flex flex-col items-center justify-center gap-4 p-4">
+                                                        <div className="flex gap-2 items-center justify-center">
+                                                            {pairingCode ? pairingCode.split('').map((char, i) => (
+                                                                <div key={i} className={`w-10 h-14 ${char === '-' ? 'bg-transparent text-gray-500 border-none' : 'bg-black/50 border border-primary/30 text-primary shadow-lg shadow-primary/10'} rounded-lg flex items-center justify-center text-2xl font-black backdrop-blur-sm`}>
+                                                                    {char}
+                                                                </div>
+                                                            )) : (
+                                                                <div className="flex flex-col items-center justify-center gap-3 text-gray-400 px-4">
+                                                                    <Loader2 className="h-6 w-6 animate-spin" />
+                                                                    <span className="text-[10px] font-bold uppercase tracking-widest">{t.pair_awaiting_code}</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        {pairingCode && (
+                                                            <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-[10px] uppercase tracking-wider text-primary">
+                                                                <Sparkles className="h-3 w-3" />
+                                                                Secure one-time pairing token
                                                             </div>
                                                         )}
                                                     </div>
@@ -348,6 +663,9 @@ export default function PairPage() {
                                                     <Button variant="outline" onClick={handleCopy} className="h-8 px-4 rounded-full border border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary hover:text-primary text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all">
                                                         <Copy className="h-3 w-3 mr-2" /> {t.copy_code}
                                                     </Button>
+                                                    <Button variant="outline" onClick={handleShareCode} className="h-8 px-4 rounded-full border border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary hover:text-primary text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all">
+                                                        <Share2 className="h-3 w-3 mr-2" /> Share
+                                                    </Button>
                                                 </div>
                                             </div>
                                         )}
@@ -355,7 +673,7 @@ export default function PairPage() {
                                         <div className="flex flex-col sm:flex-row gap-4 pt-4">
                                             <Button
                                                 variant="ghost"
-                                                onClick={() => { setStatus("idle"); setQrCode(""); setPairingCode(""); }}
+                                                onClick={cancelCurrentPairing}
                                                 className="flex-1 h-12 rounded-xl text-white hover:bg-white/10 bg-white/5 border border-white/10 font-bold text-xs tracking-widest uppercase transition-all"
                                             >
                                                 {t.cancel}

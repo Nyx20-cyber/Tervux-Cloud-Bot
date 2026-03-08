@@ -17,6 +17,7 @@ import { io } from "socket.io-client";
 import Link from "next/link";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
+import { useAuthStore } from "@/store/useAuthStore";
 
 interface Notification {
     _id: string;
@@ -30,29 +31,38 @@ interface Notification {
 
 export function NotificationBell() {
     const { language } = useLocaleStore();
+    const token = useAuthStore((s) => s.token);
+    const forceLocalLogout = useAuthStore((s) => s.forceLocalLogout);
     const t = translations[language];
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
 
     const fetchNotifications = useCallback(async () => {
+        if (!token) return;
         try {
             const res = await api.get("/notifications");
             setNotifications(res.data.notifications);
             setUnreadCount(res.data.notifications.filter((n: Notification) => !n.isRead).length);
         } catch (error: any) {
+            if (error?.response?.status === 401 || error?.response?.status === 403) {
+                forceLocalLogout();
+                return;
+            }
             if (!(error?.response?.status === 503 && error?.response?.data?.maintenance)) {
-                console.error("Failed to fetch notifications:", error);
+                // keep silent for transient auth/route transitions
             }
         }
-    }, []);
+    }, [token, forceLocalLogout]);
 
     useEffect(() => {
+        if (!token) return;
+
         queueMicrotask(() => {
             fetchNotifications();
         });
 
         const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "", {
-            auth: { token: localStorage.getItem("token") }
+            auth: { token }
         });
 
         socket.on("new_notification", (notification: Notification) => {
@@ -67,7 +77,7 @@ export function NotificationBell() {
         return () => {
             socket.disconnect();
         };
-    }, [fetchNotifications]);
+    }, [fetchNotifications, token]);
 
     const markAsRead = async (id: string) => {
         try {

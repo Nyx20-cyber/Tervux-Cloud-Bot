@@ -30,6 +30,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
+import { useAuthStore } from "@/store/useAuthStore";
 
 interface Session {
     _id: string;
@@ -46,7 +47,14 @@ function ConfigurationsContent() {
     const router = useRouter();
     const sessionIdParam = searchParams.get("session");
     const { language } = useLocaleStore();
+    const user = useAuthStore((s) => s.user);
     const t = translations[language];
+    const isAdmin = user?.role === "admin";
+    const restrictedSettingKeys = new Set([
+        "groupPromotionBroadcast",
+        "officialGroupJoined",
+        "officialChannelFollowed"
+    ]);
 
     const [sessions, setSessions] = useState<Session[]>([]);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
@@ -96,7 +104,17 @@ function ConfigurationsContent() {
         if (!selectedSession) return;
         setIsSaving(true);
         try {
-            const res = await api.put(`/sessions/${selectedSession._id}/settings`, config);
+            const payload = { ...config };
+            if (!isAdmin) {
+                for (const key of restrictedSettingKeys) {
+                    if (selectedSession.settings && Object.prototype.hasOwnProperty.call(selectedSession.settings, key)) {
+                        payload[key] = selectedSession.settings[key];
+                    } else {
+                        delete payload[key];
+                    }
+                }
+            }
+            const res = await api.put(`/sessions/${selectedSession._id}/settings`, payload);
             const savedSettings = cloneSettings(res.data?.settings || config);
             setConfig(savedSettings);
             setSelectedSession(prev => prev ? { ...prev, settings: savedSettings } : prev);
@@ -208,11 +226,16 @@ function ConfigurationsContent() {
                                             </label>
                                             <div className="relative">
                                                 {typeof value === "boolean" ? (
+                                                    (() => {
+                                                        const isRestricted = !isAdmin && restrictedSettingKeys.has(key);
+                                                        return (
                                                     <div className="flex items-center gap-2 bg-black/20 border border-white/10 p-1.5 rounded-xl h-11">
                                                         <button
                                                             onClick={() => setConfig({ ...config, [key]: true })}
+                                                            disabled={isRestricted}
                                                             className={cn(
                                                                 "flex-1 h-full rounded-lg transition-all font-bold text-[9px] uppercase tracking-widest",
+                                                                isRestricted && "opacity-60 cursor-not-allowed pointer-events-none",
                                                                 config[key] ? "bg-primary text-black" : "text-gray-500 hover:text-white"
                                                             )}
                                                         >
@@ -220,14 +243,18 @@ function ConfigurationsContent() {
                                                         </button>
                                                         <button
                                                             onClick={() => setConfig({ ...config, [key]: false })}
+                                                            disabled={isRestricted}
                                                             className={cn(
                                                                 "flex-1 h-full rounded-lg transition-all font-bold text-[9px] uppercase tracking-widest",
+                                                                isRestricted && "opacity-60 cursor-not-allowed pointer-events-none",
                                                                 !config[key] ? "bg-destructive text-white" : "text-gray-500 hover:text-white"
                                                             )}
                                                         >
                                                             OFF
                                                         </button>
                                                     </div>
+                                                        );
+                                                    })()
                                                 ) : (
                                                     <Input
                                                         value={config[key] || ""}

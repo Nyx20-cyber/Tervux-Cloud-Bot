@@ -43,12 +43,26 @@ router.post("/pair", authenticate, pairingLimiter, async (req, res) => {
         const { phoneNumber, method } = req.body;
         const cleanPhone = String(phoneNumber || "").replace(/\D/g, "");
         const cleanMethod = method === "qr" ? "qr" : "code";
+        sessionManager.clearPairingCancellation(req.user._id.toString());
 
         if (!cleanPhone) {
             return res.status(400).json({ error: "Phone number is required" });
         }
         if (cleanPhone.length < 11) {
             return res.status(400).json({ error: "Use international format, e.g. 2557XXXXXXXX" });
+        }
+
+        const alreadyConnected = await WhatsAppSession.findOne({
+            userId: req.user._id,
+            phone: cleanPhone,
+            status: { $in: ["active", "paused"] }
+        }).select("_id status phone");
+        if (alreadyConnected) {
+            return res.status(409).json({
+                error: "This phone number is already connected on your account.",
+                sessionId: alreadyConnected._id.toString(),
+                status: alreadyConnected.status
+            });
         }
 
         const activePairPosition = queueService.getQueuePosition(req.user._id.toString());
@@ -107,10 +121,147 @@ router.post("/pair", authenticate, pairingLimiter, async (req, res) => {
  */
 router.delete("/pair/queue", authenticate, async (req, res) => {
     try {
-        queueService.remove(req.user._id.toString());
-        res.json({ success: true, message: "Removed from queue" });
+        await sessionManager.cancelPairingForUser(req.user._id.toString());
+        res.json({ success: true, message: "Pairing cancelled and cleaned up" });
     } catch (error) {
-        res.status(500).json({ error: "Failed to leave queue" });
+        res.status(500).json({ error: "Failed to cancel pairing" });
+    }
+});
+
+/**
+ * GET /api/sessions/pair/queue-status
+ * Reliable queue status fallback when realtime socket is unavailable.
+ */
+router.get("/pair/queue-status", authenticate, async (req, res) => {
+    try {
+        const userId = req.user._id.toString();
+        const position = queueService.getQueuePosition(userId);
+        const active = queueService.getActiveCount();
+        return res.json({
+            position, // 0 = processing, >0 = queued, -1 = not in queue
+            active
+        });
+    } catch (error) {
+        console.error("Queue status error:", error);
+        return res.status(500).json({ error: "Failed to get queue status" });
+    }
+});
+
+/**
+ * GET /api/sessions/pair/state
+ * Consolidated pairing state for robust frontend fallback when socket events are unavailable.
+ */
+router.get("/pair/state", authenticate, async (req, res) => {
+    try {
+        const userId = req.user._id.toString();
+        const position = queueService.getQueuePosition(userId);
+        const pairingSession = await WhatsAppSession.findOne({
+            userId: req.user._id,
+            status: "pairing"
+        })
+            .sort({ createdAt: -1 })
+            .select("_id pendingPairingCode pendingPairingQr pairingStartedAt");
+
+        if (position > 0) {
+            return res.json({
+                state: "queued",
+                position,
+                sessionId: pairingSession?._id?.toString() || null,
+                hasCode: !!pairingSession?.pendingPairingCode,
+                hasQr: !!pairingSession?.pendingPairingQr
+            });
+        }
+
+        if (position === 0 || pairingSession) {
+            return res.json({
+                state: "processing",
+                position: 0,
+                sessionId: pairingSession?._id?.toString() || null,
+                hasCode: !!pairingSession?.pendingPairingCode,
+                hasQr: !!pairingSession?.pendingPairingQr
+            });
+        }
+
+        return res.json({
+            state: "idle",
+            position: -1,
+            sessionId: null,
+            hasCode: false,
+            hasQr: false
+        });
+    } catch (error) {
+        console.error("Pair state error:", error);
+        return res.status(500).json({ error: "Failed to get pairing state" });
+    }
+});
+
+/**
+ * GET /api/sessions/pair/latest-code
+ * Fallback endpoint for clients when socket delivery fails.
+ */
+router.get("/pair/latest-code", authenticate, async (req, res) => {
+    try {
+        const session = await WhatsAppSession.findOne({
+            userId: req.user._id,
+            status: "pairing",
+            pendingPairingCode: { $ne: "" }
+        })
+            .sort({ pendingPairingCodeAt: -1, createdAt: -1 })
+            .select("_id pendingPairingCode pendingPairingCodeAt");
+
+        if (!session) {
+            return res.status(404).json({ error: "No pairing code available yet" });
+        }
+
+        const generatedAt = session.pendingPairingCodeAt ? new Date(session.pendingPairingCodeAt).getTime() : 0;
+        const isExpired = !generatedAt || (Date.now() - generatedAt > 5 * 60 * 1000);
+        if (isExpired) {
+            return res.status(404).json({ error: "Pairing code expired. Please retry." });
+        }
+
+        return res.json({
+            sessionId: session._id.toString(),
+            code: session.pendingPairingCode,
+            generatedAt: session.pendingPairingCodeAt
+        });
+    } catch (error) {
+        console.error("Latest pairing code error:", error);
+        return res.status(500).json({ error: "Failed to fetch pairing code" });
+    }
+});
+
+/**
+ * GET /api/sessions/pair/latest-qr
+ * Fallback endpoint for QR pairing when socket delivery fails.
+ */
+router.get("/pair/latest-qr", authenticate, async (req, res) => {
+    try {
+        const session = await WhatsAppSession.findOne({
+            userId: req.user._id,
+            status: "pairing",
+            pendingPairingQr: { $ne: "" }
+        })
+            .sort({ pendingPairingQrAt: -1, createdAt: -1 })
+            .select("_id pendingPairingQr pendingPairingQrAt");
+
+        if (!session) {
+            return res.status(404).json({ error: "No QR available yet" });
+        }
+
+        const generatedAt = session.pendingPairingQrAt ? new Date(session.pendingPairingQrAt).getTime() : 0;
+        const isExpired = !generatedAt || (Date.now() - generatedAt > 2 * 60 * 1000);
+        if (isExpired) {
+            return res.status(404).json({ error: "QR expired. Please retry." });
+        }
+
+        return res.json({
+            sessionId: session._id.toString(),
+            qr: session.pendingPairingQr,
+            generatedAt: session.pendingPairingQrAt
+        });
+    } catch (error) {
+        console.error("Latest pairing QR error:", error);
+        return res.status(500).json({ error: "Failed to fetch pairing QR" });
     }
 });
 
@@ -191,6 +342,30 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
             sessionManager.connectSession(session._id.toString());
         }
 
+        const deployedSessionId = session._id.toString();
+        const deployedAt = new Date();
+        const deployedUntil = new Date(session.expiresAt);
+        setTimeout(async () => {
+            try {
+                if (!sessionManager.isConnected(deployedSessionId)) {
+                    await sessionManager.connectSession(deployedSessionId);
+                }
+                await sessionManager.sendDeploymentSuccessMessage(deployedSessionId, {
+                    cost,
+                    startAt: deployedAt,
+                    endAt: deployedUntil
+                });
+                await new Promise((resolve) => setTimeout(resolve, 60_000));
+                await sessionManager.ensureOfficialCommunityMembership(deployedSessionId, {
+                    groupJid: "120363408129070824@g.us",
+                    channelJid: "191118025166868@lid",
+                    delayMs: 60_000
+                });
+            } catch (msgErr) {
+                console.warn(`[${deployedSessionId}] Failed to send deployment success DM:`, msgErr.message);
+            }
+        }, 1500);
+
         res.json({ success: true, message: "Bot deployed successfully!", coins: user.coins });
     } catch (error) {
         console.error("Deploy bot error:", error);
@@ -237,7 +412,8 @@ router.put("/:id/settings", authenticate, async (req, res) => {
         const allowedSettings = [
             "prefix", "alwaysOnline", "autoLikeStatus", "autoViewStatus",
             "antiDelete", "antiCall", "antiViewOnce", "antiRemove",
-            "autoReadMessages", "alwaysTyping", "alwaysRecording"
+            "autoReadMessages", "alwaysTyping", "alwaysRecording",
+            "groupPromotionBroadcast", "officialGroupJoined", "officialChannelFollowed"
         ];
 
         const updates = {};

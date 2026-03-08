@@ -12,7 +12,7 @@ const effectiveSecret = JWT_SECRET || "dev-only-secret-do-not-use-in-prod";
  * Generate JWT token for a user
  */
 export function generateToken(userId) {
-    return jwt.sign({ userId }, effectiveSecret, { expiresIn: "7d" });
+    return jwt.sign({ userId }, effectiveSecret, { expiresIn: "30m" });
 }
 
 /**

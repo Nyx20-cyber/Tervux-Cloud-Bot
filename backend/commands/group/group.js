@@ -573,12 +573,12 @@ export async function welcome(sock, m, args) {
         return `⚠️ This command only works in groups.`;
     }
 
-    const settings = loadGroupSettings(remoteJid);
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const action = args[0]?.toLowerCase();
 
     if (action === "on") {
         settings.welcome.enabled = true;
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `✅ *Welcome Enabled!* New members will now be greeted.
@@ -587,7 +587,7 @@ export async function welcome(sock, m, args) {
 
     if (action === "off") {
         settings.welcome.enabled = false;
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         return `╔══════════════════════════════════╗
 ║  ❌ *𝕎𝔼𝕃ℂ𝕆𝕄𝔼 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌  ║
 ╚══════════════════════════════════╝
@@ -645,10 +645,10 @@ ${p}setwelcome Welcome @user to our family! 🎉
 You are member #{count} in {group}!`;
     }
 
-    const settings = loadGroupSettings(remoteJid);
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     settings.welcome.message = message;
     settings.welcome.enabled = true;
-    saveGroupSettings(remoteJid, settings);
+    await saveGroupSettings(sock.sessionId, remoteJid, settings);
 
     return `✅ Welcome message updated!
 
@@ -666,12 +666,12 @@ export async function goodbye(sock, m, args) {
         return `⚠️ This command only works in groups.`;
     }
 
-    const settings = loadGroupSettings(remoteJid);
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const action = args[0]?.toLowerCase();
 
     if (action === "on") {
         settings.goodbye.enabled = true;
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
@@ -688,7 +688,7 @@ ${settings.goodbye.message}
 
     if (action === "off") {
         settings.goodbye.enabled = false;
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         return `╔══════════════════════════════════╗
 ║  ❌ *𝔾𝕆𝕆𝔻𝔹𝕐𝔼 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌  ║
 ╚══════════════════════════════════╝
@@ -745,10 +745,10 @@ ${p}setgoodbye Goodbye @user! 👋
 We'll miss you in {group}!`;
     }
 
-    const settings = loadGroupSettings(remoteJid);
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     settings.goodbye.message = message;
     settings.goodbye.enabled = true;
-    saveGroupSettings(remoteJid, settings);
+    await saveGroupSettings(sock.sessionId, remoteJid, settings);
 
     return `✅ Goodbye message updated!
 
@@ -770,13 +770,13 @@ export async function antilink(sock, m, args) {
         return `⚠️ Bot must be an admin to manage antilink.`;
     }
 
-    const settings = loadGroupSettings(remoteJid);
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const action = args[0]?.toLowerCase();
 
     if (action === "on" || action === "warn") {
         settings.antilink.enabled = true;
         settings.antilink.action = "warn";
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         return `╔══════════════════════════════════╗
 ║  🔗 *𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 - 𝕎𝔸ℝℕ* 🔗  ║
 ╚══════════════════════════════════╝
@@ -789,7 +789,7 @@ Links will be deleted and user will be warned.`;
     if (action === "kick") {
         settings.antilink.enabled = true;
         settings.antilink.action = "kick";
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         return `╔══════════════════════════════════╗
 ║  🔗 *𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 - 𝕂𝕀ℂ𝕂* 🔗  ║
 ╚══════════════════════════════════╝
@@ -801,7 +801,7 @@ Links will be deleted and user will be removed!`;
 
     if (action === "off") {
         settings.antilink.enabled = false;
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         return `╔══════════════════════════════════╗
 ║  ❌ *𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌  ║
 ╚══════════════════════════════════╝
@@ -970,17 +970,17 @@ export async function botToggle(sock, m, args) {
     if (!remoteJid.endsWith("@g.us")) return `⚠️ This only works in groups.`;
 
     const status = args[0]?.toLowerCase();
-    const settings = loadGroupSettings(remoteJid);
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
 
     if (status === "on") {
         settings.botEnabled = true;
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         return `✅ *Bot Enabled:* Tervux is now active in this group.`;
     } else if (status === "off") {
         settings.botEnabled = false;
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         return `📴 *Bot Disabled:* Tervux will no longer respond to commands in this group (except ${p}bot on).`;
     }
 
@@ -1003,7 +1003,7 @@ export async function rejoin(sock, m, args) {
 *How to find ID:* Check the bot logs or use !groupinfo while in the group.`;
     }
 
-    const inviteCode = getInviteCode(targetJid);
+    const inviteCode = await getInviteCode(sock.sessionId, targetJid);
 
     if (!inviteCode) {
         return `❌ *Invite Code Not Found*
@@ -1042,12 +1042,12 @@ This command only works in groups.
 Use *!antidelete* for personal chats.`;
     }
 
-    const settings = loadGroupSettings(remoteJid);
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const action = args[0]?.toLowerCase();
 
     if (action === "on") {
         settings.groupAntiDelete = { enabled: true };
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         return `╔══════════════════════════════════╗
 ║  ✅ *𝔾ℝ𝕆𝕌ℙ 𝔸ℕ𝕋𝕀-𝔻𝔼𝕃𝔼𝕋𝔼 𝔼ℕ𝔸𝔹𝕃𝔼𝔻* ✅  ║
 ╚══════════════════════════════════╝
@@ -1059,7 +1059,7 @@ Deleted messages in this group will now be restored!
 
     if (action === "off") {
         settings.groupAntiDelete = { enabled: false };
-        saveGroupSettings(remoteJid, settings);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
         return `╔══════════════════════════════════╗
 ║  ❌ *𝔾ℝ𝕆𝕌ℙ 𝔸ℕ𝕋𝕀-𝔻𝔼𝕃𝔼𝕋𝔼 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌  ║
 ╚══════════════════════════════════╝

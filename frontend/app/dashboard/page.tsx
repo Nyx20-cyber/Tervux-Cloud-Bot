@@ -34,7 +34,7 @@ interface DashboardStats {
 
 export default function DashboardPage() {
     const { sessions, isLoading, fetchSessions, updateSessionLocally } = useSessionStore();
-    const { user, setUser } = useAuthStore();
+    const { user, token, forceLocalLogout } = useAuthStore();
     const { language } = useLocaleStore();
     const t = translations[language];
     const tr = (key: keyof typeof translations.en, vars?: Record<string, string | number>) => {
@@ -47,8 +47,11 @@ export default function DashboardPage() {
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [isStatsLoading, setIsStatsLoading] = useState(true);
     const isMaintenanceError = (err: any) => err?.response?.status === 503 && err?.response?.data?.maintenance;
+    const isAuthError = (err: any) => err?.response?.status === 401 || err?.response?.status === 403;
 
     useEffect(() => {
+        if (!token || !user) return;
+
         fetchSessions();
 
         const fetchAnnouncements = async () => {
@@ -56,6 +59,10 @@ export default function DashboardPage() {
                 const res = await api.get("/announcements");
                 setAnnouncements(res.data.announcements);
             } catch (err) {
+                if (isAuthError(err)) {
+                    forceLocalLogout();
+                    return;
+                }
                 if (!isMaintenanceError(err)) {
                     console.error("Failed to fetch announcements:", err);
                 }
@@ -68,6 +75,10 @@ export default function DashboardPage() {
                 const res = await api.get("/referral");
                 setReferralBonus(res.data.referralBonus || 10);
             } catch (err) {
+                if (isAuthError(err)) {
+                    forceLocalLogout();
+                    return;
+                }
                 if (!isMaintenanceError(err)) {
                     console.error("Failed to fetch referral info:", err);
                 }
@@ -80,6 +91,10 @@ export default function DashboardPage() {
                 const res = await api.get("/dashboard/stats");
                 setStats(res.data);
             } catch (err) {
+                if (isAuthError(err)) {
+                    forceLocalLogout();
+                    return;
+                }
                 if (!isMaintenanceError(err)) {
                     console.error("Failed to fetch dashboard stats:", err);
                 }
@@ -93,7 +108,7 @@ export default function DashboardPage() {
         const socket = io(backendUrl, {
             transports: ["websocket", "polling"],
             path: "/socket.io",
-            auth: { token: localStorage.getItem("token") }
+            auth: { token }
         });
 
         socket.on("session_update", (data: { sessionId: string; status: string; isLive?: boolean }) => {
@@ -101,14 +116,16 @@ export default function DashboardPage() {
         });
 
         socket.on("balance_update", (data: { coins: number }) => {
-            if (user) {
-                setUser({ ...user, coins: data.coins });
+            const currentUser = useAuthStore.getState().user;
+            const setUser = useAuthStore.getState().setUser;
+            if (currentUser) {
+                setUser({ ...currentUser, coins: data.coins });
             }
         });
         return () => {
             socket.disconnect();
         };
-    }, [fetchSessions, updateSessionLocally]);
+    }, [fetchSessions, updateSessionLocally, token, user, forceLocalLogout]);
 
     const activeSessionsCount = sessions.filter(s => s.status === "active").length;
 

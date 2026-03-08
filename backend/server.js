@@ -7,6 +7,8 @@ import { initWhatsAppService, shutdownWhatsAppService } from "./services/whatsap
 import { runCleanup } from "./services/cleanupService.js";
 import { verifyPendingPayments } from "./services/paymentVerifier.js";
 import { runWeeklyKingCeremony } from "./services/referralKingService.js";
+import { runResellerNudge } from "./services/resellerNudgeService.js";
+import { runGroupPromotionBroadcast } from "./services/groupPromotionBroadcastService.js";
 import cron from "node-cron";
 
 const httpServer = createServer(app);
@@ -50,6 +52,18 @@ async function start() {
         });
         console.log("👑 Weekly Referral King ceremony scheduled for every Sunday at midnight.");
 
+        // 9. Daily reseller opportunity nudge — every day at 03:00 (Africa/Dar_es_Salaam)
+        cron.schedule("0 3 * * *", () => {
+            runResellerNudge().catch(err => console.error("Reseller nudge cron error:", err));
+        }, { timezone: "Africa/Dar_es_Salaam" });
+        console.log("📣 Daily reseller nudge scheduled for 03:00 Africa/Dar_es_Salaam.");
+
+        // 10. Daily group promotion broadcast — midnight (day-change time), EAT
+        cron.schedule("0 0 * * *", () => {
+            runGroupPromotionBroadcast().catch(err => console.error("Group broadcast cron error:", err));
+        }, { timezone: "Africa/Dar_es_Salaam" });
+        console.log("📣 Daily group promotion broadcast scheduled for 00:00 Africa/Dar_es_Salaam.");
+
         // 7. Check pending payments every 15 seconds for near-instant user feedback
         setInterval(() => {
             verifyPendingPayments().catch(err => console.error("Payment verify error:", err));
@@ -66,11 +80,38 @@ async function start() {
 start();
 
 // Global Error Handling
+let lastCryptoNoiseAt = 0;
+const isCryptoNoise = (msg = "") => {
+    const text = String(msg).toLowerCase();
+    return (
+        text.includes("bad mac") ||
+        text.includes("failed to decrypt message with any known session") ||
+        text.includes("session error")
+    );
+};
+
 process.on("unhandledRejection", (reason, promise) => {
+    const msg = reason?.message || reason;
+    if (isCryptoNoise(msg)) {
+        const now = Date.now();
+        if (now - lastCryptoNoiseAt > 30_000) {
+            lastCryptoNoiseAt = now;
+            console.warn("⚠️ Ignored transient WhatsApp crypto/decrypt noise (Bad MAC).");
+        }
+        return;
+    }
     console.error("🔥 Unhandled Rejection at:", promise, "reason:", reason);
 });
 
 process.on("uncaughtException", (err) => {
+    if (isCryptoNoise(err?.message)) {
+        const now = Date.now();
+        if (now - lastCryptoNoiseAt > 30_000) {
+            lastCryptoNoiseAt = now;
+            console.warn("⚠️ Ignored transient WhatsApp crypto/decrypt noise (Bad MAC).");
+        }
+        return;
+    }
     console.error("🔥 Uncaught Exception:", err);
     if (
         err.message.includes("Unsupported state") ||

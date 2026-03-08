@@ -33,7 +33,7 @@ interface SessionState {
   sessions: Session[];
   isLoading: boolean;
   fetchSessions: () => Promise<void>;
-  createPairingReq: (phone: string, method: "qr" | "code") => Promise<any>;
+  createPairingReq: (phone: string, method: "qr" | "code", socketId?: string) => Promise<any>;
   updateSessionLocally: (sessionId: string, updates: Partial<Session>) => void;
   updateSessionSettings: (sessionId: string, settings: SessionSettings) => Promise<void>;
   updateSessionStatus: (sessionId: string, status: string) => Promise<void>;
@@ -65,9 +65,9 @@ export const useSessionStore = create<SessionState>((set) => ({
     }));
   },
 
-  createPairingReq: async (phone: string, method: "qr" | "code") => {
+  createPairingReq: async (phone: string, method: "qr" | "code", socketId?: string) => {
     try {
-      const res = await api.post("/sessions/pair", { phoneNumber: phone, method });
+      const res = await api.post("/sessions/pair", { phoneNumber: phone, method, socketId });
       return res.data;
     } catch (error: any) {
       throw new Error(error.response?.data?.error || "Pairing request failed");

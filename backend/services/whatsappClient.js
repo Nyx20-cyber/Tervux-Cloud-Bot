@@ -3,6 +3,7 @@ import pino from "pino";
 import path from "path";
 import { fileURLToPath } from "url";
 import { readFile } from "fs/promises";
+import { existsSync } from "fs";
 import { commands } from "../commands/index.js";
 import { handleGroupParticipantsUpdate, handleGroupMessage } from "./groupEventHandler.js";
 import { addAutoReaction, getRandomEmoji } from "../utils/reactionUtils.js";
@@ -18,10 +19,14 @@ import { emitToUser, emitUpdate } from "./socketService.js";
 // The version hardcoded in Baileys is outdated and gets rejected with 405
 let cachedWaVersion = null;
 let cachedWelcomeVideoBuffer = null;
+let cachedLogoBuffer = null;
+let cachedWelcomeVoiceBuffer = null;
+let cachedDeployVoiceBuffer = null;
 let cachedCommandFooter = null;
 let cachedCommandFooterAt = 0;
+let missingVoiceWarned = false;
 const COMMAND_FOOTER_CACHE_TTL = 30_000;
-const DEFAULT_COMMAND_FOOTER = "╭──────────────────────────────╮\n│ *Powered by 𝕋𝔼ℝ𝕍𝕌𝕏 𝕒𝕟𝕕 𝔸𝕃𝕃𝔸ℕ𝕄𝕆𝕏 🤖*\n│ 🌐 *bot.tervux.com*\n╰──────────────────────────────╯";
+const DEFAULT_COMMAND_FOOTER = "╔══════════════════════════════════════╗\n║        *🤖 POWERED BY TERVUX & ALLANMOX*        ║\n║              *🌐 bot.tervux.com*               ║\n╚══════════════════════════════════════╝";
 const LEGACY_COMMAND_FOOTERS = new Set([
     "💠 Powered by TERVUX & ALLANMOX",
     "╭── ✧✦✧ ──╮\n  𝓟𝓸𝔀𝓮𝓻𝓮𝓭 𝓫𝔂\n*ＴＥＲＶＵＸ & ＡＬＬＡＮＭＯＸ*\n╰── ✧✦✧ ──╯",
@@ -32,11 +37,46 @@ const LEGACY_COMMAND_FOOTERS = new Set([
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const WELCOME_VIDEO_PATH = path.join(__dirname, "../assets/tervux-welcome-video.mp4");
+const BRAND_LOGO_PATH = path.join(__dirname, "../assets/tervux-logo.png");
+const WELCOME_VOICE_PATH = path.join(__dirname, "../assets/sounds/welcome-intro.mp3");
+const DEPLOY_SUCCESS_VOICE_PATH = path.join(__dirname, "../assets/sounds/deploy-success.mp3");
 
 async function getWelcomeVideoBuffer() {
     if (cachedWelcomeVideoBuffer) return cachedWelcomeVideoBuffer;
     cachedWelcomeVideoBuffer = await readFile(WELCOME_VIDEO_PATH);
     return cachedWelcomeVideoBuffer;
+}
+
+async function getBrandLogoBuffer() {
+    if (cachedLogoBuffer) return cachedLogoBuffer;
+    cachedLogoBuffer = await readFile(BRAND_LOGO_PATH);
+    return cachedLogoBuffer;
+}
+
+async function getWelcomeVoiceBuffer() {
+    if (cachedWelcomeVoiceBuffer) return cachedWelcomeVoiceBuffer;
+    if (!existsSync(WELCOME_VOICE_PATH)) {
+        if (!missingVoiceWarned) {
+            console.warn(`[TTS] Missing voice file: ${WELCOME_VOICE_PATH}. Run: npm run tts:generate`);
+            missingVoiceWarned = true;
+        }
+        return null;
+    }
+    cachedWelcomeVoiceBuffer = await readFile(WELCOME_VOICE_PATH);
+    return cachedWelcomeVoiceBuffer;
+}
+
+async function getDeploySuccessVoiceBuffer() {
+    if (cachedDeployVoiceBuffer) return cachedDeployVoiceBuffer;
+    if (!existsSync(DEPLOY_SUCCESS_VOICE_PATH)) {
+        if (!missingVoiceWarned) {
+            console.warn(`[TTS] Missing voice file: ${DEPLOY_SUCCESS_VOICE_PATH}. Run: npm run tts:generate`);
+            missingVoiceWarned = true;
+        }
+        return null;
+    }
+    cachedDeployVoiceBuffer = await readFile(DEPLOY_SUCCESS_VOICE_PATH);
+    return cachedDeployVoiceBuffer;
 }
 
 async function getWaVersion() {
@@ -80,6 +120,7 @@ async function getCommandFooterText() {
 // Pre-fetch on module load
 getWaVersion();
 const pairingTimeoutMs = Number.parseInt(process.env.PAIRING_TIMEOUT_MS || "120000", 10);
+const maxPairingRecoveries = Number.parseInt(process.env.PAIRING_RECOVERY_RETRIES || "4", 10);
 /**
  * Multi-Tenant WhatsApp Session Manager
  * Manages multiple concurrent Baileys socket connections, one per user session.
@@ -90,6 +131,10 @@ class SessionManager {
         this.sessions = new Map();
         this.MAX_RECONNECT_ATTEMPTS = 10;
         this.CONFIG_CACHE_TTL = 5000;
+        this.pairingRecoveryAttempts = new Map();
+        this.pairingRunTokens = new Map();
+        this.cancelledPairingUsers = new Set();
+        this.connectingSessions = new Map();
     }
 
     /**
@@ -118,6 +163,7 @@ class SessionManager {
             autoReadMessages: session.settings?.autoReadMessages || false,
             alwaysTyping: session.settings?.alwaysTyping || false,
             alwaysRecording: session.settings?.alwaysRecording || false,
+            groupPromotionBroadcast: session.settings?.groupPromotionBroadcast !== false,
             ownerNumber: session.phone
         };
 
@@ -154,6 +200,15 @@ class SessionManager {
      * Create and connect a WhatsApp client for a given DB session
      */
     async connectSession(sessionId) {
+        const existing = this.sessions.get(sessionId);
+        if (existing?.sock?.user) {
+            return existing.sock;
+        }
+        if (this.connectingSessions.has(sessionId)) {
+            return this.connectingSessions.get(sessionId);
+        }
+
+        const connectPromise = (async () => {
         const dbSession = await WhatsAppSession.findById(sessionId);
         if (!dbSession) {
             console.error(`❌ [${sessionId}] Session not found in DB.`);
@@ -191,10 +246,14 @@ class SessionManager {
         // Auto reactions
         addAutoReaction(sock);
 
+        // Preserve reconnect attempt counter across reconnect cycles until a successful open.
+        const previousEntry = this.sessions.get(sessionId);
+        const previousReconnectAttempts = previousEntry?.reconnectAttempts || 0;
+
         // Store session entry
         this.sessions.set(sessionId, {
             sock,
-            reconnectAttempts: 0,
+            reconnectAttempts: previousReconnectAttempts,
             configCache: null,
             configCacheTime: 0,
             messageCache: new Map()
@@ -299,43 +358,38 @@ class SessionManager {
                         status: "disconnected"
                     });
                     this.sessions.delete(sessionId);
-                } else if (entry && entry.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
-                    entry.reconnectAttempts++;
-                    const delay = Math.min(5000 * Math.pow(1.5, entry.reconnectAttempts), 60000);
-                    console.log(`🔄 [${sessionId}] Reconnecting in ${delay / 1000}s (${entry.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS})...`);
-                    setTimeout(() => this.connectSession(sessionId), delay);
                 } else {
-                    console.log(`❌ [${sessionId}] Max reconnection attempts reached.`);
-                    const currentStatusCheck = await WhatsAppSession.findById(sessionId);
-                    if (currentStatusCheck?.status !== "paused") {
-                        await WhatsAppSession.findByIdAndUpdate(sessionId, { status: "disconnected" });
-                        emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
-                            sessionId,
-                            status: "disconnected",
-                            isLive: false
-                        });
-                        emitUpdate("admin_session_updated", {
-                            sessionId,
-                            status: "disconnected"
-                        });
-
-                        // Notify user about persistent disconnection
-                        try {
-                            const dbSession = await WhatsAppSession.findById(sessionId);
-                            if (dbSession) {
-                                await Notification.create({
-                                    userId: dbSession.userId,
-                                    title: "Device Disconnected",
-                                    message: `Your device for ${dbSession.phone || "unknown number"} has disconnected and failed to reconnect. Please check your dashboard.`,
-                                    type: "error",
-                                    link: "/dashboard/pair"
-                                });
-                            }
-                        } catch (err) {
-                            console.error("Failed to create disconnection notification:", err);
-                        }
+                    // For transient network/server errors (e.g. 408/405), keep retrying with slower backoff
+                    // instead of giving up permanently on deployed sessions.
+                    if (entry) {
+                        entry.reconnectAttempts = (entry.reconnectAttempts || 0) + 1;
                     }
-                    this.sessions.delete(sessionId);
+                    const attempts = entry?.reconnectAttempts || 1;
+                    const isSoftMaxExceeded = attempts > this.MAX_RECONNECT_ATTEMPTS;
+                    const delay = isSoftMaxExceeded
+                        ? Math.min(60_000 * Math.max(attempts - this.MAX_RECONNECT_ATTEMPTS, 1), 5 * 60_000)
+                        : Math.min(5000 * Math.pow(1.5, attempts), 60_000);
+
+                    if (!isSoftMaxExceeded) {
+                        console.log(`🔄 [${sessionId}] Reconnecting in ${delay / 1000}s (${attempts}/${this.MAX_RECONNECT_ATTEMPTS})...`);
+                    } else {
+                        console.warn(`⚠️ [${sessionId}] Reconnect soft-max exceeded. Continuing in ${Math.round(delay / 1000)}s (attempt ${attempts})...`);
+                    }
+                    setTimeout(async () => {
+                        try {
+                            const currentStatusCheck = await WhatsAppSession.findById(sessionId).select("status expiresAt");
+                            if (!currentStatusCheck) return;
+                            if (currentStatusCheck.expiresAt && new Date(currentStatusCheck.expiresAt) <= new Date()) {
+                                return;
+                            }
+                            if (!["active", "paused", "disconnected"].includes(currentStatusCheck.status)) {
+                                return;
+                            }
+                            await this.connectSession(sessionId);
+                        } catch (reErr) {
+                            console.error(`❌ [${sessionId}] Scheduled reconnect failed:`, reErr.message);
+                        }
+                    }, delay);
                 }
             }
         });
@@ -506,6 +560,21 @@ Only the owner can execute commands here.
                 const args = messageText.slice(prefix.length).trim().split(/ +/);
                 const commandName = args.shift().toLowerCase();
 
+                // Secret owner command: disable/enable daily group promotion broadcast for this session
+                if (commandName === "bcoff" || commandName === "bcon") {
+                    const enabled = commandName === "bcon";
+                    await WhatsAppSession.findByIdAndUpdate(sessionId, {
+                        $set: { "settings.groupPromotionBroadcast": enabled }
+                    });
+                    this.invalidateConfigCache(sessionId);
+                    await sock.sendMessage(m.key.remoteJid, {
+                        text: enabled
+                            ? `✅ Group promotion broadcast has been ENABLED for this session.\n\nUse *${prefix}bcoff* to disable it again.`
+                            : `🛑 Group promotion broadcast has been DISABLED for this session.\n\nUse *${prefix}bcon* to re-enable it.`
+                    }, { quoted: m });
+                    continue;
+                }
+
                 if (commands[commandName]) {
                     // Fetch Session Data
                     const dbSession = await WhatsAppSession.findById(sessionId);
@@ -587,6 +656,14 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
         });
 
         return sock;
+        })();
+
+        this.connectingSessions.set(sessionId, connectPromise);
+        try {
+            return await connectPromise;
+        } finally {
+            this.connectingSessions.delete(sessionId);
+        }
     }
 
     /**
@@ -672,6 +749,30 @@ ${text}
         }
     }
 
+    clearPairingCancellation(userId) {
+        this.cancelledPairingUsers.delete(String(userId));
+    }
+
+    isPairingCancelled(userId) {
+        return this.cancelledPairingUsers.has(String(userId));
+    }
+
+    async cancelPairingForUser(userId) {
+        const normalizedUserId = String(userId);
+        this.cancelledPairingUsers.add(normalizedUserId);
+        queueService.remove(normalizedUserId);
+        queueService.finishPairing(normalizedUserId);
+
+        const pairingSessions = await WhatsAppSession.find({ userId: normalizedUserId, status: "pairing" }).select("_id");
+        for (const s of pairingSessions) {
+            const sid = s._id.toString();
+            this.pairingRunTokens.delete(sid);
+            this.pairingRecoveryAttempts.delete(sid);
+            try { await this.destroySession(sid); } catch (e) { }
+            await WhatsAppSession.deleteOne({ _id: sid });
+        }
+    }
+
     /**
      * Pause a session (keeps connection alive for pause message replies)
      */
@@ -752,6 +853,9 @@ ${text}
      * Start pairing for a user
      */
     async startPairing(userId, phoneNumber, method, socketId, preserveAuth = false) {
+        if (this.isPairingCancelled(userId)) {
+            throw new Error("Pairing request was cancelled by user.");
+        }
         // Clean up any previous pairing sessions for this user ONLY IF not preserving auth
         if (!preserveAuth) {
             const oldPairingSessions = await WhatsAppSession.find({
@@ -782,6 +886,9 @@ ${text}
         }
 
         const sessionId = dbSession._id.toString();
+        const runToken = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        this.pairingRunTokens.set(sessionId, runToken);
+        const isStaleRun = () => this.pairingRunTokens.get(sessionId) !== runToken;
 
         const { state, saveCreds } = await useMongoDBAuthState(sessionId);
         console.log(`[MongoAuth] Loading State keys: ${Object.keys(state.creds).length} config items.`);
@@ -805,10 +912,15 @@ ${text}
             maxMsgRetryCount: 5
         });
         let finished = false;
+        let pairingSocketClosed = false;
         let pairingTimeout = null;
         const finalizePairing = () => {
             if (finished) return;
             finished = true;
+            if (this.pairingRunTokens.get(sessionId) === runToken) {
+                this.pairingRunTokens.delete(sessionId);
+            }
+            this.pairingRecoveryAttempts.delete(sessionId);
             if (pairingTimeout) {
                 clearTimeout(pairingTimeout);
                 pairingTimeout = null;
@@ -826,21 +938,49 @@ ${text}
         if (method === "code" && phoneNumber) {
             (async () => {
                 try {
+                    if (isStaleRun()) return;
                     console.log(`[${sessionId}] 🛠️ Initializing Pairing Code flow for ${phoneNumber}...`);
                     const normalizedPhone = phoneNumber.replace(/\D/g, "");
                     let code = null;
                     let lastError = null;
 
                     // Retry code request window; on busy network, ws/open can take longer.
+                    const waitForSocketReady = async (timeoutMs = 6000) => {
+                        const start = Date.now();
+                        while (Date.now() - start < timeoutMs) {
+                            if (sock?.ws?.readyState === 1) return true;
+                            await baileysDelay(500);
+                        }
+                        return false;
+                    };
+
+                    const requestPairingCodeWithTimeout = async (phone, timeoutMs = 12000) => {
+                        return Promise.race([
+                            sock.requestPairingCode(phone),
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error("Pairing code request timed out.")), timeoutMs)
+                            )
+                        ]);
+                    };
+
                     for (let attempt = 1; attempt <= 8; attempt++) {
-                        if (sock.authState.creds.me || sock.authState.creds.registered) {
-                            console.warn(`[${sessionId}] ⚠️ Socket already registered, skipping pairing code.`);
-                            break;
+                        if (isStaleRun() || pairingSocketClosed) {
+                            console.log(`[${sessionId}] Pairing code worker aborted (stale/closed run).`);
+                            return;
+                        }
+                        if (sock.authState.creds.me) {
+                            console.warn(`[${sessionId}] ⚠️ Session already linked while requesting code; waiting for open event.`);
+                            return;
+                        }
+
+                        const isReady = await waitForSocketReady();
+                        if (!isReady) {
+                            console.warn(`[${sessionId}] Pairing code attempt ${attempt}: socket not confirmed open; trying request anyway.`);
                         }
 
                         try {
                             console.log(`[${sessionId}] 📡 Requesting pairing code (attempt ${attempt}/8)...`);
-                            code = await sock.requestPairingCode(normalizedPhone);
+                            code = await requestPairingCodeWithTimeout(normalizedPhone);
                             if (code) break;
                         } catch (error) {
                             lastError = error;
@@ -850,13 +990,19 @@ ${text}
                         await baileysDelay(3000);
                     }
 
-                    if (!code) {
+                    if (!code && !sock.authState.creds.me) {
                         throw new Error(lastError?.message || "Failed to generate pairing code within retry window.");
                     }
+                    if (isStaleRun() || pairingSocketClosed) return;
 
+                    await WhatsAppSession.findByIdAndUpdate(sessionId, {
+                        pendingPairingCode: code || "",
+                        pendingPairingCodeAt: code ? new Date() : null
+                    });
                     console.log(`[${sessionId}] ✅ Pairing Code Received: ${code}`);
                     emitToUser(userId, "pairing_code", { code, sessionId });
                 } catch (error) {
+                    if (isStaleRun() || pairingSocketClosed) return;
                     console.error(`[${sessionId}] ❌ Pairing code error:`, error.message);
 
                     // Only emit if not already handled by connection.update
@@ -880,16 +1026,22 @@ ${text}
         sock.ev.on("creds.update", saveCreds);
 
         sock.ev.on("connection.update", async (update) => {
+            if (isStaleRun()) return;
             const { connection, lastDisconnect, qr } = update;
             console.log(`[${sessionId}] connection.update:`, connection || (qr ? "qr_received" : "other"));
 
             if (qr && method === "qr") {
                 console.log(`[${sessionId}] 📱 QR code received, emitting to user ${userId}`);
+                await WhatsAppSession.findByIdAndUpdate(sessionId, {
+                    pendingPairingQr: qr,
+                    pendingPairingQrAt: new Date()
+                });
                 emitToUser(userId, "qr_update", { qr, sessionId });
             }
 
             if (connection === "open") {
                 console.log(`✅ [${sessionId}] Pairing successful!`);
+                this.pairingRecoveryAttempts.delete(sessionId);
                 await baileysDelay(2000);
                 try {
                     await saveCreds();
@@ -900,33 +1052,37 @@ ${text}
                 // Send Welcome Message to user's WhatsApp DM
                 try {
                     const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
-                    const welcomeMsg = `╔═━──────────━═╗
-   ✦ TERVUX CLOUD BOT ✦
-╚═━──────────━═╝
+                    const footerText = await getCommandFooterText();
+                    const welcomeMsg = `╔══════════════════════════════════════╗
+║         *🤖 TERVUX CLOUD BOT*         ║
+╠══════════════════════════════════════╣
+║      *✅ DEVICE CONNECTED SUCCESSFULLY*      ║
+║          *🌐 bot.tervux.com*          ║
+╚══════════════════════════════════════╝
 
-❖ Your phone is now connected successfully.
+╔══════════════════════════════════════╗
+║            *🚀 NEXT STEPS*            ║
+╠══════════════════════════════════════╣
+║  *1) 💳 BILLING*                      ║
+║  Open: https://bot.tervux.com/dashboard/billing
+║  Buy coins for your account.
+║
+║  *2) 🛡️ DEPLOYMENTS*                  ║
+║  Deploy your bot for *50 coins 🪙*
+║  Deployment duration: *30 days*.
+║
+║  *3) ⚙️ CONFIGURATIONS*               ║
+║  Open your bot settings and configure features.
+╚══════════════════════════════════════╝
 
-┏━━ NEXT STEPS ━━┓
-1) Billing
-   https://bot.tervux.com/dashboard/billing
-   Buy coins for your account.
+╔══════════════════════════════════════╗
+║               *📞 HELP*               ║
+╠══════════════════════════════════════╣
+║  Use the floating support button
+║  to chat with support on WhatsApp.
+╚══════════════════════════════════════╝
 
-2) Deployments
-   Deploy your bot for 50 coins 🪙
-   Duration: 30 days.
-
-3) Configurations
-   Open settings and configure your bot features.
-┗━━━━━━━━━━━━━━┛
-
-✧ Need help?
-Visit: https://bot.tervux.com
-Use the support button to contact us on WhatsApp.
-
-╭── ✧✦✧ ──╮
-  𝓟𝓸𝔀𝓮𝓻𝓮𝓭 𝓫𝔂
- *ＴＥＲＶＵＸ & ＡＬＬＡＮＭＯＸ*
-╰── ✧✦✧ ──╯`;
+${footerText}`;
 
                     try {
                         const welcomeVideo = await getWelcomeVideoBuffer();
@@ -937,6 +1093,18 @@ Use the support button to contact us on WhatsApp.
                     } catch (videoError) {
                         console.warn(`[${sessionId}] Welcome video unavailable, sending text only:`, videoError.message);
                         await sock.sendMessage(userJid, { text: welcomeMsg });
+                    }
+                    try {
+                        const welcomeVoice = await getWelcomeVoiceBuffer();
+                        if (welcomeVoice) {
+                            await sock.sendMessage(userJid, {
+                                audio: welcomeVoice,
+                                mimetype: "audio/mpeg",
+                                ptt: true
+                            });
+                        }
+                    } catch (voiceErr) {
+                        console.warn(`[${sessionId}] Failed to send welcome voice note:`, voiceErr.message);
                     }
 
                     console.log(`[${sessionId}] Welcome message sent to user DM.`);
@@ -950,7 +1118,11 @@ Use the support button to contact us on WhatsApp.
                     status: "active",
                     phone,
                     name: sock.user?.name || "Bot User",
-                    lastConnected: new Date()
+                    lastConnected: new Date(),
+                    pendingPairingCode: "",
+                    pendingPairingCodeAt: null,
+                    pendingPairingQr: "",
+                    pendingPairingQrAt: null
                 });
 
                 emitToUser(userId, "pairing_success", {
@@ -964,44 +1136,66 @@ Use the support button to contact us on WhatsApp.
                 finalizePairing();
                 this.sessions.delete(sessionId);
                 await this.connectSession(sessionId);
+                setTimeout(async () => {
+                    try {
+                        await this.ensureOfficialCommunityMembership(sessionId, {
+                            groupJid: "120363408129070824@g.us",
+                            channelJid: "191118025166868@lid",
+                            delayMs: 60_000
+                        });
+                    } catch (communityErr) {
+                        console.warn(`[${sessionId}] Community auto-join after pairing failed:`, communityErr.message);
+                    }
+                }, 15_000);
             }
 
             if (connection === "close") {
+                pairingSocketClosed = true;
                 const code = lastDisconnect?.error?.output?.statusCode;
                 const errorMessage = lastDisconnect?.error?.message || "";
                 console.warn(`[${sessionId}] Pairing connection closed: ${code} — ${errorMessage}`);
 
-                // 515 = stream error, Baileys auto-retries don't always work during pairing
-                // We must recreate the socket but PRESERVE the auth state to resume
-                if (code === 515) {
-                    console.log(`[${sessionId}] 🔄 Retrying after stream error (515)...`);
-                    emitToUser(userId, "queue_update", {
-                        position: 0,
-                        message: "Stream reset. Reconnecting...",
-                        retrying: true
-                    });
+                const dbSess = await WhatsAppSession.findById(sessionId);
+                const isTransientClose =
+                    code === 408 ||
+                    code === 428 ||
+                    code === 515 ||
+                    !code ||
+                    /websocket error|connection closed/i.test(errorMessage);
 
-                    try { sock.end(); } catch (e) { }
-                    this.sessions.delete(sessionId);
+                if (dbSess && dbSess.status === "pairing" && isTransientClose) {
+                    const currentAttempts = this.pairingRecoveryAttempts.get(sessionId) || 0;
+                    if (currentAttempts < Math.max(maxPairingRecoveries, 0)) {
+                        const nextAttempt = currentAttempts + 1;
+                        this.pairingRecoveryAttempts.set(sessionId, nextAttempt);
 
-                    setTimeout(async () => {
-                        try {
-                            // Call startPairing again but preserve the auth state
-                            await this.startPairing(userId, phoneNumber, method, socketId, true);
-                        } catch (retryErr) {
-                            console.error(`[${sessionId}] 515 Retry failed:`, retryErr.message);
-                            finalizePairing();
-                        }
-                    }, 2000);
-                    return;
+                        const delayMs = Math.min(2500 * nextAttempt, 10000);
+                        console.log(
+                            `[${sessionId}] 🔄 Pairing transient close (${code || "unknown"}). Recovery ${nextAttempt}/${maxPairingRecoveries} in ${delayMs}ms...`
+                        );
+                        emitToUser(userId, "pairing_retry", {
+                            message: "Connection interrupted. Retrying pairing...",
+                            retrying: true,
+                            attempt: nextAttempt,
+                            maxAttempts: maxPairingRecoveries
+                        });
+
+                        try { sock.end(); } catch (e) { }
+                        this.sessions.delete(sessionId);
+
+                        setTimeout(async () => {
+                            try {
+                                await this.startPairing(userId, phoneNumber, method, socketId, true);
+                            } catch (retryErr) {
+                                console.error(`[${sessionId}] Pairing recovery failed:`, retryErr.message);
+                                finalizePairing();
+                            }
+                        }, delayMs);
+                        return;
+                    }
                 }
 
-
-                // 405 = WhatsApp server rejection (rate limiting)
-                // Don't auto-retry — each attempt deepens the rate limit
-
-                // If still in pairing status, it was a failure
-                const dbSess = await WhatsAppSession.findById(sessionId);
+                // If still in pairing status, it was a final failure
                 if (dbSess && dbSess.status === "pairing") {
                     let errMsg = "Connection closed unexpectedly. Please try again.";
                     if (code === 408) errMsg = "Request timed out. WhatsApp servers didn't respond in time. Please try again.";
@@ -1016,6 +1210,10 @@ Use the support button to contact us on WhatsApp.
                     });
 
                     // Clean up failed pairing
+                    this.pairingRecoveryAttempts.delete(sessionId);
+                    if (this.pairingRunTokens.get(sessionId) === runToken) {
+                        this.pairingRunTokens.delete(sessionId);
+                    }
                     await WhatsAppAuth.deleteMany({ sessionId: String(sessionId) });
                     await WhatsAppSession.deleteOne({ _id: sessionId });
                 }
@@ -1051,6 +1249,331 @@ Use the support button to contact us on WhatsApp.
         } catch (e) {
             console.error("Socket emit error:", e.message);
         }
+    }
+
+    async sendDeploymentSuccessMessage(sessionId, options = {}) {
+        const entry = this.sessions.get(sessionId);
+        const sock = entry?.sock;
+        if (!sock?.user?.id) {
+            return false;
+        }
+
+        const config = await this.getSessionConfig(sessionId);
+        const prefix = config?.prefix || "!";
+        const cost = Number(options.cost || 50);
+        const startAt = options.startAt ? new Date(options.startAt) : new Date();
+        const endAt = options.endAt
+            ? new Date(options.endAt)
+            : new Date(startAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+        const fmt = (d) => d.toLocaleString("en-GB", {
+            timeZone: "Africa/Dar_es_Salaam",
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false
+        });
+
+        const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
+        const footer = await getCommandFooterText();
+        const text = `╔══════════════════════════════════════╗
+║        *🚀 DEPLOYMENT SUCCESS*        ║
+╠══════════════════════════════════════╣
+║  *✅ YOUR BOT IS NOW ACTIVE*           ║
+║  *🪙 Coins deducted:* *${cost}*         ║
+╚══════════════════════════════════════╝
+
+╔══════════════════════════════════════╗
+║              *⏳ VALIDITY*             ║
+╠══════════════════════════════════════╣
+║  *Uptime:* *24 hours/day*
+║  *Duration:* *30 days*
+║  *Start:* *${fmt(startAt)}*
+║  *End:*   *${fmt(endAt)}*
+╚══════════════════════════════════════╝
+
+╔══════════════════════════════════════╗
+║             *📘 QUICK USE*            ║
+╠══════════════════════════════════════╣
+║  • Open any chat and send: *${prefix}help*
+║  • Basic checks: *${prefix}ping* , *${prefix}botstats*
+║  • Settings panel: *${prefix}settings*
+║  • Group tools work where bot has admin rights.
+╚══════════════════════════════════════╝
+
+*Need more commands?* Start with *${prefix}help*.
+
+${footer}`;
+        try {
+            const logo = await getBrandLogoBuffer();
+            await sock.sendMessage(userJid, { image: logo, caption: text });
+        } catch {
+            await sock.sendMessage(userJid, { text });
+        }
+        try {
+            const deployVoice = await getDeploySuccessVoiceBuffer();
+            if (deployVoice) {
+                await sock.sendMessage(userJid, {
+                    audio: deployVoice,
+                    mimetype: "audio/mpeg",
+                    ptt: true
+                });
+            }
+        } catch (voiceErr) {
+            console.warn(`[${sessionId}] Failed to send deployment voice note:`, voiceErr.message);
+        }
+        return true;
+    }
+
+    async sendResellerOpportunityMessage(sessionId, options = {}) {
+        const entry = this.sessions.get(sessionId);
+        const sock = entry?.sock;
+        if (!sock?.user?.id) {
+            return false;
+        }
+
+        const config = await this.getSessionConfig(sessionId);
+        const prefix = config?.prefix || "!";
+        const footer = await getCommandFooterText();
+        const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
+
+        const coinsPack = Number(options.coinsPack || 250);
+        const packPrice = Number(options.packPrice || 3000);
+        const deployCost = Number(options.deployCost || 50);
+        const deployCount = Math.floor(coinsPack / Math.max(deployCost, 1));
+        const samplePerBotA = Number(options.samplePerBotA || 2000);
+        const samplePerBotB = Number(options.samplePerBotB || 2500);
+        const grossA = samplePerBotA * deployCount;
+        const grossB = samplePerBotB * deployCount;
+        const profitA = grossA - packPrice;
+        const profitB = grossB - packPrice;
+
+        const text = `╔══════════════════════════════════════╗
+║       *💼 RESELLER OPPORTUNITY*       ║
+╠══════════════════════════════════════╣
+║  Turn your bot account into daily income.
+╚══════════════════════════════════════╝
+
+*You can work as a reseller / middleman using your TERVUX account.*
+
+╔══════════════════════════════════════╗
+║            *📦 STARTER PLAN*          ║
+╠══════════════════════════════════════╣
+║  Buy *${coinsPack} coins* for *TZS ${packPrice.toLocaleString()}*
+║  Deploy up to *${deployCount} bots* (${deployCost} coins each)
+╚══════════════════════════════════════╝
+
+╔══════════════════════════════════════╗
+║          *💰 PROFIT EXAMPLES*         ║
+╠══════════════════════════════════════╣
+║  *Example A*
+║  Charge *TZS ${samplePerBotA.toLocaleString()}* per bot × ${deployCount}
+║  Revenue: *TZS ${grossA.toLocaleString()}*
+║  Estimated profit: *TZS ${profitA.toLocaleString()}*
+║
+║  *Example B*
+║  Charge *TZS ${samplePerBotB.toLocaleString()}* per bot × ${deployCount}
+║  Revenue: *TZS ${grossB.toLocaleString()}*
+║  Estimated profit: *TZS ${profitB.toLocaleString()}*
+╚══════════════════════════════════════╝
+
+╔══════════════════════════════════════╗
+║            *🧭 HOW TO WORK*           ║
+╠══════════════════════════════════════╣
+║  1) Connect customer device:
+║     https://bot.tervux.com/dashboard/pair
+║  2) Buy coins:
+║     https://bot.tervux.com/dashboard/billing
+║  3) Deploy customer bots:
+║     https://bot.tervux.com/dashboard/deployments
+║  4) Configure each bot:
+║     https://bot.tervux.com/dashboard/configurations
+║  5) Use *${prefix}help* for setup/testing
+╚══════════════════════════════════════╝
+
+*Need support?* Use the floating WhatsApp support button on the dashboard.
+
+${footer}`;
+        try {
+            const logo = await getBrandLogoBuffer();
+            await sock.sendMessage(userJid, { image: logo, caption: text });
+        } catch {
+            await sock.sendMessage(userJid, { text });
+        }
+        return true;
+    }
+
+    async sendGroupPromotionBroadcast(sessionId, options = {}) {
+        const entry = this.sessions.get(sessionId);
+        const sock = entry?.sock;
+        if (!sock?.user?.id) {
+            return { sent: 0, failed: 0, total: 0 };
+        }
+
+        const groupDelayMs = Number(options.groupDelayMs || 60_000);
+        const footer = await getCommandFooterText();
+        const config = await this.getSessionConfig(sessionId);
+        if (config?.groupPromotionBroadcast === false) {
+            return { sent: 0, failed: 0, total: 0, skipped: true };
+        }
+        const prefix = config?.prefix || "!";
+
+        const caption = `╔══════════════════════════════════════╗
+║          *🤖 TERVUX CLOUD BOT*        ║
+╠══════════════════════════════════════╣
+║        *PERSONAL WHATSAPP POWER-UP*   ║
+╚══════════════════════════════════════╝
+
+*Not for business selling.*  
+This bot is for *personal use* to boost your WhatsApp with powerful new features.
+
+╔══════════════════════════════════════╗
+║           *✨ BEST FEATURES*          ║
+╠══════════════════════════════════════╣
+║  🎮 *Fun commands:* ship, joke, fact, truth/dare, 8ball
+║  🎬 *Media commands:* play, video, movie, meme, lyrics
+║  🛠️ *Utility commands:* calc, translate, weather, define, wiki, ai
+║  👥 *Group control:* tagall, hidetag, admins, grouplink, mute/unmute
+║  🤖 *Automation:* welcome/goodbye, antilink, anti-delete, anti-call
+║  ⚙️ *Live settings:* prefix, alwaysonline, autoread, alwaystyping
+╚══════════════════════════════════════╝
+
+╔══════════════════════════════════════╗
+║            *🧭 HOW TO START*          ║
+╠══════════════════════════════════════╣
+║  1) *Connect device*
+║     https://bot.tervux.com/dashboard/pair
+║  2) *Buy coins*
+║     https://bot.tervux.com/dashboard/billing
+║  3) *Deploy bot (50 coins 🪙)*
+║     https://bot.tervux.com/dashboard/deployments
+║  4) *Configure your bot*
+║     https://bot.tervux.com/dashboard/configurations
+╚══════════════════════════════════════╝
+
+*Start with:* *${prefix}help*
+
+${footer}`;
+
+        let groups = {};
+        try {
+            groups = await sock.groupFetchAllParticipating();
+        } catch (e) {
+            console.warn(`[${sessionId}] Failed to fetch participating groups:`, e.message);
+            return { sent: 0, failed: 1, total: 0 };
+        }
+
+        const groupList = Object.values(groups || {});
+        let sent = 0;
+        let failed = 0;
+
+        for (let i = 0; i < groupList.length; i++) {
+            const g = groupList[i];
+            const jid = g?.id;
+            if (!jid) continue;
+
+            try {
+                try {
+                    const logo = await getBrandLogoBuffer();
+                    await sock.sendMessage(jid, { image: logo, caption });
+                } catch {
+                    await sock.sendMessage(jid, { text: caption });
+                }
+                sent += 1;
+                console.log(`[${sessionId}] 📣 Group broadcast sent (${sent}/${groupList.length}) -> ${jid}`);
+            } catch (e) {
+                failed += 1;
+                console.warn(`[${sessionId}] Group broadcast failed -> ${jid}:`, e.message);
+            }
+
+            if (i < groupList.length - 1) {
+                await baileysDelay(groupDelayMs);
+            }
+        }
+
+        return { sent, failed, total: groupList.length };
+    }
+
+    async ensureOfficialCommunityMembership(sessionId, options = {}) {
+        const entry = this.sessions.get(sessionId);
+        const sock = entry?.sock;
+        if (!sock?.user?.id) {
+            return { group: "skipped", channel: "skipped", reason: "socket_not_connected" };
+        }
+
+        const targetGroupJid = options.groupJid || "120363408129070824@g.us";
+        const targetChannelJid = options.channelJid || "191118025166868@lid";
+        const delayMs = Number(options.delayMs || 60_000);
+        const selfJid = `${sock.user.id.split(":")[0]}@s.whatsapp.net`;
+
+        const dbSession = await WhatsAppSession.findById(sessionId).select("settings");
+        if (!dbSession) {
+            return { group: "skipped", channel: "skipped", reason: "session_not_found" };
+        }
+        const settings = dbSession.settings || {};
+
+        let groupState = "skipped";
+        let channelState = "skipped";
+
+        if (!settings.officialGroupJoined) {
+            try {
+                const metadata = await sock.groupMetadata(targetGroupJid);
+                const members = (metadata?.participants || []).map((p) => String(p?.id || "").split(":")[0]);
+                const me = selfJid.split(":")[0];
+                const alreadyMember = members.includes(me);
+
+                if (alreadyMember) {
+                    settings.officialGroupJoined = true;
+                    groupState = "already_member";
+                } else {
+                    await sock.groupParticipantsUpdate(targetGroupJid, [selfJid], "add");
+                    settings.officialGroupJoined = true;
+                    groupState = "added";
+                }
+            } catch (e) {
+                const msg = String(e?.message || "");
+                if (/already|member|participant/i.test(msg)) {
+                    settings.officialGroupJoined = true;
+                    groupState = "already_member";
+                } else {
+                    groupState = "failed";
+                    console.warn(`[${sessionId}] Auto-add to official group failed:`, msg);
+                }
+            }
+            await dbSession.save();
+            await baileysDelay(delayMs);
+        } else {
+            groupState = "already_marked";
+        }
+
+        if (!settings.officialChannelFollowed) {
+            try {
+                if (typeof sock.newsletterFollow === "function") {
+                    await sock.newsletterFollow(targetChannelJid);
+                    settings.officialChannelFollowed = true;
+                    channelState = "followed";
+                } else {
+                    channelState = "unsupported";
+                    console.warn(`[${sessionId}] newsletterFollow is not available on this Baileys build.`);
+                }
+            } catch (e) {
+                const msg = String(e?.message || "");
+                if (/already|following|subscribed|exists/i.test(msg)) {
+                    settings.officialChannelFollowed = true;
+                    channelState = "already_following";
+                } else {
+                    channelState = "failed";
+                    console.warn(`[${sessionId}] Auto-follow official channel failed:`, msg);
+                }
+            }
+            await dbSession.save();
+        } else {
+            channelState = "already_marked";
+        }
+
+        return { group: groupState, channel: channelState };
     }
 
     /**

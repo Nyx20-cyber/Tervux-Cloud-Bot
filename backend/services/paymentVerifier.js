@@ -69,6 +69,7 @@ export async function verifyPendingPayments() {
                 payment.gatewayResponse = {
                     ...(payment.gatewayResponse || {}),
                     lastPolledAt: new Date().toISOString(),
+                    consecutivePollFailures: 0,
                     lastStatusPayload: statusResult
                 };
 
@@ -97,7 +98,23 @@ export async function verifyPendingPayments() {
                 await payment.save();
 
             } catch (err) {
-                console.error(`   ⚠️ [${payment.fastlipaTransactionId}] Check failed:`, err.message);
+                const isTransient = !!err?.isTransient || /fetch failed|timed out|timeout|etimedout|econnreset|eai_again/i.test(String(err?.message || ""));
+                payment.gatewayResponse = {
+                    ...(payment.gatewayResponse || {}),
+                    lastPolledAt: new Date().toISOString(),
+                    lastErrorAt: new Date().toISOString(),
+                    lastErrorMessage: String(err?.message || "Unknown FastLipa polling error"),
+                    consecutivePollFailures: Number(payment.gatewayResponse?.consecutivePollFailures || 0) + 1
+                };
+                await payment.save();
+
+                const failCount = Number(payment.gatewayResponse?.consecutivePollFailures || 1);
+                if (!isTransient || failCount === 1 || failCount % 5 === 0) {
+                    const levelTag = isTransient ? "⚠️" : "❌";
+                    console[isTransient ? "warn" : "error"](
+                        `   ${levelTag} [${payment.fastlipaTransactionId}] Check failed (x${failCount}): ${err.message}`
+                    );
+                }
             }
 
             await new Promise(r => setTimeout(r, 1000));
