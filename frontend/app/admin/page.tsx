@@ -24,6 +24,20 @@ import { AdminReferral } from "@/components/admin/AdminReferral";
 import { GlobalSettings } from "@/components/admin/GlobalSettings";
 import { AdminGamification } from "@/components/admin/AdminGamification";
 
+const ADMIN_ACTIVE_TAB_KEY = "admin.activeTab";
+const ADMIN_TAB_IDS = [
+    "dashboard",
+    "users",
+    "sessions",
+    "payments",
+    "plans",
+    "coins",
+    "referral",
+    "announcements",
+    "gamification",
+    "settings"
+] as const;
+
 export default function AdminDashboard() {
     const { user } = useAuthStore();
     const router = useRouter();
@@ -32,7 +46,12 @@ export default function AdminDashboard() {
 
     const [stats, setStats] = useState<any>(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState("dashboard");
+    const [activeTab, setActiveTab] = useState<string>(() => {
+        if (typeof window === "undefined") return "dashboard";
+        const savedTab = window.localStorage.getItem(ADMIN_ACTIVE_TAB_KEY);
+        return savedTab && (ADMIN_TAB_IDS as readonly string[]).includes(savedTab) ? savedTab : "dashboard";
+    });
+    const [refreshNonce, setRefreshNonce] = useState(0);
 
     const ADMIN_TABS = useMemo(() => [
         { id: "dashboard", label: t.dashboard, icon: LayoutDashboard },
@@ -41,9 +60,9 @@ export default function AdminDashboard() {
         { id: "payments", label: t.payments, icon: History },
         { id: "plans", label: t.plans, icon: SettingsIcon },
         { id: "coins", label: t.billing, icon: Coins },
-        { id: "referral", label: "Referral", icon: Crown },
+        { id: "referral", label: t.referral, icon: Crown },
         { id: "announcements", label: t.announcements, icon: Megaphone },
-        { id: "gamification", label: "Badges & VIP", icon: Crown },
+        { id: "gamification", label: t.badges_vip, icon: Crown },
         { id: "settings", label: t.site_settings, icon: SettingsIcon },
     ], [t]);
 
@@ -59,6 +78,13 @@ export default function AdminDashboard() {
         }
     };
 
+    const handleRefresh = async () => {
+        await fetchStats();
+        // Force remount of the current tab so components with internal fetch
+        // run their loading logic again (users, sessions, payments, etc.).
+        setRefreshNonce((prev) => prev + 1);
+    };
+
     useEffect(() => {
         if (user && user.role !== "admin") {
             router.replace("/dashboard");
@@ -66,6 +92,11 @@ export default function AdminDashboard() {
         }
         fetchStats();
     }, [user, router]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        window.localStorage.setItem(ADMIN_ACTIVE_TAB_KEY, activeTab);
+    }, [activeTab]);
 
     if (!user || user.role !== "admin") return null;
 
@@ -91,7 +122,7 @@ export default function AdminDashboard() {
                     <motion.button
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        onClick={fetchStats}
+                        onClick={handleRefresh}
                         disabled={isLoading}
                         className="flex items-center gap-2 px-6 py-3 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-white transition-all disabled:opacity-50 backdrop-blur-xl"
                     >
@@ -137,7 +168,7 @@ export default function AdminDashboard() {
                         </div>
                     ) : (
                         <motion.div
-                            key={activeTab}
+                            key={`${activeTab}-${refreshNonce}`}
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
@@ -160,7 +191,7 @@ export default function AdminDashboard() {
                             {activeTab === "referral" && <AdminReferral />}
                             {activeTab === "announcements" && <AnnouncementSystem />}
                             {activeTab === "settings" && <GlobalSettings />}
-                            {activeTab === "gamification" && <AdminGamification users={stats?.recentUsers || []} onUpdate={fetchStats} />}
+                            {activeTab === "gamification" && <AdminGamification />}
                         </motion.div>
                     )}
                 </div>

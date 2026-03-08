@@ -30,7 +30,7 @@ export function Sidebar({ isMobile }: { isMobile?: boolean }) {
             <div className="p-6">
                 <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-3 uppercase">
                     <ShieldCheck className="h-5 w-5 text-primary" />
-                    Tervux Cloud
+                    {t.app_name}
                 </h2>
                 <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1 italic opacity-70">
                     {t.securely_connected}

@@ -24,9 +24,9 @@ async function start() {
         if (planCount === 0) {
             console.log("🌱 No plans found. Seeding...");
             await Plan.insertMany([
-                { name: "50 Coins", slug: "50-coins", price: 1500, currency: "TZS", durationDays: 0, coinsAmount: 50, maxSessions: 1, description: "50 Coins — Deploy 1 Bot" },
-                { name: "100 Coins", slug: "100-coins", price: 2000, currency: "TZS", durationDays: 0, coinsAmount: 100, maxSessions: 1, description: "100 Coins — Deploy 2 Bots" },
-                { name: "250 Coins", slug: "250-coins", price: 3000, currency: "TZS", durationDays: 0, coinsAmount: 250, maxSessions: 1, description: "250 Coins — Deploy 5 Bots" }
+                { name: "50 Coins", slug: "50-coins", price: 1500, currency: "TZS", coinsAmount: 50, description: "50 Coins — Deploy 1 Bot" },
+                { name: "100 Coins", slug: "100-coins", price: 2000, currency: "TZS", coinsAmount: 100, description: "100 Coins — Deploy 2 Bots" },
+                { name: "250 Coins", slug: "250-coins", price: 3000, currency: "TZS", coinsAmount: 250, description: "250 Coins — Deploy 5 Bots" }
             ]);
             console.log("✅ Plans seeded successfully.");
         }

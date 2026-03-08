@@ -91,7 +91,19 @@ export const useAuthStore = create<AuthState>()(
         try {
           const res = await api.get("/auth/me");
           set({ user: res.data.user, isAuthenticated: true });
-        } catch (error) {
+        } catch (error: any) {
+          const status = error?.response?.status;
+          const isMaintenance = !!error?.response?.data?.maintenance;
+
+          // During maintenance windows, keep token/session and fail silently.
+          if (status === 503 && isMaintenance) {
+            set((state) => ({
+              ...state,
+              isAuthenticated: !!state.token
+            }));
+            return;
+          }
+
           console.error("Auth check failed:", error);
           removeToken();
           set({ isAuthenticated: false, user: null, token: null });

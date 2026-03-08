@@ -6,14 +6,14 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Users, Gift, Copy, RotateCcw, Loader2, Info, Coins, Star, Trophy, Medal, Crown } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { Users, Gift, Copy, Loader2, Info, Coins, Star, Trophy, Medal, Crown } from "lucide-react";
+import { motion } from "framer-motion";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
 import { cn } from "@/lib/utils";
 
 interface LeaderboardItem {
-    _id: string;
+    rank: number;
     count: number;
     name: string;
     isReferralKing?: boolean;
@@ -21,7 +21,6 @@ interface LeaderboardItem {
 }
 
 interface KingInfo {
-    _id: string;
     name: string;
     referralKingSince: string;
 }
@@ -29,40 +28,75 @@ interface KingInfo {
 export default function ReferralsPage() {
     const { language } = useLocaleStore();
     const t = translations[language];
+    const tr = (key: keyof typeof translations.en, vars?: Record<string, string | number>) => {
+        const template = String(t[key] ?? translations.en[key] ?? "");
+        if (!vars) return template;
+        return Object.entries(vars).reduce(
+            (acc, [k, v]) => acc.replaceAll(`{{${k}}}`, String(v)),
+            template
+        );
+    };
 
     const [referralInfo, setReferralInfo] = useState<{
         referralCode: string | null;
-        referralCodeExpiresAt: string | null;
         referralCount: number;
+        referralCoinsEarned: number;
         kingBonusCoins: number;
+        referralBonus: number;
     }>({
         referralCode: null,
-        referralCodeExpiresAt: null,
         referralCount: 0,
-        kingBonusCoins: 100
+        referralCoinsEarned: 0,
+        kingBonusCoins: 100,
+        referralBonus: 10
     });
     const [leaderboard, setLeaderboard] = useState<LeaderboardItem[]>([]);
     const [king, setKing] = useState<KingInfo | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isGenerating, setIsGenerating] = useState(false);
+    const maskName = (name: string) => {
+        const clean = name?.trim() || "";
+        if (!clean) return t.guest_name;
+        if (clean.length === 1) return `${clean.charAt(0)}***`;
+        return `${clean.charAt(0)}***${clean.charAt(clean.length - 1)}`;
+    };
 
     const fetchData = useCallback(async () => {
         try {
             setIsLoading(true);
-            const [refRes, leaderRes, kingRes] = await Promise.all([
+            const results = await Promise.allSettled([
                 api.get("/referral"),
                 api.get("/referral/leaderboard"),
                 api.get("/referral/king")
             ]);
-            setReferralInfo(refRes.data);
-            setLeaderboard(leaderRes.data.leaderboard);
-            setKing(kingRes.data.king);
-        } catch (error) {
-            toast.error(language === "sw" ? "Imeshindwa kupakia taarifa" : "Failed to load information");
+            let hasFailure = false;
+
+            if (results[0].status === "fulfilled") {
+                setReferralInfo(results[0].value.data);
+            } else {
+                hasFailure = true;
+            }
+
+            if (results[1].status === "fulfilled") {
+                setLeaderboard(results[1].value.data.leaderboard);
+            } else {
+                hasFailure = true;
+            }
+
+            if (results[2].status === "fulfilled") {
+                setKing(results[2].value.data.king);
+            } else {
+                hasFailure = true;
+            }
+
+            if (hasFailure) {
+                const msg = translations[useLocaleStore.getState().language].failed_load_information;
+                toast.error(msg);
+            }
         } finally {
             setIsLoading(false);
         }
-    }, [language]);
+    }, []); // No dependency on language — API calls don't change
 
     useEffect(() => {
         fetchData();
@@ -74,23 +108,24 @@ export default function ReferralsPage() {
             const res = await api.post("/referral/generate");
             setReferralInfo(prev => ({
                 ...prev,
-                referralCode: res.data.referralCode,
-                referralCodeExpiresAt: res.data.referralCodeExpiresAt
+                referralCode: res.data.referralCode
             }));
-            toast.success(language === "sw" ? "Kodi mpya imetengenezwa!" : "New referral code generated!");
-        } catch (error) {
-            toast.error(language === "sw" ? "Imeshindwa kutengeneza kodi" : "Failed to generate referral code");
+            toast.success(t.referral_code_generated);
+        } catch {
+            toast.error(t.failed_generate_referral);
         } finally {
             setIsGenerating(false);
         }
     };
 
-    const copyToClipboard = (text: string) => {
-        navigator.clipboard.writeText(text);
-        toast.success(language === "sw" ? "Kodi imenakiliwa!" : "Code copied!");
+    const copyToClipboard = async (text: string) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            toast.success(t.code_copied);
+        } catch {
+            toast.error(t.failed_copy_code);
+        }
     };
-
-    const isExpired = false; // Codes are now permanent
 
     if (isLoading) {
         return (
@@ -110,13 +145,10 @@ export default function ReferralsPage() {
                         <Users className="h-8 w-8 text-primary" />
                         {t.referrals}
                     </h1>
-                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">
-                        {language === "sw" ? "Alika marafiki na upate sarafu rafiki yako atakapofanya ununuzi" : "Invite friends and earn coins when they make their first purchase"}
-                    </p>
+                    <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">{t.invite_friends_tip}</p>
                 </div>
 
                 {/* Weekly King Banner */}
-                <AnimatePresence>
                     <motion.div
                         initial={{ opacity: 0, y: -10 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -150,11 +182,11 @@ export default function ReferralsPage() {
                                 {king ? (
                                     <>
                                         <h2 className="text-xl font-black text-white tracking-tight">
-                                            {king.name.charAt(0)}***{king.name.charAt(king.name.length - 1)}
+                                            {maskName(king.name)}
                                             <span className="ml-2 text-yellow-400">👑</span>
                                         </h2>
                                         <p className="text-[10px] font-bold text-yellow-500/50 uppercase tracking-widest mt-0.5">
-                                            {t.king_crowned} · {language === "sw" ? `Bonasi ya ${referralInfo.kingBonusCoins} Sarafu` : `Wins ${referralInfo.kingBonusCoins} Coins`} + Crown
+                                            {t.king_crowned} · {tr("king_bonus_with_amount", { amount: referralInfo.kingBonusCoins })}
                                         </p>
                                     </>
                                 ) : (
@@ -176,7 +208,6 @@ export default function ReferralsPage() {
                             )}
                         </div>
                     </motion.div>
-                </AnimatePresence>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Stats & Code Section */}
@@ -193,13 +224,13 @@ export default function ReferralsPage() {
                                             <Users className="w-5 h-5" />
                                         </div>
                                         <div>
-                                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{language === "sw" ? "Athari ya Mtandao" : "Network Impact"}</p>
-                                            <h3 className="text-xl font-bold text-white uppercase tracking-tight">{language === "sw" ? "Mialiko Inayofanya Kazi" : "Active Referrals"}</h3>
+                                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{t.network_impact}</p>
+                                            <h3 className="text-xl font-bold text-white uppercase tracking-tight">{t.active_referrals}</h3>
                                         </div>
                                     </div>
                                     <div className="flex items-baseline gap-2 pt-2">
                                         <span className="text-4xl font-black text-white">{referralInfo.referralCount}</span>
-                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{language === "sw" ? "Mialiko iliyofanikiwa" : "Successful invites"}</span>
+                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{t.successful_invites}</span>
                                     </div>
                                 </div>
                             </div>
@@ -216,12 +247,12 @@ export default function ReferralsPage() {
                                         </div>
                                         <div>
                                             <p className="text-[10px] font-bold text-yellow-500/50 uppercase tracking-widest">{t.coins_earned} 🪙</p>
-                                            <h3 className="text-xl font-bold text-white uppercase tracking-tight">{language === "sw" ? "Sarafu 🪙 Zawadi" : "Coins 🪙 Rewarded"}</h3>
+                                            <h3 className="text-xl font-bold text-white uppercase tracking-tight">{t.coins_rewarded_title}</h3>
                                         </div>
                                     </div>
                                     <div className="flex items-baseline gap-2 pt-2">
-                                        <span className="text-4xl font-black text-yellow-500">{referralInfo.referralCount * 10}</span>
-                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{language === "sw" ? "🪙 Zawadi ya maisha yote" : "🪙 Lifetime reward"}</span>
+                                        <span className="text-4xl font-black text-yellow-500">{referralInfo.referralCoinsEarned}</span>
+                                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{t.lifetime_reward}</span>
                                     </div>
                                 </div>
                             </div>
@@ -231,10 +262,10 @@ export default function ReferralsPage() {
                         <Card className="bg-white/5 border-white/10 backdrop-blur-xl border-t-primary/30">
                             <CardHeader className="pb-4">
                                 <div className="flex items-center justify-between">
-                                    <CardTitle className="text-sm font-bold text-white uppercase tracking-widest">{language === "sw" ? "Kodi Inayofanya Kazi" : "Active Code"}</CardTitle>
+                                    <CardTitle className="text-sm font-bold text-white uppercase tracking-widest">{t.active_code}</CardTitle>
                                     <Gift className="h-4 w-4 text-primary" />
                                 </div>
-                                <CardDescription className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">{language === "sw" ? "Kodi yako ya kudumu ya mialiko" : "Your permanent referral code"}</CardDescription>
+                                <CardDescription className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">{t.permanent_referral_code}</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 {referralInfo.referralCode ? (
@@ -257,7 +288,7 @@ export default function ReferralsPage() {
                                             <div>
                                                 <p className="text-[11px] font-extrabold text-white uppercase tracking-wider">{t.referral_rule_title}</p>
                                                 <p className="text-[10px] font-medium text-gray-400 mt-1 leading-relaxed">
-                                                    {t.referral_rule_desc}
+                                                    {tr("referral_rule_desc_dynamic", { amount: referralInfo.referralBonus })}
                                                 </p>
                                             </div>
                                         </div>
@@ -268,7 +299,7 @@ export default function ReferralsPage() {
                                             <div className="p-3 rounded-full bg-white/5">
                                                 <Star className="w-6 h-6 text-gray-700" />
                                             </div>
-                                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{language === "sw" ? "Hujatengeneza kodi bado" : "No active code found"}</p>
+                                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{t.no_active_code_found}</p>
                                         </div>
                                         <Button
                                             className="w-full h-16 bg-primary hover:bg-primary/90 text-black font-black uppercase tracking-widest shadow-[0_0_20px_rgba(var(--primary),0.3)]"
@@ -299,10 +330,10 @@ export default function ReferralsPage() {
                                 {leaderboard.length === 0 ? (
                                     <div className="p-12 text-center text-gray-500 space-y-3">
                                         <Medal className="h-8 w-8 mx-auto opacity-20" />
-                                        <p className="text-[10px] font-bold uppercase tracking-widest">{language === "sw" ? "Bado hakuna takwimu" : "No rankings yet"}</p>
+                                        <p className="text-[10px] font-bold uppercase tracking-widest">{t.no_rankings}</p>
                                         <div className="mt-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
                                             <p className="text-[9px] font-black text-yellow-500 uppercase tracking-widest">
-                                                {language === "sw" ? `Shinda Sarafu ${referralInfo.kingBonusCoins} 👑` : `Win ${referralInfo.kingBonusCoins} Coins 👑`}
+                                                {tr("win_coins_with_amount", { amount: referralInfo.kingBonusCoins })}
                                             </p>
                                         </div>
                                     </div>
@@ -310,7 +341,7 @@ export default function ReferralsPage() {
                                     <div className="divide-y divide-white/5">
                                         {leaderboard.map((item, index) => (
                                             <motion.div
-                                                key={item._id}
+                                                key={item.rank}
                                                 initial={{ opacity: 0, x: 10 }}
                                                 animate={{ opacity: 1, x: 0 }}
                                                 transition={{ delay: index * 0.06 }}
@@ -332,7 +363,7 @@ export default function ReferralsPage() {
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-xs font-bold text-white uppercase tracking-widest truncate flex items-center gap-1.5">
-                                                        {item.name.charAt(0)}***{item.name.charAt(item.name.length - 1)}
+                                                        {maskName(item.name)}
                                                         {item.isReferralKing && (
                                                             <span className="text-yellow-400 text-sm" title="Referral King">👑</span>
                                                         )}
@@ -358,30 +389,28 @@ export default function ReferralsPage() {
 
                                 <div className="p-4 mt-2 space-y-3">
                                     <div className="p-4 rounded-xl bg-primary/5 border border-primary/10 text-center">
-                                        <p className="text-[9px] font-bold text-primary uppercase tracking-widest mb-1">{language === "sw" ? "Kila mwaliko ni" : "Each referral is"}</p>
-                                        <p className="text-sm font-black text-white">10 COINS 🪙</p>
+                                        <p className="text-[9px] font-bold text-primary uppercase tracking-widest mb-1">{t.each_referral_is}</p>
+                                        <p className="text-sm font-black text-white">{referralInfo.referralBonus} COINS 🪙</p>
                                     </div>
                                     <div className="p-4 rounded-xl bg-yellow-500/5 border border-yellow-500/20 text-center">
                                         <p className="text-[9px] font-bold text-yellow-500/60 uppercase tracking-widest mb-1">
-                                            {language === "sw" ? `Shinda Sarafu ${referralInfo.kingBonusCoins} 👑` : `Win ${referralInfo.kingBonusCoins} Coins 👑`}
+                                            {tr("win_coins_with_amount", { amount: referralInfo.kingBonusCoins })}
                                         </p>
                                         <p className="text-[10px] font-bold text-yellow-400/80 leading-relaxed">
-                                            {language === "sw"
-                                                ? `Maalikaji bora kila wiki anatawazwa Mfalme na kupata sarafu ${referralInfo.kingBonusCoins} za bure 🪙 kila Jumapili otomatiki.`
-                                                : `The top referrer every week gets crowned King and wins ${referralInfo.kingBonusCoins} bonus coins 🪙 automatically every Sunday.`}
+                                            {tr("weekly_king_reward_desc", { amount: referralInfo.kingBonusCoins })}
                                         </p>
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
                     </div>
-                </div >
+                </div>
 
                 {/* Instructions Section */}
-                < div className="space-y-4 pt-4" >
+                <div className="space-y-4 pt-4">
                     <div className="flex items-center gap-2">
                         <Info className="h-5 w-5 text-primary" />
-                        <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{language === "sw" ? "Jinsi inavyofanya kazi" : "How it works"}</h2>
+                        <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{t.how_it_works}</h2>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md space-y-3 relative overflow-hidden group">
@@ -390,7 +419,7 @@ export default function ReferralsPage() {
                             <div className="relative z-10 space-y-1">
                                 <h3 className="text-xs font-bold text-white uppercase tracking-widest">{t.generate_code}</h3>
                                 <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest leading-relaxed">
-                                    {language === "sw" ? "Tengeneza kodi ya kipekee. Kodi ni ya kudumu na haishi muda wake." : "Create a unique 8-character code. Codes are permanent and never expire."}
+                                    {t.create_unique_code_desc}
                                 </p>
                             </div>
                         </div>
@@ -398,9 +427,9 @@ export default function ReferralsPage() {
                             <div className="absolute -right-4 -bottom-4 opacity-5 text-8xl font-black text-white group-hover:opacity-10 transition-opacity">2</div>
                             <div className="h-8 w-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-black relative z-10">2</div>
                             <div className="relative z-10 space-y-1">
-                                <h3 className="text-xs font-bold text-white uppercase tracking-widest">{language === "sw" ? "Alika wengine" : "Share with others"}</h3>
+                                <h3 className="text-xs font-bold text-white uppercase tracking-widest">{t.share_with_others}</h3>
                                 <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest leading-relaxed">
-                                    {language === "sw" ? "Tuma kodi yako kwa marafiki. Lazima waiingize wakati wa kujisajili." : "Send your code to friends. They must enter it during registration."}
+                                    {t.share_with_others_desc}
                                 </p>
                             </div>
                         </div>
@@ -408,9 +437,9 @@ export default function ReferralsPage() {
                             <div className="absolute -right-4 -bottom-4 opacity-5 text-8xl font-black text-white group-hover:opacity-10 transition-opacity">3</div>
                             <div className="h-8 w-8 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-black relative z-10">3</div>
                             <div className="relative z-10 space-y-1">
-                                <h3 className="text-xs font-bold text-white uppercase tracking-widest">{language === "sw" ? "Pata Zawadi 🪙" : "Earn Rewards 🪙"}</h3>
+                                <h3 className="text-xs font-bold text-white uppercase tracking-widest">{t.earn_rewards}</h3>
                                 <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest leading-relaxed">
-                                    {language === "sw" ? "Pata sarafu 10 kwa kila mtumiaji anayejisajili na kisha kufanya ununuzi wa kwanza." : "Get 10 coins for every user who registers and then makes their first purchase."}
+                                    {tr("earn_rewards_desc", { amount: referralInfo.referralBonus })}
                                 </p>
                             </div>
                         </div>
@@ -422,13 +451,13 @@ export default function ReferralsPage() {
                             <div className="relative z-10 space-y-1">
                                 <h3 className="text-xs font-bold text-yellow-400 uppercase tracking-widest">{t.king_how_it_works}</h3>
                                 <p className="text-[10px] text-yellow-500/50 font-bold uppercase tracking-widest leading-relaxed">
-                                    {language === "sw" ? `Maalikaji bora kila Jumapili anapata sarafu ${referralInfo.kingBonusCoins} + taji la Mfalme otomatiki.` : `The top referrer every Sunday wins ${referralInfo.kingBonusCoins} bonus coins + the King crown automatically.`}
+                                    {tr("king_weekly_desc", { amount: referralInfo.kingBonusCoins })}
                                 </p>
                             </div>
                         </div>
                     </div>
-                </div >
-            </div >
-        </DashboardLayout >
+                </div>
+            </div>
+        </DashboardLayout>
     );
 }

@@ -20,12 +20,12 @@ export interface Session {
   phone?: string;
   name?: string;
   status: string;
+  isLive?: boolean;
   expiresAt?: string;
   settings: SessionSettings;
   updatedAt?: string;
   phoneNumber?: string; // Add if used in UI
   nodeId?: string;
-  subscriptionActive?: boolean;
   createdAt: string;
 }
 
@@ -50,7 +50,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       const res = await api.get("/sessions");
       set({ sessions: res.data.sessions, isLoading: false });
     } catch (error: any) {
-      if (error.response?.status !== 401) {
+      if (!(error.response?.status === 503 && error.response?.data?.maintenance) && error.response?.status !== 401) {
         console.error("Fetch sessions failed:", error);
       }
       set({ isLoading: false, sessions: [] });

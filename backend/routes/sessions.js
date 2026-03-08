@@ -5,7 +5,7 @@ import User from "../models/User.js";
 import Notification from "../models/Notification.js";
 import { sessionManager } from "../services/whatsappService.js";
 import { queueService } from "../services/queueService.js";
-import { emitToUser } from "../services/socketService.js";
+import { emitToUser, emitUpdate } from "../services/socketService.js";
 import { pairingLimiter } from "../middleware/rateLimiter.js";
 
 const router = Router();
@@ -36,20 +36,53 @@ router.get("/", authenticate, async (req, res) => {
 
 /**
  * POST /api/sessions/pair
- * Start pairing a new WhatsApp session (unlimited, but only active with subscription)
+ * Start pairing a new WhatsApp session
  */
 router.post("/pair", authenticate, pairingLimiter, async (req, res) => {
     try {
         const { phoneNumber, method } = req.body;
+        const cleanPhone = String(phoneNumber || "").replace(/\D/g, "");
+        const cleanMethod = method === "qr" ? "qr" : "code";
 
-        if (!phoneNumber) {
+        if (!cleanPhone) {
             return res.status(400).json({ error: "Phone number is required" });
+        }
+        if (cleanPhone.length < 11) {
+            return res.status(400).json({ error: "Use international format, e.g. 2557XXXXXXXX" });
+        }
+
+        const activePairPosition = queueService.getQueuePosition(req.user._id.toString());
+        if (activePairPosition === 0) {
+            return res.json({
+                status: "processing",
+                message: "Pairing already in progress."
+            });
+        }
+        if (activePairPosition > 0) {
+            return res.json({
+                status: "queued",
+                position: activePairPosition,
+                message: `You are already in queue at position ${activePairPosition}.`
+            });
+        }
+
+        const inFlightPairing = await WhatsAppSession.findOne({
+            userId: req.user._id,
+            status: "pairing",
+            pairingStartedAt: { $gt: new Date(Date.now() - 3 * 60 * 1000) }
+        }).select("_id pairingStartedAt");
+
+        if (inFlightPairing) {
+            return res.json({
+                status: "processing",
+                message: "Pairing is already being prepared. Please wait."
+            });
         }
 
         const position = queueService.add(
             req.user._id.toString(),
-            phoneNumber,
-            method || "code",
+            cleanPhone,
+            cleanMethod,
             req.body.socketId
         );
 
@@ -148,6 +181,11 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         session.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
         await session.save();
 
+        emitUpdate("admin_session_updated", {
+            sessionId: session._id.toString(),
+            status: session.status
+        });
+
         // Connect session Manager
         if (!sessionManager.isConnected(session._id.toString())) {
             sessionManager.connectSession(session._id.toString());
@@ -229,6 +267,10 @@ router.put("/:id/settings", authenticate, async (req, res) => {
         }
 
         res.json({ success: true, settings: session.settings });
+
+        emitUpdate("admin_session_updated", {
+            sessionId: session._id.toString()
+        });
     } catch (error) {
         console.error("Update settings error:", error);
         res.status(500).json({ error: "Failed to update settings" });
@@ -254,6 +296,11 @@ router.post("/:id/disconnect", authenticate, async (req, res) => {
 
         session.status = "disconnected";
         await session.save();
+
+        emitUpdate("admin_session_updated", {
+            sessionId: session._id.toString(),
+            status: session.status
+        });
 
         res.json({ success: true, message: "Session disconnected" });
     } catch (error) {
@@ -289,6 +336,10 @@ router.post("/:id/pause", authenticate, async (req, res) => {
         // Notify client via socket
         emitToUser(req.user._id.toString(), "session_update", {
             sessionId: session._id,
+            status: "paused"
+        });
+        emitUpdate("admin_session_updated", {
+            sessionId: session._id.toString(),
             status: "paused"
         });
     } catch (error) {
@@ -329,6 +380,10 @@ router.post("/:id/resume", authenticate, async (req, res) => {
             sessionId: session._id,
             status: "active"
         });
+        emitUpdate("admin_session_updated", {
+            sessionId: session._id.toString(),
+            status: "active"
+        });
     } catch (error) {
         console.error("Resume session error:", error);
         res.status(500).json({ error: "Failed to resume session" });
@@ -355,6 +410,10 @@ router.delete("/:id", authenticate, async (req, res) => {
 
         // Remove from DB
         await WhatsAppSession.deleteOne({ _id: session._id });
+
+        emitUpdate("admin_session_deleted", {
+            sessionId: session._id.toString()
+        });
 
         res.json({ success: true, message: "Session deleted" });
     } catch (error) {

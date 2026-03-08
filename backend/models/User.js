@@ -43,10 +43,6 @@ const userSchema = new mongoose.Schema({
         sparse: true,
         trim: true
     },
-    referralCodeExpiresAt: {
-        type: Date,
-        default: null
-    },
     referredByPaid: {
         type: Boolean,
         default: false
@@ -93,6 +89,10 @@ const userSchema = new mongoose.Schema({
         default: 0
     },
     totalReferrals: {
+        type: Number,
+        default: 0
+    },
+    totalReferralCoinsEarned: {
         type: Number,
         default: 0
     },

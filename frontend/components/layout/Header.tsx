@@ -49,7 +49,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                 <Button variant="ghost" size="icon" className="lg:hidden text-white" onClick={onMenuClick}>
                     <Menu className="h-5 w-5" />
                 </Button>
-                <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-primary/5 border border-primary/10 backdrop-blur-md">
+                    <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-primary/5 border border-primary/10 backdrop-blur-md">
                     <div className="relative flex h-1.5 w-1.5">
                         <motion.span
                             animate={{ opacity: [0.4, 1, 0.4], scale: [1, 1.2, 1] }}
@@ -58,14 +58,14 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                         ></motion.span>
                         <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span>
                     </div>
-                    <span className="text-[9px] font-bold tracking-[0.2em] uppercase text-primary">Service Online</span>
+                    <span className="text-[9px] font-bold tracking-[0.2em] uppercase text-primary">{t.service_online}</span>
                 </div>
             </div>
 
             <div className="flex items-center gap-4 text-sm">
                 <div className="hidden lg:flex items-center gap-2 bg-yellow-500/10 px-3 py-1.5 rounded-full border border-yellow-500/20 mr-2">
                     <Coins className="h-3 w-3 text-yellow-500" />
-                    <span className="text-[10px] font-bold tracking-widest text-yellow-500 uppercase">{user?.coins || 0} Coins</span>
+                    <span className="text-[10px] font-bold tracking-widest text-yellow-500 uppercase">{user?.coins || 0} {t.coins_word}</span>
                 </div>
 
                 {/* Language Toggle */}
@@ -160,7 +160,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                         initial={{ scale: 0.8, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         className="hidden sm:flex items-center gap-1.5 bg-yellow-500/10 border border-yellow-500/30 px-3 py-1.5 rounded-full"
-                        title={language === "sw" ? "Wewe ni Mfalme wa Wiki hii 👑" : "You are this week's Referral King 👑"}
+                        title={t.king_tooltip}
                     >
                         <motion.span
                             animate={{ rotate: [-5, 5, -5] }}
@@ -170,7 +170,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                             👑
                         </motion.span>
                         <span className="text-[9px] font-black text-yellow-400 uppercase tracking-widest">
-                            {language === "sw" ? "Mfalme" : "King"}
+                            {t.king_label}
                         </span>
                     </motion.div>
                 )}
@@ -182,7 +182,7 @@ export function Header({ onMenuClick }: { onMenuClick: () => void }) {
                     className="flex items-center h-8 px-4 rounded-full border border-red-500/20 bg-red-500/10 text-red-500 transition-all cursor-pointer"
                 >
                     <LogOut className="h-3 w-3 mr-2" />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Logout</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest">{t.logout}</span>
                 </motion.button>
             </div>
         </header>

@@ -1,26 +1,60 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, useAuthStore } from "@/store/useAuthStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ShieldCheck, Loader2, Eye, EyeOff, Globe } from "lucide-react";
+import { ShieldCheck, Loader2, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
 import { motion } from "framer-motion";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertTriangle } from "lucide-react";
+import { io } from "socket.io-client";
 
 export default function LoginPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [banDialogOpen, setBanDialogOpen] = useState(false);
+    const [banMessage, setBanMessage] = useState("");
+    const [registrationEnabled, setRegistrationEnabled] = useState(true);
     const { login } = useAuthStore();
     const { language, setLanguage } = useLocaleStore();
     const t = translations[language];
     const router = useRouter();
+
+    useEffect(() => {
+        const fetchConfig = async () => {
+            try {
+                const res = await api.get("/config", { params: { _t: Date.now() } });
+                setRegistrationEnabled(res.data?.registrationEnabled !== false);
+            } catch {
+                setRegistrationEnabled(true);
+            }
+        };
+        fetchConfig();
+
+        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        const socket = io(backendUrl, {
+            transports: ["websocket", "polling"],
+            path: "/socket.io"
+        });
+
+        socket.on("platform_settings_updated", (payload: { registrationEnabled?: boolean }) => {
+            if (typeof payload?.registrationEnabled === "boolean") {
+                setRegistrationEnabled(payload.registrationEnabled);
+            }
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, []);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -31,7 +65,13 @@ export default function LoginPage() {
             toast.success(t.successful_login);
             router.push("/dashboard");
         } catch (error: any) {
-            toast.error(error.response?.data?.error || t.invalid_credentials);
+            const errorMsg = error.response?.data?.error || t.invalid_credentials;
+            if (error.response?.status === 403 || String(errorMsg).toLowerCase().includes("suspend") || String(errorMsg).toLowerCase().includes("bann")) {
+                setBanMessage(errorMsg);
+                setBanDialogOpen(true);
+            } else {
+                toast.error(errorMsg);
+            }
         } finally {
             setIsLoading(false);
         }
@@ -78,7 +118,7 @@ export default function LoginPage() {
                             </motion.div>
                         </div>
                         <div className="space-y-1.5">
-                            <h1 className="text-2xl font-bold text-white uppercase tracking-[0.25em] font-mono">Tervux Cloud</h1>
+                            <h1 className="text-2xl font-bold text-white uppercase tracking-[0.25em] font-mono">{t.app_name}</h1>
                             <p className="text-[10px] font-medium text-gray-500 uppercase tracking-[0.3em] opacity-80">{t.sign_in_account}</p>
                         </div>
                     </div>
@@ -124,12 +164,45 @@ export default function LoginPage() {
                     </form>
 
                     <div className="text-center pt-6 border-t border-white/[0.05]">
-                        <p className="text-[10px] text-gray-500 font-medium uppercase tracking-widest">
-                            {t.no_account} <Link href="/register" className="text-primary hover:text-primary/80 transition-colors ml-1.5 font-bold">{t.create_one}</Link>
-                        </p>
+                        {registrationEnabled ? (
+                            <p className="text-[10px] text-gray-500 font-medium uppercase tracking-widest">
+                                {t.no_account} <Link href="/register" className="text-primary hover:text-primary/80 transition-colors ml-1.5 font-bold">{t.create_one}</Link>
+                            </p>
+                        ) : (
+                            <p className="text-[10px] text-gray-500 font-medium uppercase tracking-widest">
+                                {t.registration_closed_brief}
+                            </p>
+                        )}
                     </div>
                 </div>
             </div>
+
+            <Dialog open={banDialogOpen} onOpenChange={setBanDialogOpen}>
+                <DialogContent className="max-w-md border-red-500/30 bg-[#0e0e0e] text-white rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-sm font-black uppercase tracking-widest text-red-300 flex items-center gap-2">
+                            <motion.span
+                                animate={{ scale: [1, 1.1, 1], opacity: [0.8, 1, 0.8] }}
+                                transition={{ duration: 1, repeat: Infinity }}
+                                className="inline-flex"
+                            >
+                                <AlertTriangle className="w-4 h-4 text-red-400" />
+                            </motion.span>
+                            {t.account_suspended_title}
+                        </DialogTitle>
+                        <DialogDescription className="text-xs font-semibold text-gray-300 leading-relaxed">
+                            {banMessage || t.account_suspended_login_notice}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-red-400">
+                        <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-400"></span>
+                        </span>
+                        {t.contact_support_to_continue}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

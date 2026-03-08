@@ -69,6 +69,8 @@ FASTLIPA_API_KEY=your_key
 FASTLIPA_VENDOR_ID=your_id
 CORS_ORIGINS=http://localhost:3000
 NODE_ENV=development
+MAX_CONCURRENT_PAIRINGS=3
+PAIRING_TIMEOUT_MS=120000
 ```
 
 ## 📡 API Endpoints
@@ -78,14 +80,14 @@ NODE_ENV=development
 - `POST /api/auth/login`: Authenticate and receive a JWT.
 
 ### WhatsApp Sessions
-- `GET /api/sessions`: List all user sessions (includes subscription info).
+- `GET /api/sessions`: List all user sessions (includes deployment status/expiry).
 - `POST /api/sessions/pair`: Initiate device pairing (QR/Code).
 - `POST /api/sessions/:id/pause`: Temporarily stop bot activity.
 - `POST /api/sessions/:id/resume`: Resume bot activity.
 - `DELETE /api/sessions/:id`: Terminate and remove a device connection.
 
 ### Subscriptions & Payments
-- `GET /api/subscription/plans`: Fetch available pricing plans.
+- `GET /api/plans`: Fetch available coin plans.
 - `POST /api/subscription/checkout`: Initiate a mobile money payment.
 - `GET /api/subscription/payment-status/:id`: Check status of a transaction.
 

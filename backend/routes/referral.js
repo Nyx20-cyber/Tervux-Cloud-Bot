@@ -3,8 +3,18 @@ import { authenticate } from "../middleware/auth.js";
 import User from "../models/User.js";
 import crypto from "crypto";
 import { getSettings } from "../models/SystemSettings.js";
+import rateLimit from "express-rate-limit";
 
 const router = Router();
+
+// Rate limiter for code generation: 3 attempts per 10 minutes per IP
+const generateLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many code generation attempts. Please try again later." }
+});
 
 /**
  * GET /api/referral
@@ -18,8 +28,8 @@ router.get("/", authenticate, async (req, res) => {
 
         res.json({
             referralCode: user.referralCode || null,
-            referralCodeExpiresAt: user.referralCodeExpiresAt || null,
             referralCount,
+            referralCoinsEarned: user.totalReferralCoinsEarned || 0,
             kingBonusCoins: settings.kingBonusCoins || 100,
             referralBonus: settings.referralBonus || 10
         });
@@ -31,37 +41,58 @@ router.get("/", authenticate, async (req, res) => {
 
 /**
  * POST /api/referral/generate
- * Generate a new referral code (valid for 7 days)
+ * Generate a permanent referral code (one per user)
  */
-router.post("/generate", authenticate, async (req, res) => {
+router.post("/generate", authenticate, generateLimiter, async (req, res) => {
     try {
-        const userCheck = await User.findById(req.user._id);
+        // Generate and assign atomically to avoid races across concurrent requests.
+        const MAX_RETRIES = 10;
+        for (let i = 0; i < MAX_RETRIES; i++) {
+            const candidate = crypto.randomBytes(6).toString("hex").toUpperCase();
+            try {
+                const user = await User.findOneAndUpdate(
+                    {
+                        _id: req.user._id,
+                        hasGeneratedCode: false,
+                        $or: [
+                            { referralCode: null },
+                            { referralCode: "" },
+                            { referralCode: { $exists: false } }
+                        ]
+                    },
+                    {
+                        $set: {
+                            referralCode: candidate,
+                            hasGeneratedCode: true
+                        }
+                    },
+                    { new: true }
+                );
 
-        // Check if a code already exists or was already generated
-        if (userCheck.hasGeneratedCode || userCheck.referralCode) {
-            return res.status(400).json({
-                error: "You already have a referral code. Codes are permanent."
-            });
+                if (user) {
+                    return res.json({
+                        success: true,
+                        referralCode: user.referralCode
+                    });
+                }
+
+                // User already has a permanent code.
+                const existingUser = await User.findById(req.user._id).select("referralCode hasGeneratedCode");
+                if (existingUser?.hasGeneratedCode || (existingUser?.referralCode || "").trim().length > 0) {
+                    return res.status(400).json({
+                        error: "You already have a referral code. Codes are permanent."
+                    });
+                }
+            } catch (error) {
+                // Duplicate code from unique index race/collision, retry with a new candidate.
+                if (error?.code === 11000 && error?.keyPattern?.referralCode) {
+                    continue;
+                }
+                throw error;
+            }
         }
 
-        // Generate a random 8-character uppercase string
-        const newCode = crypto.randomBytes(4).toString("hex").toUpperCase();
-
-        const user = await User.findByIdAndUpdate(
-            req.user._id,
-            {
-                referralCode: newCode,
-                referralCodeExpiresAt: null,
-                hasGeneratedCode: true
-            },
-            { new: true }
-        );
-
-        res.json({
-            success: true,
-            referralCode: user.referralCode,
-            referralCodeExpiresAt: user.referralCodeExpiresAt
-        });
+        return res.status(500).json({ error: "Failed to generate a unique code. Please try again." });
     } catch (error) {
         console.error("Referral generation error:", error);
         res.status(500).json({ error: "Failed to generate referral code" });
@@ -70,7 +101,7 @@ router.post("/generate", authenticate, async (req, res) => {
 
 /**
  * GET /api/referral/leaderboard
- * Global list of top referrers
+ * Global list of top referrers (anonymized — no internal IDs exposed)
  */
 router.get("/leaderboard", authenticate, async (req, res) => {
     try {
@@ -90,7 +121,7 @@ router.get("/leaderboard", authenticate, async (req, res) => {
             { $unwind: "$userDetails" },
             {
                 $project: {
-                    _id: 1,
+                    _id: 0,
                     count: 1,
                     name: "$userDetails.name",
                     isReferralKing: "$userDetails.isReferralKing",
@@ -99,7 +130,10 @@ router.get("/leaderboard", authenticate, async (req, res) => {
             }
         ]);
 
-        res.json({ leaderboard });
+        // Add a rank field for stable client-side keying
+        const ranked = leaderboard.map((item, i) => ({ ...item, rank: i + 1 }));
+
+        res.json({ leaderboard: ranked });
     } catch (error) {
         console.error("Leaderboard error:", error);
         res.status(500).json({ error: "Failed to fetch leaderboard" });
@@ -112,7 +146,7 @@ router.get("/leaderboard", authenticate, async (req, res) => {
  */
 router.get("/king", authenticate, async (req, res) => {
     try {
-        const king = await User.findOne({ isReferralKing: true }).select("name referralKingSince");
+        const king = await User.findOne({ isReferralKing: true }).select("-_id name referralKingSince");
         res.json({ king: king || null });
     } catch (error) {
         console.error("King fetch error:", error);

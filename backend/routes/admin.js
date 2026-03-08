@@ -7,8 +7,11 @@ import Plan from "../models/Plan.js";
 import Announcement from "../models/Announcement.js";
 import Notification from "../models/Notification.js";
 import SystemSettings, { getSettings } from "../models/SystemSettings.js";
+import FastLipaWebhookLog from "../models/FastLipaWebhookLog.js";
 import { sessionManager } from "../services/whatsappService.js";
-import { emitToUser } from "../services/socketService.js";
+import { emitToUser, emitUpdate } from "../services/socketService.js";
+import { checkTransactionStatus } from "../services/paymentService.js";
+import { extractFastLipaFields, settleCompletedPayment, settleFailedPayment } from "../services/paymentSettlement.js";
 
 const router = Router();
 
@@ -27,7 +30,7 @@ router.get("/stats", authenticate, requireAdmin, async (req, res) => {
             recentPayments
         ] = await Promise.all([
             User.countDocuments(),
-            WhatsAppSession.countDocuments({ "subscription.status": "active" }),
+            WhatsAppSession.countDocuments({ expiresAt: { $gt: new Date() } }),
             WhatsAppSession.countDocuments(),
             WhatsAppSession.countDocuments({ status: "active" }),
             Payment.aggregate([
@@ -75,8 +78,26 @@ router.get("/users", authenticate, requireAdmin, async (req, res) => {
             User.countDocuments()
         ]);
 
+        const usersData = users.map((u) => u.toJSON());
+        const userIds = usersData.map((u) => u._id);
+        const recentPayments = await Payment.find({ userId: { $in: userIds }, payerPhone: { $ne: "" } })
+            .select("userId payerPhone createdAt")
+            .sort({ createdAt: -1 })
+            .lean();
+
+        const phoneByUserId = new Map();
+        for (const payment of recentPayments) {
+            const id = payment.userId?.toString();
+            if (!id || phoneByUserId.has(id)) continue;
+            if (payment.payerPhone) phoneByUserId.set(id, String(payment.payerPhone));
+        }
+
+        for (const user of usersData) {
+            user.phone = phoneByUserId.get(String(user._id)) || "";
+        }
+
         res.json({
-            users: users.map(u => u.toJSON()),
+            users: usersData,
             total,
             page,
             pages: Math.ceil(total / limit)
@@ -89,11 +110,11 @@ router.get("/users", authenticate, requireAdmin, async (req, res) => {
 
 /**
  * PUT /api/admin/users/:id
- * Update user (ban, change role, extend subscription etc.)
+ * Update user (ban, change role)
  */
 router.put("/users/:id", authenticate, requireAdmin, async (req, res) => {
     try {
-        const { isBanned, role, subscriptionExtendDays } = req.body;
+        const { isBanned, role } = req.body;
         const user = await User.findById(req.params.id);
 
         if (!user) {
@@ -103,27 +124,24 @@ router.put("/users/:id", authenticate, requireAdmin, async (req, res) => {
         if (isBanned !== undefined) user.isBanned = isBanned;
         if (role && ["user", "admin"].includes(role)) user.role = role;
 
-        if (subscriptionExtendDays && user.subscription?.expiresAt) {
-            const current = new Date(user.subscription.expiresAt);
-            const base = current > new Date() ? current : new Date();
-            user.subscription.expiresAt = new Date(base.getTime() + subscriptionExtendDays * 86400000);
-            user.subscription.status = "active";
-
-            // Notify user about subscription extension
-            try {
-                const notification = await Notification.create({
-                    userId: user._id,
-                    title: "Subscription Extended! 🚀",
-                    message: `System administrator has extended your subscription by ${subscriptionExtendDays} days.`,
-                    type: "success"
-                });
-                emitToUser(user._id, "new_notification", notification);
-            } catch (err) {
-                console.error("Failed to create sub extension notification:", err);
-            }
-        }
-
         await user.save();
+        const serializedUser = user.toJSON();
+
+        emitUpdate("admin_user_updated", {
+            user: serializedUser
+        });
+
+        emitToUser(user._id, "account_status_update", {
+            isBanned: !!user.isBanned,
+            role: user.role
+        });
+
+        if (isBanned === true) {
+            emitToUser(user._id, "force_logout", {
+                reason: "banned",
+                message: "Your account has been suspended by an administrator."
+            });
+        }
 
         // If banned, disconnect their sessions
         if (isBanned) {
@@ -135,7 +153,7 @@ router.put("/users/:id", authenticate, requireAdmin, async (req, res) => {
             }
         }
 
-        res.json({ success: true, user: user.toJSON() });
+        res.json({ success: true, user: serializedUser });
     } catch (error) {
         console.error("Admin update user error:", error);
         res.status(500).json({ error: "Failed to update user" });
@@ -192,6 +210,114 @@ router.get("/payments", authenticate, requireAdmin, async (req, res) => {
 });
 
 /**
+ * DELETE /api/admin/payments/:id
+ * Delete a payment record
+ */
+router.delete("/payments/:id", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const payment = await Payment.findByIdAndDelete(req.params.id);
+        if (!payment) {
+            return res.status(404).json({ error: "Payment not found" });
+        }
+
+        emitUpdate("admin_payment_deleted", {
+            paymentId: payment._id.toString()
+        });
+
+        res.json({
+            success: true,
+            message: "Payment deleted",
+            paymentId: payment._id.toString()
+        });
+    } catch (error) {
+        console.error("Admin delete payment error:", error);
+        res.status(500).json({ error: "Failed to delete payment" });
+    }
+});
+
+/**
+ * POST /api/admin/payments/:id/reconcile
+ * Manual settlement fallback when webhook is unreliable.
+ */
+router.post("/payments/:id/reconcile", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const payment = await Payment.findById(req.params.id);
+        if (!payment) return res.status(404).json({ error: "Payment not found" });
+
+        if (!payment.fastlipaTransactionId) {
+            return res.status(400).json({ error: "Payment has no FastLipa transaction ID" });
+        }
+
+        const statusResult = await checkTransactionStatus(payment.fastlipaTransactionId);
+        const { paymentStatus } = extractFastLipaFields(statusResult);
+
+        if (paymentStatus === "COMPLETED" || paymentStatus === "SUCCESSFUL") {
+            const result = await settleCompletedPayment(payment._id, statusResult, "admin_reconcile");
+            return res.json({
+                ok: true,
+                action: "completed",
+                state: result.state,
+                paymentId: payment._id,
+                transactionId: payment.fastlipaTransactionId
+            });
+        }
+
+        if (["FAILED", "EXPIRED", "CANCELLED", "REJECTED"].includes(paymentStatus)) {
+            const failureStatus = paymentStatus === "CANCELLED" || paymentStatus === "REJECTED" ? "cancelled" : "failed";
+            const failureReason = failureStatus === "cancelled"
+                ? "Payment was cancelled."
+                : `Payment failed (${paymentStatus}).`;
+            const result = await settleFailedPayment(payment._id, failureStatus, failureReason, statusResult);
+            return res.json({
+                ok: true,
+                action: "failed",
+                state: result.state,
+                paymentId: payment._id,
+                transactionId: payment.fastlipaTransactionId
+            });
+        }
+
+        await Payment.updateOne(
+            { _id: payment._id },
+            { $set: { gatewayResponse: { ...(payment.gatewayResponse || {}), lastManualReconcile: statusResult } } }
+        );
+        emitUpdate("admin_payment_updated", {
+            paymentId: payment._id.toString(),
+            status: paymentStatus || "PENDING"
+        });
+
+        return res.json({
+            ok: true,
+            action: "pending",
+            paymentId: payment._id,
+            transactionId: payment.fastlipaTransactionId,
+            status: paymentStatus || "PENDING"
+        });
+    } catch (error) {
+        console.error("Admin reconcile payment error:", error);
+        res.status(500).json({ error: "Failed to reconcile payment" });
+    }
+});
+
+/**
+ * GET /api/admin/payments/webhook-logs
+ * Inspect recent FastLipa webhook deliveries
+ */
+router.get("/payments/webhook-logs", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const logs = await FastLipaWebhookLog.find()
+            .sort({ createdAt: -1 })
+            .limit(50)
+            .populate("matchedPaymentId", "fastlipaTransactionId status amount payerPhone");
+
+        res.json({ logs });
+    } catch (error) {
+        console.error("Admin webhook logs error:", error);
+        res.status(500).json({ error: "Failed to fetch webhook logs" });
+    }
+});
+
+/**
  * GET /api/admin/plans
  * List all plans
  */
@@ -211,7 +337,7 @@ router.get("/plans", authenticate, requireAdmin, async (req, res) => {
  */
 router.post("/plans", authenticate, requireAdmin, async (req, res) => {
     try {
-        const { name, slug, price, currency, durationDays, coinsAmount, description, isActive } = req.body;
+        const { name, slug, price, currency, coinsAmount, description, isActive } = req.body;
 
         if (!name || !slug || price === undefined || coinsAmount === undefined) {
             return res.status(400).json({ error: "name, slug, price, and coinsAmount are required" });
@@ -225,9 +351,12 @@ router.post("/plans", authenticate, requireAdmin, async (req, res) => {
         const plan = await Plan.create({
             name, slug: slug.toLowerCase(),
             price, currency: currency || "TZS",
-            durationDays: durationDays || 0,
             coinsAmount, description: description || "",
             isActive: isActive !== undefined ? isActive : true
+        });
+
+        emitUpdate("admin_plan_created", {
+            plan
         });
 
         res.status(201).json({ success: true, plan });
@@ -246,18 +375,22 @@ router.put("/plans/:id", authenticate, requireAdmin, async (req, res) => {
         const plan = await Plan.findById(req.params.id);
         if (!plan) return res.status(404).json({ error: "Plan not found" });
 
-        const { name, slug, price, currency, durationDays, coinsAmount, description, isActive } = req.body;
+        const { name, slug, price, currency, coinsAmount, description, isActive } = req.body;
 
         if (name !== undefined) plan.name = name;
         if (slug !== undefined) plan.slug = slug.toLowerCase();
         if (price !== undefined) plan.price = price;
         if (currency !== undefined) plan.currency = currency;
-        if (durationDays !== undefined) plan.durationDays = durationDays;
         if (coinsAmount !== undefined) plan.coinsAmount = coinsAmount;
         if (description !== undefined) plan.description = description;
         if (isActive !== undefined) plan.isActive = isActive;
 
         await plan.save();
+
+        emitUpdate("admin_plan_updated", {
+            plan
+        });
+
         res.json({ success: true, plan });
     } catch (error) {
         console.error("Admin update plan error:", error);
@@ -273,6 +406,11 @@ router.delete("/plans/:id", authenticate, requireAdmin, async (req, res) => {
     try {
         const plan = await Plan.findByIdAndDelete(req.params.id);
         if (!plan) return res.status(404).json({ error: "Plan not found" });
+
+        emitUpdate("admin_plan_deleted", {
+            planId: plan._id.toString()
+        });
+
         res.json({ success: true, message: "Plan deleted" });
     } catch (error) {
         console.error("Admin delete plan error:", error);
@@ -294,7 +432,6 @@ router.get("/sessions", authenticate, requireAdmin, async (req, res) => {
 
         const sessions = await WhatsAppSession.find(filter)
             .populate("userId", "email name phone")
-            .populate("subscription.planId", "name price")
             .sort({ lastConnected: -1, createdAt: -1 });
 
         const enriched = sessions.map(s => ({
@@ -322,10 +459,122 @@ router.post("/sessions/:id/disconnect", authenticate, requireAdmin, async (req, 
         session.status = "disconnected";
         await session.save();
 
+        emitUpdate("admin_session_updated", {
+            sessionId: session._id.toString(),
+            status: session.status
+        });
+
         res.json({ success: true, message: "Session disconnected" });
     } catch (error) {
         console.error("Admin disconnect session error:", error);
         res.status(500).json({ error: "Failed to disconnect session" });
+    }
+});
+
+/**
+ * PUT /api/admin/sessions/:id
+ * Edit a session (phone, status, expiresAt, and settings)
+ */
+router.put("/sessions/:id", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const session = await WhatsAppSession.findById(req.params.id);
+        if (!session) return res.status(404).json({ error: "Session not found" });
+
+        const { phone, status, expiresAt, settings } = req.body;
+        const allowedStatuses = ["pairing", "active", "disconnected", "paused", "expired"];
+        const allowedSettings = [
+            "prefix", "alwaysOnline", "autoLikeStatus", "autoViewStatus",
+            "antiDelete", "antiCall", "antiViewOnce", "antiRemove",
+            "autoReadMessages", "alwaysTyping", "alwaysRecording"
+        ];
+
+        if (phone !== undefined) {
+            session.phone = String(phone).trim();
+        }
+
+        if (expiresAt !== undefined) {
+            session.expiresAt = expiresAt ? new Date(expiresAt) : null;
+        }
+
+        if (status !== undefined) {
+            if (!allowedStatuses.includes(status)) {
+                return res.status(400).json({ error: "Invalid session status" });
+            }
+            session.status = status;
+
+            // Apply runtime connection behavior for status changes
+            if (status === "disconnected") {
+                await sessionManager.disconnectSession(session._id.toString());
+            } else if (status === "paused") {
+                if (sessionManager?.isConnected(session._id.toString())) {
+                    await sessionManager.pauseSession(session._id.toString());
+                }
+            } else if (status === "active") {
+                if (sessionManager?.isConnected(session._id.toString())) {
+                    await sessionManager.resumeSession(session._id.toString());
+                } else {
+                    sessionManager.connectSession(session._id.toString());
+                }
+            }
+        }
+
+        if (settings && typeof settings === "object") {
+            for (const key of allowedSettings) {
+                if (settings[key] !== undefined) {
+                    session.settings[key] = settings[key];
+                }
+            }
+            sessionManager.invalidateConfigCache(session._id.toString());
+        }
+
+        await session.save();
+
+        emitToUser(session.userId.toString(), "session_update", {
+            sessionId: session._id,
+            status: session.status
+        });
+        emitUpdate("admin_session_updated", {
+            sessionId: session._id.toString(),
+            status: session.status
+        });
+
+        const populated = await WhatsAppSession.findById(session._id)
+            .populate("userId", "email name phone");
+
+        res.json({
+            success: true,
+            message: "Session updated",
+            session: populated
+        });
+    } catch (error) {
+        console.error("Admin edit session error:", error);
+        res.status(500).json({ error: "Failed to update session" });
+    }
+});
+
+/**
+ * DELETE /api/admin/sessions/:id
+ * Delete a session permanently
+ */
+router.delete("/sessions/:id", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const session = await WhatsAppSession.findById(req.params.id);
+        if (!session) return res.status(404).json({ error: "Session not found" });
+
+        await sessionManager.destroySession(session._id.toString());
+        await WhatsAppSession.deleteOne({ _id: session._id });
+
+        emitToUser(session.userId.toString(), "session_deleted", {
+            sessionId: session._id
+        });
+        emitUpdate("admin_session_deleted", {
+            sessionId: session._id.toString()
+        });
+
+        res.json({ success: true, message: "Session deleted", sessionId: session._id.toString() });
+    } catch (error) {
+        console.error("Admin delete session error:", error);
+        res.status(500).json({ error: "Failed to delete session" });
     }
 });
 
@@ -558,6 +807,16 @@ router.put("/settings", authenticate, requireAdmin, async (req, res) => {
         settings.lastUpdatedBy = req.user._id;
         await settings.save();
 
+        emitUpdate("admin_settings_updated", { settings });
+        emitUpdate("platform_settings_updated", {
+            maintenanceMode: settings.maintenanceMode,
+            registrationEnabled: settings.registrationEnabled,
+            supportPhone: settings.supportPhone,
+            siteName: settings.siteName,
+            kingBonusCoins: settings.kingBonusCoins,
+            referralBonus: settings.referralBonus
+        });
+
         // Broadcast notification for coin changes
         const kingBonusChanged = oldKingBonus !== settings.kingBonusCoins;
         const referralBonusChanged = oldReferralBonus !== settings.referralBonus;
@@ -703,7 +962,17 @@ router.post("/users/:id/gamification", authenticate, requireAdmin, async (req, r
 
         if (!updatedUser) return res.status(404).json({ error: "User not found" });
 
-        res.json({ success: true, user: updatedUser.toJSON() });
+        const serializedUser = updatedUser.toJSON();
+        emitUpdate("admin_user_updated", {
+            user: serializedUser
+        });
+
+        emitToUser(updatedUser._id, "account_gamification_updated", {
+            badges: serializedUser.badges,
+            isVIP: serializedUser.isVIP
+        });
+
+        res.json({ success: true, user: serializedUser });
     } catch (error) {
         console.error("Admin gamification update error:", error);
         res.status(500).json({ error: "Failed to update user gamification data" });

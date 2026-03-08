@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Activity, ShieldCheck, RefreshCcw, Network, Coins, Rocket, Megaphone, Info, AlertTriangle, Wrench, Sparkles, Tag, ChevronRight } from "lucide-react";
+import { Activity, ShieldCheck, RefreshCcw, Network, Coins, Rocket, Megaphone, Info, AlertTriangle, Wrench, Sparkles, Tag } from "lucide-react";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { io } from "socket.io-client";
@@ -37,10 +37,16 @@ export default function DashboardPage() {
     const { user, setUser } = useAuthStore();
     const { language } = useLocaleStore();
     const t = translations[language];
+    const tr = (key: keyof typeof translations.en, vars?: Record<string, string | number>) => {
+        const template = String(t[key] ?? translations.en[key] ?? "");
+        if (!vars) return template;
+        return Object.entries(vars).reduce((acc, [k, v]) => acc.replaceAll(`{{${k}}}`, String(v)), template);
+    };
     const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
     const [referralBonus, setReferralBonus] = useState(10);
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [isStatsLoading, setIsStatsLoading] = useState(true);
+    const isMaintenanceError = (err: any) => err?.response?.status === 503 && err?.response?.data?.maintenance;
 
     useEffect(() => {
         fetchSessions();
@@ -50,7 +56,9 @@ export default function DashboardPage() {
                 const res = await api.get("/announcements");
                 setAnnouncements(res.data.announcements);
             } catch (err) {
-                console.error("Failed to fetch announcements:", err);
+                if (!isMaintenanceError(err)) {
+                    console.error("Failed to fetch announcements:", err);
+                }
             }
         };
         fetchAnnouncements();
@@ -60,7 +68,9 @@ export default function DashboardPage() {
                 const res = await api.get("/referral");
                 setReferralBonus(res.data.referralBonus || 10);
             } catch (err) {
-                console.error("Failed to fetch referral info:", err);
+                if (!isMaintenanceError(err)) {
+                    console.error("Failed to fetch referral info:", err);
+                }
             }
         };
         fetchReferralInfo();
@@ -70,20 +80,24 @@ export default function DashboardPage() {
                 const res = await api.get("/dashboard/stats");
                 setStats(res.data);
             } catch (err) {
-                console.error("Failed to fetch dashboard stats:", err);
+                if (!isMaintenanceError(err)) {
+                    console.error("Failed to fetch dashboard stats:", err);
+                }
             } finally {
                 setIsStatsLoading(false);
             }
         };
         fetchDashboardStats();
 
-        const backendUrl = process.env.NEXT_PUBLIC_API_URL || "";
+        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
         const socket = io(backendUrl, {
+            transports: ["websocket", "polling"],
+            path: "/socket.io",
             auth: { token: localStorage.getItem("token") }
         });
 
-        socket.on("session_update", (data: { sessionId: string; status: string }) => {
-            updateSessionLocally(data.sessionId, { status: data.status });
+        socket.on("session_update", (data: { sessionId: string; status: string; isLive?: boolean }) => {
+            updateSessionLocally(data.sessionId, { status: data.status, isLive: data.isLive });
         });
 
         socket.on("balance_update", (data: { coins: number }) => {
@@ -91,7 +105,6 @@ export default function DashboardPage() {
                 setUser({ ...user, coins: data.coins });
             }
         });
-
         return () => {
             socket.disconnect();
         };
@@ -113,12 +126,12 @@ export default function DashboardPage() {
     };
 
     const shortcuts = [
-        { icon: CreditCard, label: language === "sw" ? "Sarafu" : "Top Up", path: "/dashboard/billing", color: "text-emerald-400", bg: "bg-emerald-400/10" },
-        { icon: UserPlus, label: language === "sw" ? "Alika" : "Refer", path: "/dashboard/referrals", color: "text-violet-400", bg: "bg-violet-400/10" },
-        { icon: Rocket, label: language === "sw" ? "Usambazaji" : "Deploy", path: "/dashboard/deployments", color: "text-primary", bg: "bg-primary/10" },
-        { icon: Bell, label: language === "sw" ? "Taarifa" : "Alerts", path: "/dashboard/notifications", color: "text-orange-400", bg: "bg-orange-400/10" },
-        { icon: Settings, label: language === "sw" ? "Mipangilio" : "Settings", path: "/dashboard/configurations", color: "text-blue-400", bg: "bg-blue-400/10" },
-        { icon: History, label: language === "sw" ? "Historia" : "Usage", path: "/dashboard/billing", color: "text-gray-400", bg: "bg-gray-400/10" },
+        { icon: CreditCard, label: t.shortcut_topup, path: "/dashboard/billing", color: "text-emerald-400", bg: "bg-emerald-400/10" },
+        { icon: UserPlus, label: t.shortcut_refer, path: "/dashboard/referrals", color: "text-violet-400", bg: "bg-violet-400/10" },
+        { icon: Rocket, label: t.shortcut_deploy, path: "/dashboard/deployments", color: "text-primary", bg: "bg-primary/10" },
+        { icon: Bell, label: t.shortcut_alerts, path: "/dashboard/notifications", color: "text-orange-400", bg: "bg-orange-400/10" },
+        { icon: Settings, label: t.shortcut_settings, path: "/dashboard/configurations", color: "text-blue-400", bg: "bg-blue-400/10" },
+        { icon: History, label: t.shortcut_usage, path: "/dashboard/billing", color: "text-gray-400", bg: "bg-gray-400/10" },
     ];
 
     return (
@@ -139,7 +152,7 @@ export default function DashboardPage() {
                             <span className="bg-gradient-to-r from-white to-white/40 bg-clip-text text-transparent">{t.dashboard}</span>
                         </h1>
                         <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-2 ml-1 opacity-70">
-                            {language === "sw" ? "PANELI YAKO KUU YA USIMAMIZI" : "YOUR CENTRAL MANAGEMENT COMMAND"}
+                            {t.dashboard_central_command}
                         </p>
                     </motion.div>
 
@@ -149,7 +162,7 @@ export default function DashboardPage() {
                         </div>
                         <div>
                             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest leading-none mb-1">{t.welcome_back}</p>
-                            <p className="text-sm font-black text-white uppercase tracking-tight">{user?.name || "Member"}</p>
+                            <p className="text-sm font-black text-white uppercase tracking-tight">{user?.name || t.member}</p>
                         </div>
                     </motion.div>
                 </div>
@@ -161,10 +174,10 @@ export default function DashboardPage() {
                 {/* Stats Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
-                        { icon: Coins, label: language === "sw" ? "SALIO LA SARAFU" : "COIN BALANCE", value: user?.coins || 0, color: "text-yellow-500", detail: "🪙", pulse: true },
-                        { icon: ShieldCheck, label: language === "sw" ? "USALAMA" : "ENCRYPTION", value: "AES-256", color: "text-sky-400", detail: "🔐" },
-                        { icon: RefreshCcw, label: language === "sw" ? "MUDA WA KAZI" : "UPTIME", value: "99.9%", color: "text-emerald-400", detail: "⚡" },
-                        { icon: Network, label: language === "sw" ? "BO TI HAI" : "ACTIVE BOTS", value: activeSessionsCount, color: "text-primary", detail: "🤖" },
+                        { icon: Coins, label: t.stat_coin_balance, value: user?.coins || 0, color: "text-yellow-500", detail: "🪙", pulse: true },
+                        { icon: ShieldCheck, label: t.encryption, value: "AES-256", color: "text-sky-400", detail: "🔐" },
+                        { icon: RefreshCcw, label: t.uptime, value: "99.9%", color: "text-emerald-400", detail: "⚡" },
+                        { icon: Network, label: t.stat_active_bots, value: activeSessionsCount, color: "text-primary", detail: "🤖" },
                     ].map((stat, i) => (
                         <motion.div
                             key={i}
@@ -191,8 +204,8 @@ export default function DashboardPage() {
                     <motion.div variants={itemVariants} className="p-8 rounded-3xl border border-white/5 bg-[#0D0D0D]/60 backdrop-blur-3xl min-h-[350px] relative overflow-hidden group">
                         <div className="flex items-center justify-between mb-8">
                             <div>
-                                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">{language === "sw" ? "Mwenendo wa Mwaliko" : "Referral Growth"}</h3>
-                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Last 7 Days Activity</p>
+                                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">{t.referral_growth}</h3>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">{t.last_7_days_activity}</p>
                             </div>
                             <div className="p-2 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400">
                                 <TrendingUp size={16} />
@@ -229,8 +242,8 @@ export default function DashboardPage() {
                     <motion.div variants={itemVariants} className="p-8 rounded-3xl border border-white/5 bg-[#0D0D0D]/60 backdrop-blur-3xl min-h-[350px] relative overflow-hidden">
                         <div className="flex items-center justify-between mb-8">
                             <div>
-                                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">{language === "sw" ? "Ununuzi wa Sarafu" : "Coin Purchase Trend"}</h3>
-                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Daily Investment Recap</p>
+                                <h3 className="text-sm font-black text-white uppercase tracking-[0.2em]">{t.coin_purchase_trend}</h3>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">{t.daily_investment_recap}</p>
                             </div>
                             <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary">
                                 <Coins size={16} />
@@ -264,7 +277,7 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-2 px-2">
                         <Sparkles className="h-4 w-4 text-primary" />
                         <h2 className="text-xs font-black text-white uppercase tracking-[0.3em] opacity-60">
-                            {language === "sw" ? "Njia za Mkato" : "Quick Commands"}
+                            {t.quick_commands}
                         </h2>
                     </div>
                     <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
@@ -294,14 +307,14 @@ export default function DashboardPage() {
                         <div className="space-y-4">
                             <div className="flex items-center gap-2 px-2">
                                 <Megaphone className="h-5 w-5 text-primary" />
-                                <h2 className="text-lg font-black tracking-tight text-white uppercase">{language === "sw" ? "Matangazo" : "Broadcasts"}</h2>
+                                <h2 className="text-lg font-black tracking-tight text-white uppercase">{t.broadcasts}</h2>
                             </div>
                             <div className="grid gap-4">
                                 {announcements.length === 0 ? (
                                     <div className="p-8 text-center border border-white/5 rounded-3xl bg-white/5">
-                                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">No active broadcasts</p>
+                                        <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">{t.no_active_broadcasts}</p>
                                     </div>
-                                ) : announcements.map((announcement, idx) => {
+                                ) : announcements.map((announcement) => {
                                     const tc = typeConfig[announcement.type] || typeConfig.info;
                                     const Icon = tc.icon;
                                     return (
@@ -335,12 +348,10 @@ export default function DashboardPage() {
                                 <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20">
                                     <Sparkles className="h-5 w-5 text-primary" />
                                 </div>
-                                <h3 className="text-xs font-black text-white uppercase tracking-[0.3em]">{language === "sw" ? "Kidokezo cha Haraka" : "Quick Tip"}</h3>
+                                <h3 className="text-xs font-black text-white uppercase tracking-[0.3em]">{t.quick_tip}</h3>
                             </div>
                             <p className="text-xs text-white/80 font-medium leading-[1.8] relative z-10">
-                                {language === "sw"
-                                    ? `Alika marafiki kwa kutumia kodi yako ya mwaliko na upate sarafu ${referralBonus} 🪙 kila mmoja anapofanya malipo yake ya kwanza!`
-                                    : `Invite friends using your unique referral code and earn ${referralBonus} coins 🪙 whenever they make their first successful purchase!`}
+                                {tr("invite_friends_dynamic", { amount: referralBonus })}
                             </p>
                             <Button asChild variant="link" className="p-0 h-auto text-[10px] font-black uppercase tracking-[0.2em] text-primary hover:gap-2 transition-all">
                                 <Link href="/dashboard/referrals" className="flex items-center gap-2">
@@ -354,17 +365,15 @@ export default function DashboardPage() {
                                 <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
                                     <Wrench className="h-5 w-5 text-gray-400" />
                                 </div>
-                                <h3 className="text-xs font-black text-white uppercase tracking-[0.3em]">{language === "sw" ? "Msaada" : "Support"}</h3>
+                                <h3 className="text-xs font-black text-white uppercase tracking-[0.3em]">{t.support}</h3>
                             </div>
                             <p className="text-[10px] text-gray-500 font-bold uppercase tracking-[0.2em] leading-relaxed mb-6">
-                                {language === "sw"
-                                    ? "Ungana nasi kupitia jopo la msaada au telegram yetu."
-                                    : "Need help? Connect with our team via the support panel or our official Telegram."}
+                                {t.support_desc}
                             </p>
                             <div className="p-5 rounded-2xl bg-black/40 border border-white/5 text-center group-hover:border-emerald-500/20 transition-colors">
-                                <p className="text-[9px] font-black text-gray-600 uppercase tracking-[0.2em] mb-1">{language === "sw" ? "Hali ya Mfumo" : "Service Status"}</p>
+                                <p className="text-[9px] font-black text-gray-600 uppercase tracking-[0.2em] mb-1">{t.service_status}</p>
                                 <p className="text-[11px] font-black text-emerald-500 uppercase tracking-widest flex items-center justify-center gap-2">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Operational
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> {t.operational}
                                 </p>
                             </div>
                         </motion.div>
@@ -375,7 +384,6 @@ export default function DashboardPage() {
     );
 }
 
-const tcConfig: any = { icon: Info, color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/10" };
 const typeConfig: Record<string, { icon: any; color: string; bg: string; border: string }> = {
     info: { icon: Info, color: "text-sky-400", bg: "bg-sky-500/5", border: "border-sky-500/10" },
     warning: { icon: AlertTriangle, color: "text-amber-400", bg: "bg-amber-500/5", border: "border-amber-500/10" },
@@ -383,4 +391,3 @@ const typeConfig: Record<string, { icon: any; color: string; bg: string; border:
     update: { icon: Sparkles, color: "text-violet-400", bg: "bg-violet-500/5", border: "border-violet-500/10" },
     promo: { icon: Tag, color: "text-emerald-400", bg: "bg-emerald-500/5", border: "border-emerald-500/10" },
 };
-

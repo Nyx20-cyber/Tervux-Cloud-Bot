@@ -18,7 +18,7 @@ const router = Router();
  */
 router.post("/register", authLimiter, async (req, res) => {
     try {
-        const { email, password, name, phone, referralCode } = req.body;
+        const { email, password, name, referralCode } = req.body;
 
         const settings = await getSettings();
         if (!settings.registrationEnabled) {
@@ -57,7 +57,6 @@ router.post("/register", authLimiter, async (req, res) => {
             email: email.toLowerCase(),
             password,
             name: sanitize(name),
-            phone: phone ? phone.replace(/[^0-9+]/g, "") : "",
             referredBy: referrer ? referrer._id : null
         });
 
@@ -117,7 +116,7 @@ router.post("/login", authLimiter, async (req, res) => {
         }
 
         if (user.isBanned) {
-            return res.status(403).json({ error: "Account suspended" });
+            return res.status(403).json({ error: "Your account is suspended by administrator. Please contact support." });
         }
 
         const isValid = await user.comparePassword(password);

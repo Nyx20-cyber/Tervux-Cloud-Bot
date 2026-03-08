@@ -11,9 +11,7 @@ const plans = [
         slug: "50-coins",
         price: 1500,
         currency: "TZS",
-        durationDays: 0,
         coinsAmount: 50,
-        maxSessions: 1,
         description: "50 Coins — Deploy 1 Bot"
     },
     {
@@ -21,9 +19,7 @@ const plans = [
         slug: "100-coins",
         price: 2000,
         currency: "TZS",
-        durationDays: 0,
         coinsAmount: 100,
-        maxSessions: 1,
         description: "100 Coins — Deploy 2 Bots"
     },
     {
@@ -31,9 +27,7 @@ const plans = [
         slug: "250-coins",
         price: 3000,
         currency: "TZS",
-        durationDays: 0,
         coinsAmount: 250,
-        maxSessions: 1,
         description: "250 Coins — Deploy 5 Bots"
     }
 ];

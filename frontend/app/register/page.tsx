@@ -1,16 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, useAuthStore } from "@/store/useAuthStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ShieldCheck, Loader2, Globe, Eye, EyeOff } from "lucide-react";
+import { ShieldCheck, Loader2, Eye, EyeOff, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
 import { motion } from "framer-motion";
+import { io } from "socket.io-client";
 
 export default function RegisterPage() {
     const [name, setName] = useState("");
@@ -19,10 +20,42 @@ export default function RegisterPage() {
     const [showPassword, setShowPassword] = useState(false);
     const [referralCode, setReferralCode] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [configLoading, setConfigLoading] = useState(true);
+    const [registrationEnabled, setRegistrationEnabled] = useState(true);
     const { login } = useAuthStore();
     const { language, setLanguage } = useLocaleStore();
     const t = translations[language];
     const router = useRouter();
+
+    useEffect(() => {
+        const fetchConfig = async () => {
+            try {
+                const res = await api.get("/config", { params: { _t: Date.now() } });
+                setRegistrationEnabled(res.data?.registrationEnabled !== false);
+            } catch {
+                setRegistrationEnabled(false);
+            } finally {
+                setConfigLoading(false);
+            }
+        };
+        fetchConfig();
+
+        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        const socket = io(backendUrl, {
+            transports: ["websocket", "polling"],
+            path: "/socket.io"
+        });
+
+        socket.on("platform_settings_updated", (payload: { registrationEnabled?: boolean }) => {
+            if (typeof payload?.registrationEnabled === "boolean") {
+                setRegistrationEnabled(payload.registrationEnabled);
+            }
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, []);
 
     const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -38,6 +71,41 @@ export default function RegisterPage() {
             setIsLoading(false);
         }
     };
+
+    if (configLoading) {
+        return (
+            <div className="min-h-screen bg-black flex items-center justify-center">
+                <Loader2 className="w-8 h-8 text-primary animate-spin" />
+            </div>
+        );
+    }
+
+    if (!registrationEnabled) {
+        return (
+            <div className="min-h-screen flex items-center justify-center p-4 bg-black">
+                <div className="w-full max-w-xl rounded-3xl border border-orange-500/20 bg-white/[0.03] p-8 space-y-5">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/30">
+                        <AlertTriangle className="w-4 h-4 text-orange-400" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-orange-300">
+                            {t.registration_closed_title}
+                        </span>
+                    </div>
+                    <h1 className="text-2xl font-black text-white uppercase tracking-wide">
+                        {t.registration_closed_title}
+                    </h1>
+                    <p className="text-sm text-gray-300 leading-relaxed">
+                        {t.registration_closed_message}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                        {t.registration_closed_retry}
+                    </p>
+                    <Link href="/login" className="inline-flex items-center px-4 py-2 rounded-xl bg-primary text-black text-[10px] font-black uppercase tracking-widest">
+                        {t.sign_in}
+                    </Link>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen flex items-center justify-center p-4 animate-fade-in relative z-20 overflow-hidden bg-black">
@@ -80,7 +148,7 @@ export default function RegisterPage() {
                             </motion.div>
                         </div>
                         <div className="space-y-1.5">
-                            <h1 className="text-2xl font-bold text-white uppercase tracking-[0.25em] font-mono">Tervux Cloud</h1>
+                            <h1 className="text-2xl font-bold text-white uppercase tracking-[0.25em] font-mono">{t.app_name}</h1>
                             <p className="text-[10px] font-medium text-gray-500 uppercase tracking-[0.3em] opacity-80">{t.create_account}</p>
                         </div>
                     </div>

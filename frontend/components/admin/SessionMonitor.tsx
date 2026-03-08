@@ -3,12 +3,19 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/store/useAuthStore";
 import {
-    Wifi, WifiOff, Search, Loader2, Filter, Radio,
-    Pause, Power, Clock, Smartphone
+    Wifi, Search, Loader2, Filter, Radio,
+    Power, Smartphone, Pencil, Trash2
 } from "lucide-react";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { io } from "socket.io-client";
+import { useAuthStore } from "@/store/useAuthStore";
 
 interface SessionRecord {
     _id: string;
@@ -18,12 +25,6 @@ interface SessionRecord {
     isLive: boolean;
     expiresAt?: string;
     lastConnected?: string;
-    subscription?: {
-        planId?: { name?: string; price?: number };
-        status: string;
-        activatedAt?: string;
-        expiresAt?: string;
-    };
     settings?: Record<string, boolean | string>;
     createdAt: string;
 }
@@ -37,12 +38,21 @@ const statusStyles: Record<string, { bg: string; text: string; border: string; d
 };
 
 export function SessionMonitor() {
+    const { language } = useLocaleStore();
+    const t = translations[language];
+    const { token } = useAuthStore();
     const [sessions, setSessions] = useState<SessionRecord[]>([]);
     const [total, setTotal] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [actionLoading, setActionLoading] = useState<string | null>(null);
+    const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+    const [confirmDisconnectSessionId, setConfirmDisconnectSessionId] = useState<string | null>(null);
+    const [editSession, setEditSession] = useState<SessionRecord | null>(null);
+    const [editPhone, setEditPhone] = useState("");
+    const [editStatus, setEditStatus] = useState<SessionRecord["status"]>("disconnected");
+    const [editExpiresAt, setEditExpiresAt] = useState("");
 
     const fetchSessions = useCallback(async (status?: string) => {
         setIsLoading(true);
@@ -54,7 +64,7 @@ export function SessionMonitor() {
             setTotal(res.data.total);
         } catch (err) {
             console.error(err);
-            toast.error("Failed to fetch sessions");
+            toast.error(t.admin_failed_fetch_sessions);
         } finally {
             setIsLoading(false);
         }
@@ -64,11 +74,36 @@ export function SessionMonitor() {
         fetchSessions(statusFilter);
     }, [fetchSessions, statusFilter]);
 
-    // Auto-refresh every 15s
+    // Live updates via socket.io (silent updates, no polling)
     useEffect(() => {
-        const interval = setInterval(() => fetchSessions(statusFilter), 15000);
-        return () => clearInterval(interval);
-    }, [fetchSessions, statusFilter]);
+        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        const socket = io(backendUrl, {
+            transports: ["websocket", "polling"],
+            path: "/socket.io",
+            auth: { token }
+        });
+
+        socket.on("admin_session_updated", (payload: { sessionId: string; status?: SessionRecord["status"] }) => {
+            if (!payload?.sessionId) return;
+            if (payload.status) {
+                setSessions(prev => prev.map(s =>
+                    s._id === payload.sessionId ? { ...s, status: payload.status ?? s.status } : s
+                ));
+            } else {
+                fetchSessions(statusFilter);
+            }
+        });
+
+        socket.on("admin_session_deleted", (payload: { sessionId: string }) => {
+            if (!payload?.sessionId) return;
+            setSessions(prev => prev.filter(s => s._id !== payload.sessionId));
+            setTotal(prev => Math.max(0, prev - 1));
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [fetchSessions, statusFilter, token]);
 
     const handleDisconnect = async (sessionId: string) => {
         setActionLoading(sessionId);
@@ -77,9 +112,63 @@ export function SessionMonitor() {
             setSessions(prev => prev.map(s =>
                 s._id === sessionId ? { ...s, status: "disconnected" as const, isLive: false } : s
             ));
-            toast.success("Session disconnected");
+            toast.success(t.admin_session_disconnected);
         } catch (err) {
-            toast.error("Failed to disconnect session");
+            toast.error(t.admin_failed_disconnect_session);
+        } finally {
+            setActionLoading(null);
+            setConfirmDisconnectSessionId(null);
+        }
+    };
+
+    const handleDeleteSession = async (sessionId: string) => {
+        setActionLoading(sessionId);
+        try {
+            await api.delete(`/admin/sessions/${sessionId}`);
+            setSessions(prev => prev.filter(s => s._id !== sessionId));
+            setTotal(prev => Math.max(0, prev - 1));
+            toast.success(t.admin_session_deleted);
+            setConfirmDeleteSessionId(null);
+        } catch (err: any) {
+            toast.error(err.response?.data?.error || t.admin_failed_delete_session);
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
+    const openEditModal = (session: SessionRecord) => {
+        setEditSession(session);
+        setEditPhone(session.phone || "");
+        setEditStatus(session.status);
+        setEditExpiresAt(
+            session.expiresAt
+                ? new Date(session.expiresAt).toISOString().slice(0, 16)
+                : ""
+        );
+    };
+
+    const handleSaveEdit = async () => {
+        if (!editSession) return;
+        setActionLoading(editSession._id);
+        try {
+            const payload: Record<string, any> = {
+                phone: editPhone,
+                status: editStatus
+            };
+            payload.expiresAt = editExpiresAt ? new Date(editExpiresAt).toISOString() : null;
+
+            const res = await api.put(`/admin/sessions/${editSession._id}`, payload);
+            const updated = res.data.session;
+
+            setSessions(prev => prev.map(s =>
+                s._id === editSession._id
+                    ? { ...s, ...updated, _id: editSession._id }
+                    : s
+            ));
+            toast.success(t.admin_session_updated_successfully);
+            setEditSession(null);
+        } catch (err: any) {
+            toast.error(err.response?.data?.error || t.admin_failed_update_session);
         } finally {
             setActionLoading(null);
         }
@@ -107,7 +196,7 @@ export function SessionMonitor() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                     <Radio className="h-5 w-5 text-emerald-400" />
-                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Session Monitor</h2>
+                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{t.admin_session_monitor}</h2>
                     <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                         {total}
                     </span>
@@ -120,11 +209,11 @@ export function SessionMonitor() {
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
                         </span>
-                        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">{liveCount} Live</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">{liveCount} {t.live_now}</span>
                     </div>
                     <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-sky-500/20 bg-sky-500/5">
                         <Wifi className="h-3 w-3 text-sky-400" />
-                        <span className="text-[10px] font-black uppercase tracking-widest text-sky-400">{activeCount} Active</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-sky-400">{activeCount} {t.admin_active}</span>
                     </div>
                 </div>
             </div>
@@ -135,7 +224,7 @@ export function SessionMonitor() {
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                     <input
                         type="text"
-                        placeholder="Search phone or user..."
+                        placeholder={t.admin_search_phone_or_user}
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 backdrop-blur-md transition-all uppercase tracking-widest"
@@ -152,7 +241,7 @@ export function SessionMonitor() {
                                     : "bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10 hover:text-gray-300"
                                 }`}
                         >
-                            {s}
+                            {t[`admin_status_${s}` as keyof typeof t] || s}
                         </button>
                     ))}
                 </div>
@@ -166,7 +255,7 @@ export function SessionMonitor() {
             ) : filteredSessions.length === 0 ? (
                 <div className="p-8 text-center border border-white/10 border-dashed rounded-xl bg-white/5">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">
-                        {search || statusFilter !== "all" ? "No sessions match your filters" : "No sessions found"}
+                        {search || statusFilter !== "all" ? t.admin_no_sessions_match_filters : t.admin_no_sessions_found}
                     </p>
                 </div>
             ) : (
@@ -186,7 +275,7 @@ export function SessionMonitor() {
                                     <div className="flex items-center justify-between">
                                         <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg ${st.bg} ${st.text} border ${st.border} flex items-center gap-1.5`}>
                                             <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-                                            {session.status}
+                                            {t[`admin_status_${session.status}` as keyof typeof t] || session.status}
                                         </span>
                                         {session.isLive && (
                                             <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-emerald-400">
@@ -194,7 +283,7 @@ export function SessionMonitor() {
                                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                                                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
                                                 </span>
-                                                Live
+                                                {t.live_now}
                                             </span>
                                         )}
                                     </div>
@@ -205,9 +294,9 @@ export function SessionMonitor() {
                                             <Smartphone className="w-4 h-4 text-gray-500" />
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-bold text-white tracking-widest">{session.phone || "Unknown"}</p>
+                                            <p className="text-sm font-bold text-white tracking-widest">{session.phone || t.unknown_phone}</p>
                                             <p className="text-[10px] text-gray-500 font-semibold truncate">
-                                                {session.userId?.name || session.userId?.email || "Unknown user"}
+                                                {session.userId?.name || session.userId?.email || t.admin_unknown_user}
                                             </p>
                                         </div>
                                     </div>
@@ -215,13 +304,13 @@ export function SessionMonitor() {
                                     {/* Details */}
                                     <div className="grid grid-cols-2 gap-2 text-[9px]">
                                         <div>
-                                            <p className="font-bold uppercase tracking-widest text-gray-600">Plan</p>
+                                            <p className="font-bold uppercase tracking-widest text-gray-600">{t.status_label}</p>
                                             <p className="font-black text-violet-400 tracking-widest">
-                                                {session.subscription?.planId?.name || "None"}
+                                                {t[`admin_status_${session.status}` as keyof typeof t] || session.status}
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="font-bold uppercase tracking-widest text-gray-600">Expires</p>
+                                            <p className="font-bold uppercase tracking-widest text-gray-600">{t.admin_expires}</p>
                                             <p className="font-black text-gray-400 tracking-widest">
                                                 {session.expiresAt
                                                     ? format(new Date(session.expiresAt), "MMM dd, HH:mm")
@@ -230,7 +319,7 @@ export function SessionMonitor() {
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="font-bold uppercase tracking-widest text-gray-600">Last Online</p>
+                                            <p className="font-bold uppercase tracking-widest text-gray-600">{t.admin_last_online}</p>
                                             <p className="font-black text-gray-400 tracking-widest">
                                                 {session.lastConnected
                                                     ? format(new Date(session.lastConnected), "MMM dd, HH:mm")
@@ -239,7 +328,7 @@ export function SessionMonitor() {
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="font-bold uppercase tracking-widest text-gray-600">Created</p>
+                                            <p className="font-bold uppercase tracking-widest text-gray-600">{t.admin_created}</p>
                                             <p className="font-black text-gray-400 tracking-widest">
                                                 {format(new Date(session.createdAt), "MMM dd")}
                                             </p>
@@ -247,27 +336,172 @@ export function SessionMonitor() {
                                     </div>
 
                                     {/* Actions */}
-                                    {(session.status === "active" || session.isLive) && (
-                                        <div className="pt-2 border-t border-white/5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            {actionLoading === session._id ? (
-                                                <Loader2 className="w-4 h-4 text-red-400 animate-spin" />
-                                            ) : (
+                                    <div className="pt-2 border-t border-white/5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {actionLoading === session._id ? (
+                                            <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                                        ) : (
+                                            <div className="flex flex-wrap gap-2">
                                                 <button
-                                                    onClick={() => handleDisconnect(session._id)}
+                                                    onClick={() => openEditModal(session)}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-[9px] font-black uppercase tracking-widest transition-all"
+                                                >
+                                                    <Pencil className="w-3 h-3" />
+                                                    {t.admin_edit}
+                                                </button>
+                                                {(session.status === "active" || session.isLive) && (
+                                                    <button
+                                                        onClick={() => setConfirmDisconnectSessionId(session._id)}
+                                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest transition-all"
+                                                    >
+                                                        <Power className="w-3 h-3" />
+                                                        {t.admin_force_disconnect}
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => setConfirmDeleteSessionId(session._id)}
                                                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[9px] font-black uppercase tracking-widest transition-all"
                                                 >
-                                                    <Power className="w-3 h-3" />
-                                                    Force Disconnect
+                                                    <Trash2 className="w-3 h-3" />
+                                                    {t.delete}
                                                 </button>
-                                            )}
-                                        </div>
-                                    )}
+                                            </div>
+                                        )}
+                                    </div>
                                 </motion.div>
                             );
                         })}
                     </AnimatePresence>
                 </div>
             )}
+
+            <Dialog open={!!confirmDisconnectSessionId} onOpenChange={(open) => !open && setConfirmDisconnectSessionId(null)}>
+                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
+                            {t.admin_disconnect_session_title}
+                        </DialogTitle>
+                        <DialogDescription className="text-xs font-semibold text-gray-400 leading-relaxed">
+                            {t.admin_confirm_disconnect_session}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!!actionLoading}
+                            onClick={() => setConfirmDisconnectSessionId(null)}
+                            className="border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
+                        >
+                            {t.cancel}
+                        </Button>
+                        <Button
+                            type="button"
+                            disabled={!!actionLoading || !confirmDisconnectSessionId}
+                            onClick={() => confirmDisconnectSessionId && handleDisconnect(confirmDisconnectSessionId)}
+                            className="bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 hover:text-white"
+                        >
+                            {actionLoading && confirmDisconnectSessionId ? <Loader2 className="w-4 h-4 animate-spin" /> : t.admin_force_disconnect}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!confirmDeleteSessionId} onOpenChange={(open) => !open && setConfirmDeleteSessionId(null)}>
+                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
+                            {t.admin_delete_session_title}
+                        </DialogTitle>
+                        <DialogDescription className="text-xs font-semibold text-gray-400 leading-relaxed">
+                            {t.admin_confirm_delete_session}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!!actionLoading}
+                            onClick={() => setConfirmDeleteSessionId(null)}
+                            className="border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
+                        >
+                            {t.cancel}
+                        </Button>
+                        <Button
+                            type="button"
+                            disabled={!!actionLoading || !confirmDeleteSessionId}
+                            onClick={() => confirmDeleteSessionId && handleDeleteSession(confirmDeleteSessionId)}
+                            className="bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 hover:text-white"
+                        >
+                            {actionLoading && confirmDeleteSessionId ? <Loader2 className="w-4 h-4 animate-spin" /> : t.delete}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!editSession} onOpenChange={(open) => !open && setEditSession(null)}>
+                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
+                            {t.admin_edit_session_title}
+                        </DialogTitle>
+                        <DialogDescription className="text-xs font-semibold text-gray-400 leading-relaxed">
+                            {t.admin_edit_session_desc}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">{t.phone_number}</label>
+                            <Input
+                                value={editPhone}
+                                onChange={(e) => setEditPhone(e.target.value)}
+                                className="bg-white/5 border-white/10 text-white"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">{t.status_label}</label>
+                            <select
+                                value={editStatus}
+                                onChange={(e) => setEditStatus(e.target.value as SessionRecord["status"])}
+                                className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-primary/50"
+                            >
+                                {["pairing", "active", "paused", "disconnected", "expired"].map((s) => (
+                                    <option key={s} value={s} className="bg-[#0e0e0e] text-white">
+                                        {t[`admin_status_${s}` as keyof typeof t] || s}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">{t.admin_expires}</label>
+                            <Input
+                                type="datetime-local"
+                                value={editExpiresAt}
+                                onChange={(e) => setEditExpiresAt(e.target.value)}
+                                className="bg-white/5 border-white/10 text-white"
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!!actionLoading}
+                            onClick={() => setEditSession(null)}
+                            className="border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
+                        >
+                            {t.cancel}
+                        </Button>
+                        <Button
+                            type="button"
+                            disabled={!!actionLoading || !editSession}
+                            onClick={handleSaveEdit}
+                            className="bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 hover:text-white"
+                        >
+                            {actionLoading && editSession ? <Loader2 className="w-4 h-4 animate-spin" /> : t.save}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </motion.div>
     );
 }

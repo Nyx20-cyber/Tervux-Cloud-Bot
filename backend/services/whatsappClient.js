@@ -8,7 +8,7 @@ import WhatsAppAuth from "../models/WhatsAppAuth.js";
 import Notification from "../models/Notification.js";
 import { useMongoDBAuthState } from "./mongoAuthState.js";
 import { queueService } from "./queueService.js";
-import { emitToUser } from "./socketService.js";
+import { emitToUser, emitUpdate } from "./socketService.js";
 
 // Cache the WhatsApp Web protocol version at module load
 // The version hardcoded in Baileys is outdated and gets rejected with 405
@@ -27,6 +27,7 @@ async function getWaVersion() {
 }
 // Pre-fetch on module load
 getWaVersion();
+const pairingTimeoutMs = Number.parseInt(process.env.PAIRING_TIMEOUT_MS || "120000", 10);
 /**
  * Multi-Tenant WhatsApp Session Manager
  * Manages multiple concurrent Baileys socket connections, one per user session.
@@ -164,6 +165,11 @@ class SessionManager {
             if (connection === "open") {
                 console.log(`✅ [${sessionId}] Connected!`);
                 if (entry) entry.reconnectAttempts = 0;
+                try {
+                    await saveCreds();
+                } catch (error) {
+                    console.error(`[${sessionId}] Failed to persist auth creds on open:`, error.message);
+                }
 
                 // Update DB safely, maintaining paused state if it exists
                 const phone = sock.user?.id?.split(":")[0] || sock.user?.id?.split("@")[0];
@@ -180,6 +186,15 @@ class SessionManager {
                 }
 
                 await WhatsAppSession.findByIdAndUpdate(sessionId, dbUpdates);
+                emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
+                    sessionId,
+                    status: liveDbSession?.status === "paused" ? "paused" : "active",
+                    isLive: true
+                });
+                emitUpdate("admin_session_updated", {
+                    sessionId,
+                    status: liveDbSession?.status === "paused" ? "paused" : "active"
+                });
 
                 // Always Online heartbeat
                 if (sock.onlineInterval) clearInterval(sock.onlineInterval);
@@ -197,21 +212,40 @@ class SessionManager {
                 const error = lastDisconnect?.error;
                 const statusCode = error?.output?.statusCode;
                 const errorMessage = error?.message || "";
+                const lowerError = String(errorMessage).toLowerCase();
 
-                const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 405;
+                const isLoggedOut = statusCode === DisconnectReason.loggedOut || lowerError.includes("logged out");
                 const isConflict = errorMessage.includes("conflict") ||
                     statusCode === DisconnectReason.connectionReplaced;
 
                 console.log(`❌ [${sessionId}] Connection closed. Code: ${statusCode}`);
 
                 if (isLoggedOut) {
-                    console.log(`🔓 [${sessionId}] Logged out or Invalid Session. Destorying auth directory.`);
+                    console.log(`🔓 [${sessionId}] Logged out session. Clearing stored auth state.`);
                     await WhatsAppSession.findByIdAndUpdate(sessionId, { status: "disconnected" });
-                    await WhatsAppAuth.deleteMany({ sessionId });
+                    await WhatsAppAuth.deleteMany({ sessionId: String(sessionId) });
+                    emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
+                        sessionId,
+                        status: "disconnected",
+                        isLive: false
+                    });
+                    emitUpdate("admin_session_updated", {
+                        sessionId,
+                        status: "disconnected"
+                    });
                     this.sessions.delete(sessionId);
                 } else if (isConflict) {
                     console.log(`⚠️ [${sessionId}] Session conflict.`);
                     await WhatsAppSession.findByIdAndUpdate(sessionId, { status: "disconnected" });
+                    emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
+                        sessionId,
+                        status: "disconnected",
+                        isLive: false
+                    });
+                    emitUpdate("admin_session_updated", {
+                        sessionId,
+                        status: "disconnected"
+                    });
                     this.sessions.delete(sessionId);
                 } else if (entry && entry.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
                     entry.reconnectAttempts++;
@@ -223,6 +257,15 @@ class SessionManager {
                     const currentStatusCheck = await WhatsAppSession.findById(sessionId);
                     if (currentStatusCheck?.status !== "paused") {
                         await WhatsAppSession.findByIdAndUpdate(sessionId, { status: "disconnected" });
+                        emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
+                            sessionId,
+                            status: "disconnected",
+                            isLive: false
+                        });
+                        emitUpdate("admin_session_updated", {
+                            sessionId,
+                            status: "disconnected"
+                        });
 
                         // Notify user about persistent disconnection
                         try {
@@ -570,7 +613,7 @@ ${text}
     async destroySession(sessionId) {
         await this.disconnectSession(sessionId);
         try {
-            await WhatsAppAuth.deleteMany({ sessionId });
+            await WhatsAppAuth.deleteMany({ sessionId: String(sessionId) });
             console.log(`🧹 [${sessionId}] Mongo Auth records deleted.`);
         } catch (e) {
             console.error(`[${sessionId}] Failed to delete auth records:`, e.message);
@@ -610,7 +653,7 @@ ${text}
             console.log(`🔄 Found ${activeSessions.length} eligible session(s) to reconnect.`);
 
             for (const session of activeSessions) {
-                // Check if user's subscription is still active
+                // Skip reconnect for banned/deleted users
                 const User = (await import("../models/User.js")).default;
                 const user = await User.findById(session.userId);
 
@@ -666,7 +709,7 @@ ${text}
             for (const oldSession of oldPairingSessions) {
                 console.log(`[Cleanup] Removing orphan pairing session ${oldSession._id} for user ${userId}`);
                 try { await this.destroySession(oldSession._id.toString()); } catch (e) { }
-                await WhatsAppAuth.deleteMany({ sessionId: oldSession._id });
+                await WhatsAppAuth.deleteMany({ sessionId: oldSession._id.toString() });
                 await WhatsAppSession.deleteOne({ _id: oldSession._id });
             }
         }
@@ -709,6 +752,17 @@ ${text}
             retryRequestDelayMs: 5000,
             maxMsgRetryCount: 5
         });
+        let finished = false;
+        let pairingTimeout = null;
+        const finalizePairing = () => {
+            if (finished) return;
+            finished = true;
+            if (pairingTimeout) {
+                clearTimeout(pairingTimeout);
+                pairingTimeout = null;
+            }
+            queueService.finishPairing(userId);
+        };
 
         this.sessions.set(sessionId, {
             sock, reconnectAttempts: 0,
@@ -721,30 +775,35 @@ ${text}
             (async () => {
                 try {
                     console.log(`[${sessionId}] 🛠️ Initializing Pairing Code flow for ${phoneNumber}...`);
+                    const normalizedPhone = phoneNumber.replace(/\D/g, "");
+                    let code = null;
+                    let lastError = null;
 
-                    // Wait up to 10 seconds for socket to tell us it's ready for code
-                    let retries = 0;
-                    while (retries < 10) {
-                        await baileysDelay(1000);
-                        if (sock.ws && sock.ws.readyState === 1) break; // WebSocket is open
-                        retries++;
+                    // Retry code request window; on busy network, ws/open can take longer.
+                    for (let attempt = 1; attempt <= 8; attempt++) {
+                        if (sock.authState.creds.me || sock.authState.creds.registered) {
+                            console.warn(`[${sessionId}] ⚠️ Socket already registered, skipping pairing code.`);
+                            break;
+                        }
+
+                        try {
+                            console.log(`[${sessionId}] 📡 Requesting pairing code (attempt ${attempt}/8)...`);
+                            code = await sock.requestPairingCode(normalizedPhone);
+                            if (code) break;
+                        } catch (error) {
+                            lastError = error;
+                            console.warn(`[${sessionId}] Pairing code attempt ${attempt} failed: ${error.message}`);
+                        }
+
+                        await baileysDelay(3000);
                     }
 
-                    if (!sock.ws || sock.ws.readyState !== 1) {
-                        throw new Error("Socket failed to open in time.");
+                    if (!code) {
+                        throw new Error(lastError?.message || "Failed to generate pairing code within retry window.");
                     }
 
-                    // Wait a bit more for Baileys internal init
-                    await baileysDelay(2000);
-
-                    if (!sock.authState.creds.me && !sock.authState.creds.registered) {
-                        console.log(`[${sessionId}] 📡 Requesting pairing code now...`);
-                        const code = await sock.requestPairingCode(phoneNumber.replace(/\D/g, ""));
-                        console.log(`[${sessionId}] ✅ Pairing Code Received: ${code}`);
-                        emitToUser(userId, "pairing_code", { code, sessionId });
-                    } else {
-                        console.warn(`[${sessionId}] ⚠️ Socket already registered, skipping pairing code.`);
-                    }
+                    console.log(`[${sessionId}] ✅ Pairing Code Received: ${code}`);
+                    emitToUser(userId, "pairing_code", { code, sessionId });
                 } catch (error) {
                     console.error(`[${sessionId}] ❌ Pairing code error:`, error.message);
 
@@ -755,11 +814,11 @@ ${text}
                             error: `Failed to generate pairing code: ${error.message}`,
                             sessionId
                         });
-                        queueService.finishPairing(userId);
+                        finalizePairing();
                         try { sock.end(); } catch (e) { }
                         this.sessions.delete(sessionId);
                         // Clean up the failed pairing DB record
-                        await WhatsAppAuth.deleteMany({ sessionId });
+                        await WhatsAppAuth.deleteMany({ sessionId: String(sessionId) });
                         await WhatsAppSession.deleteOne({ _id: sessionId });
                     }
                 }
@@ -770,7 +829,7 @@ ${text}
 
         sock.ev.on("connection.update", async (update) => {
             const { connection, lastDisconnect, qr } = update;
-            console.log(`[${sessionId}] connection.update:`, connection || (qr ? "qr_received" : "other"), JSON.stringify(update).slice(0, 150));
+            console.log(`[${sessionId}] connection.update:`, connection || (qr ? "qr_received" : "other"));
 
             if (qr && method === "qr") {
                 console.log(`[${sessionId}] 📱 QR code received, emitting to user ${userId}`);
@@ -780,6 +839,11 @@ ${text}
             if (connection === "open") {
                 console.log(`✅ [${sessionId}] Pairing successful!`);
                 await baileysDelay(2000);
+                try {
+                    await saveCreds();
+                } catch (error) {
+                    console.error(`[${sessionId}] Failed to persist pairing creds on open:`, error.message);
+                }
 
                 // Send Welcome Message to user's WhatsApp DM
                 try {
@@ -816,7 +880,7 @@ To activate 24/7 cloud features like Auto-Reply and Anti-Delete, please return t
                 // Now disconnect the pairing socket and reconnect with full handler
                 await baileysDelay(3000);
                 try { sock.end(); } catch (e) { }
-                queueService.finishPairing(userId);
+                finalizePairing();
                 this.sessions.delete(sessionId);
                 await this.connectSession(sessionId);
             }
@@ -845,7 +909,7 @@ To activate 24/7 cloud features like Auto-Reply and Anti-Delete, please return t
                             await this.startPairing(userId, phoneNumber, method, socketId, true);
                         } catch (retryErr) {
                             console.error(`[${sessionId}] 515 Retry failed:`, retryErr.message);
-                            queueService.finishPairing(userId);
+                            finalizePairing();
                         }
                     }, 2000);
                     return;
@@ -871,18 +935,18 @@ To activate 24/7 cloud features like Auto-Reply and Anti-Delete, please return t
                     });
 
                     // Clean up failed pairing
-                    await WhatsAppAuth.deleteMany({ sessionId });
+                    await WhatsAppAuth.deleteMany({ sessionId: String(sessionId) });
                     await WhatsAppSession.deleteOne({ _id: sessionId });
                 }
 
-                queueService.finishPairing(userId);
+                finalizePairing();
                 try { sock.end(); } catch (e) { }
                 this.sessions.delete(sessionId);
             }
         });
 
         // Timeout cleanup
-        setTimeout(async () => {
+        pairingTimeout = setTimeout(async () => {
             const dbSess = await WhatsAppSession.findById(sessionId);
             if (dbSess && dbSess.status === "pairing") {
                 console.log(`[${sessionId}] Pairing timed out.`);
@@ -891,11 +955,11 @@ To activate 24/7 cloud features like Auto-Reply and Anti-Delete, please return t
                     sessionId
                 });
                 await this.destroySession(sessionId);
-                await WhatsAppAuth.deleteMany({ sessionId });
+                await WhatsAppAuth.deleteMany({ sessionId: String(sessionId) });
                 await WhatsAppSession.deleteOne({ _id: sessionId });
             }
-            queueService.finishPairing(userId);
-        }, 120 * 1000);
+            finalizePairing();
+        }, Number.isFinite(pairingTimeoutMs) ? Math.max(pairingTimeoutMs, 60_000) : 120_000);
 
         return { sessionId };
     }

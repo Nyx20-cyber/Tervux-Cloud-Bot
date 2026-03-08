@@ -11,10 +11,12 @@ import WhatsAppAuth from "../models/WhatsAppAuth.js";
  * @returns {Promise<{ state: AuthenticationState, saveCreds: () => Promise<void> }>}
  */
 export const useMongoDBAuthState = async (sessionId) => {
+    const normalizedSessionId = String(sessionId);
+
     // 1. Helper to fetch data
     const readData = async (type, id = "") => {
         try {
-            const doc = await WhatsAppAuth.findOne({ sessionId, type, id });
+            const doc = await WhatsAppAuth.findOne({ sessionId: normalizedSessionId, type, id });
             if (doc && doc.data) {
                 return JSON.parse(doc.data, BufferJSON.reviver);
             }
@@ -30,7 +32,7 @@ export const useMongoDBAuthState = async (sessionId) => {
         try {
             const dataString = JSON.stringify(data, BufferJSON.replacer);
             await WhatsAppAuth.updateOne(
-                { sessionId, type, id },
+                { sessionId: normalizedSessionId, type, id },
                 { $set: { data: dataString } },
                 { upsert: true }
             );
@@ -42,7 +44,7 @@ export const useMongoDBAuthState = async (sessionId) => {
     // 3. Helper to delete data
     const removeData = async (type, id = "") => {
         try {
-            await WhatsAppAuth.deleteOne({ sessionId, type, id });
+            await WhatsAppAuth.deleteOne({ sessionId: normalizedSessionId, type, id });
         } catch (error) {
             console.error(`[MongoAuth] Failed to delete ${type} ${id}:`, error);
         }
@@ -55,10 +57,9 @@ export const useMongoDBAuthState = async (sessionId) => {
         await writeData(creds, "creds");
     }
 
-    return {
-        state: {
-            creds,
-            keys: {
+    const state = {
+        creds,
+        keys: {
                 // Return a specific key from DB
                 get: async (type, ids) => {
                     const data = {};
@@ -91,7 +92,10 @@ export const useMongoDBAuthState = async (sessionId) => {
                     await Promise.all(tasks);
                 }
             }
-        },
-        saveCreds: () => writeData(creds, "creds")
+        };
+
+    return {
+        state,
+        saveCreds: () => writeData(state.creds, "creds")
     };
 };

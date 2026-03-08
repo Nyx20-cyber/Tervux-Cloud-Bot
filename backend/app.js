@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import jwt from "jsonwebtoken";
 
 // Route imports
 import authRoutes from "./routes/auth.js";
@@ -9,26 +10,46 @@ import adminRoutes from "./routes/admin.js";
 import notificationRoutes from "./routes/notifications.js";
 import referralRoutes from "./routes/referral.js";
 import dashboardRoutes from "./routes/dashboard.js";
+import webhookRoutes from "./routes/webhooks.js";
 import { authenticate } from "./middleware/auth.js";
 import Plan from "./models/Plan.js";
 import Announcement from "./models/Announcement.js";
 import { getSettings } from "./models/SystemSettings.js";
 import { sessionManager } from "./services/whatsappService.js";
+import User from "./models/User.js";
 
 const app = express();
+const JWT_SECRET = process.env.JWT_SECRET || "dev-only-secret-do-not-use-in-prod";
 
 // Maintenance Mode Middleware
 app.use(async (req, res, next) => {
     try {
         const settings = await getSettings();
         if (settings.maintenanceMode) {
-            // For now, let's skip check for /api/admin paths 
-            // but in a more robust system, we would check for req.user.role === 'admin'
-            // Since we don't have user in req here (authenticate is later), we use a path check
-            if (!req.path.startsWith("/api/admin") && !req.path.startsWith("/api/auth/login")) {
-                // We'll allow admins to bypass if they are already authenticated, 
-                // but for simplicity, we'll just check if it's NOT an admin route
-                // If it's a regular user route, return 503
+            const isAllowedDuringMaintenance =
+                req.path.startsWith("/api/admin") ||
+                req.path.startsWith("/api/auth/login") ||
+                req.path.startsWith("/api/auth/me") ||
+                req.path.startsWith("/api/config") ||
+                req.path.startsWith("/webhook") ||
+                req.path.startsWith("/api/webhooks");
+
+            if (!isAllowedDuringMaintenance) {
+                const authHeader = req.headers.authorization || "";
+                const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+                if (token) {
+                    try {
+                        const decoded = jwt.verify(token, JWT_SECRET);
+                        const adminUser = await User.findById(decoded.userId).select("role").lean();
+                        if (adminUser?.role === "admin") {
+                            return next();
+                        }
+                    } catch {
+                        // Ignore and continue to maintenance response
+                    }
+                }
+
                 return res.status(503).json({
                     error: "Platform is currently under maintenance. Please try again later.",
                     maintenance: true
@@ -51,6 +72,7 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
 // ========================
@@ -103,9 +125,15 @@ app.get("/api/stats", async (req, res) => {
 app.get("/api/config", async (req, res) => {
     try {
         const settings = await getSettings();
+        res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.set("Pragma", "no-cache");
+        res.set("Expires", "0");
         res.json({
             siteName: settings.siteName,
-            supportPhone: settings.supportPhone
+            supportPhone: settings.supportPhone,
+            maintenanceMode: !!settings.maintenanceMode,
+            registrationEnabled: !!settings.registrationEnabled,
+            updatedAt: settings.updatedAt
         });
     } catch (error) {
         res.status(500).json({ error: "Failed to fetch config" });
@@ -116,6 +144,8 @@ app.get("/api/config", async (req, res) => {
 // Auth Routes (public)
 // ========================
 app.use("/api/auth", authRoutes);
+app.use("/webhook", webhookRoutes);
+app.use("/api/webhooks", webhookRoutes);
 
 // ========================
 // Protected Routes

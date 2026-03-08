@@ -4,10 +4,13 @@ import React, { useEffect, useState } from "react";
 import { api } from "@/store/useAuthStore";
 import { motion, AnimatePresence } from "framer-motion";
 import { MessageCircle } from "lucide-react";
+import { io } from "socket.io-client";
+import { useAuthStore } from "@/store/useAuthStore";
 
 export function WhatsAppFloat() {
     const [config, setConfig] = useState<{ supportPhone: string } | null>(null);
     const [isVisible, setIsVisible] = useState(false);
+    const { token } = useAuthStore();
 
     useEffect(() => {
         const fetchConfig = async () => {
@@ -24,6 +27,24 @@ export function WhatsAppFloat() {
         const timer = setTimeout(() => setIsVisible(true), 1500);
         return () => clearTimeout(timer);
     }, []);
+
+    useEffect(() => {
+        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        const socket = io(backendUrl, {
+            transports: ["websocket", "polling"],
+            path: "/socket.io",
+            auth: { token }
+        });
+
+        socket.on("platform_settings_updated", (payload: { supportPhone?: string }) => {
+            if (typeof payload?.supportPhone !== "string") return;
+            setConfig(prev => ({ supportPhone: payload.supportPhone || prev?.supportPhone || "" }));
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [token]);
 
     const handleWhatsAppClick = () => {
         if (!config?.supportPhone) return;

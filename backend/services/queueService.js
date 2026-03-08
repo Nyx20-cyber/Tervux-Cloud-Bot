@@ -1,7 +1,10 @@
 import { EventEmitter } from "events";
 import { emitToUser } from "./socketService.js";
 
-const MAX_CONCURRENT_PAIRINGS = 3;
+const configuredMaxPairings = Number.parseInt(process.env.MAX_CONCURRENT_PAIRINGS || "3", 10);
+const MAX_CONCURRENT_PAIRINGS = Number.isFinite(configuredMaxPairings)
+    ? Math.min(Math.max(configuredMaxPairings, 1), 8)
+    : 3;
 
 class QueueService extends EventEmitter {
     constructor() {
@@ -23,6 +26,8 @@ class QueueService extends EventEmitter {
         const existingIndex = this.queue.findIndex(item => item.userId === userId);
         if (existingIndex !== -1) {
             this.queue[existingIndex].socketId = socketId;
+            this.queue[existingIndex].phoneNumber = phoneNumber;
+            this.queue[existingIndex].method = method;
             return existingIndex + 1; // 1-based position
         }
 
@@ -67,27 +72,21 @@ class QueueService extends EventEmitter {
     }
 
     processQueue() {
-        if (this.activePairings.size >= MAX_CONCURRENT_PAIRINGS) {
-            return; // At capacity
+        while (this.activePairings.size < MAX_CONCURRENT_PAIRINGS && this.queue.length > 0) {
+            const nextItem = this.queue.shift();
+            this.activePairings.add(nextItem.userId);
+
+            console.log(`[Queue] Starting pairing for user ${nextItem.userId}. Active: ${this.activePairings.size}/${MAX_CONCURRENT_PAIRINGS}`);
+
+            // Notify others their position moved up
+            this.broadcastAllPositions();
+
+            // Notify this user it's their turn
+            emitToUser(nextItem.userId, "queue_ready", { message: "Your turn has arrived!" });
+
+            // Start actual pairing process in the background
+            this.startSessionPairing(nextItem);
         }
-
-        if (this.queue.length === 0) {
-            return; // Nobody waiting
-        }
-
-        const nextItem = this.queue.shift();
-        this.activePairings.add(nextItem.userId);
-
-        console.log(`[Queue] Starting pairing for user ${nextItem.userId}. Active: ${this.activePairings.size}/${MAX_CONCURRENT_PAIRINGS}`);
-
-        // Notify others their position moved up
-        this.broadcastAllPositions();
-
-        // Notify this user it's their turn
-        emitToUser(nextItem.userId, "queue_ready", { message: "Your turn has arrived!" });
-
-        // Start actual pairing process in the background
-        this.startSessionPairing(nextItem);
     }
 
     async startSessionPairing(item) {

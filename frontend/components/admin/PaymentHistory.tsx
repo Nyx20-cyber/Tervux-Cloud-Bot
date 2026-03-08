@@ -4,10 +4,17 @@ import { useEffect, useState, useCallback } from "react";
 import { api } from "@/store/useAuthStore";
 import {
     Search, ChevronLeft, ChevronRight, Loader2, Receipt,
-    Filter, Download, CreditCard
+    Filter, Download, CreditCard, Trash2, RefreshCw
 } from "lucide-react";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
+import { toast } from "sonner";
+import { io } from "socket.io-client";
+import { useAuthStore } from "@/store/useAuthStore";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface PaymentRecord {
     _id: string;
@@ -30,6 +37,9 @@ const statusConfig: Record<string, { bg: string; text: string; border: string }>
 };
 
 export function PaymentHistory() {
+    const { language } = useLocaleStore();
+    const t = translations[language];
+    const { token } = useAuthStore();
     const [payments, setPayments] = useState<PaymentRecord[]>([]);
     const [total, setTotal] = useState(0);
     const [totalAmount, setTotalAmount] = useState(0);
@@ -38,6 +48,11 @@ export function PaymentHistory() {
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [isLoading, setIsLoading] = useState(true);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [reconcilingId, setReconcilingId] = useState<string | null>(null);
+    const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState<string | null>(null);
+    const [confirmReconcilePaymentId, setConfirmReconcilePaymentId] = useState<string | null>(null);
+    const tr = (key: string, fallback: string) => (t as Record<string, string>)[key] || fallback;
 
     const fetchPayments = useCallback(async (p: number, status?: string, q?: string) => {
         setIsLoading(true);
@@ -63,9 +78,70 @@ export function PaymentHistory() {
         fetchPayments(1, statusFilter, search);
     }, [fetchPayments, statusFilter, search]);
 
+    useEffect(() => {
+        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        const socket = io(backendUrl, {
+            transports: ["websocket", "polling"],
+            path: "/socket.io",
+            auth: { token }
+        });
+
+        socket.on("admin_payment_deleted", (payload: { paymentId: string }) => {
+            setPayments(prev => prev.filter(p => p._id !== payload.paymentId));
+            setTotal(prev => Math.max(0, prev - 1));
+            fetchPayments(page, statusFilter, search);
+        });
+        socket.on("admin_payment_updated", () => {
+            fetchPayments(page, statusFilter, search);
+        });
+
+        return () => {
+            socket.disconnect();
+        };
+    }, [fetchPayments, page, search, statusFilter, token]);
+
+    const handleDeletePayment = async (paymentId: string) => {
+        setDeletingId(paymentId);
+        try {
+            await api.delete(`/admin/payments/${paymentId}`);
+            setPayments(prev => prev.filter(p => p._id !== paymentId));
+            setTotal(prev => Math.max(0, prev - 1));
+            toast.success(t.admin_payment_deleted);
+            fetchPayments(page, statusFilter, search);
+        } catch (err: any) {
+            toast.error(err.response?.data?.error || t.admin_failed_delete_payment);
+        } finally {
+            setDeletingId(null);
+            setConfirmDeletePaymentId(null);
+        }
+    };
+
+    const handleReconcilePayment = async (paymentId: string) => {
+        setReconcilingId(paymentId);
+        try {
+            const res = await api.post(`/admin/payments/${paymentId}/reconcile`);
+            const action = res.data?.action;
+
+            if (action === "completed") {
+                toast.success(tr("admin_payment_reconcile_completed", "Payment settled successfully and coins credited."));
+            } else if (action === "failed") {
+                toast.warning(tr("admin_payment_reconcile_failed", "Payment marked as failed/cancelled after verification."));
+            } else {
+                toast.message(tr("admin_payment_reconcile_pending", "Payment is still pending at provider. Try again shortly."));
+            }
+
+            fetchPayments(page, statusFilter, search);
+        } catch (err: any) {
+            toast.error(err.response?.data?.error || tr("admin_payment_reconcile_error", "Failed to reconcile payment"));
+        } finally {
+            setReconcilingId(null);
+            setConfirmReconcilePaymentId(null);
+        }
+    };
+
     const handleExportCSV = () => {
         if (payments.length === 0) return;
-        const headers = ["Date", "Transaction ID", "User", "Phone", "Plan", "Amount", "Status"];
+        const headers = [t.admin_date, t.admin_transaction_id, t.users, t.phone_number, t.plans, t.admin_amount, t.status_label];
         const rows = payments.map(p => [
             format(new Date(p.createdAt), "yyyy-MM-dd HH:mm"),
             p.fastlipaTransactionId || p._id.slice(-8),
@@ -98,7 +174,7 @@ export function PaymentHistory() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                     <Receipt className="h-5 w-5 text-primary" />
-                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Payment History</h2>
+                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{t.admin_payment_history}</h2>
                     <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
                         {total}
                     </span>
@@ -129,7 +205,7 @@ export function PaymentHistory() {
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                     <input
                         type="text"
-                        placeholder="Search phone or ref..."
+                        placeholder={t.admin_search_phone_or_ref}
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 backdrop-blur-md transition-all uppercase tracking-widest"
@@ -148,7 +224,7 @@ export function PaymentHistory() {
                                     : "bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10 hover:text-gray-300"
                                 }`}
                         >
-                            {s}
+                            {t[`admin_status_${s}` as keyof typeof t] || s}
                         </button>
                     ))}
                 </div>
@@ -165,14 +241,15 @@ export function PaymentHistory() {
                         <table className="w-full text-sm text-left">
                             <thead className="text-[9px] text-gray-500 uppercase tracking-widest bg-white/[0.03] border-b border-white/10">
                                 <tr>
-                                    <th className="px-5 py-4 font-black">Date</th>
-                                    <th className="px-5 py-4 font-black">Ref ID</th>
-                                    <th className="px-5 py-4 font-black">User</th>
-                                    <th className="px-5 py-4 font-black">Payer Phone</th>
-                                    <th className="px-5 py-4 font-black">Plan</th>
-                                    <th className="px-5 py-4 font-black">Amount</th>
-                                    <th className="px-5 py-4 font-black">Status</th>
-                                    <th className="px-5 py-4 font-black">Reason</th>
+                                    <th className="px-5 py-4 font-black">{t.admin_date}</th>
+                                    <th className="px-5 py-4 font-black">{t.admin_ref_id}</th>
+                                    <th className="px-5 py-4 font-black">{t.users}</th>
+                                    <th className="px-5 py-4 font-black">{t.admin_payer_phone}</th>
+                                    <th className="px-5 py-4 font-black">{t.plans}</th>
+                                    <th className="px-5 py-4 font-black">{t.admin_amount}</th>
+                                    <th className="px-5 py-4 font-black">{t.status_label}</th>
+                                    <th className="px-5 py-4 font-black">{t.admin_reason}</th>
+                                    <th className="px-5 py-4 font-black text-right">{t.admin_actions}</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
@@ -207,7 +284,7 @@ export function PaymentHistory() {
                                                         {p.planId?.name || "—"}
                                                     </span>
                                                     {p.planId?.coinsAmount && (
-                                                        <p className="text-[9px] text-gray-600 font-semibold mt-0.5">{p.planId.coinsAmount} coins</p>
+                                                        <p className="text-[9px] text-gray-600 font-semibold mt-0.5">{p.planId.coinsAmount} {t.coins_word}</p>
                                                     )}
                                                 </td>
                                                 <td className="px-5 py-4 text-primary font-black tracking-widest text-xs whitespace-nowrap">
@@ -215,11 +292,39 @@ export function PaymentHistory() {
                                                 </td>
                                                 <td className="px-5 py-4">
                                                     <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg ${sc.bg} ${sc.text} border ${sc.border}`}>
-                                                        {p.status}
+                                                        {t[`admin_status_${p.status}` as keyof typeof t] || p.status}
                                                     </span>
                                                 </td>
                                                 <td className="px-5 py-4 text-[10px] text-red-400/70 font-semibold max-w-[150px] truncate">
                                                     {p.failureReason || "—"}
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <div className="flex justify-end">
+                                                        <button
+                                                            onClick={() => setConfirmReconcilePaymentId(p._id)}
+                                                            disabled={reconcilingId === p._id || p.status === "completed"}
+                                                            title={tr("admin_reconcile", "Reconcile")}
+                                                            className="p-2 mr-2 rounded-lg bg-primary/10 hover:bg-primary/20 transition-all text-primary disabled:opacity-40"
+                                                        >
+                                                            {reconcilingId === p._id ? (
+                                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                            ) : (
+                                                                <RefreshCw className="w-3.5 h-3.5" />
+                                                            )}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setConfirmDeletePaymentId(p._id)}
+                                                            disabled={deletingId === p._id}
+                                                            title={t.delete}
+                                                            className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 transition-all text-red-400 disabled:opacity-40"
+                                                        >
+                                                            {deletingId === p._id ? (
+                                                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                            ) : (
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            )}
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </motion.tr>
                                         );
@@ -227,8 +332,8 @@ export function PaymentHistory() {
                                 </AnimatePresence>
                                 {payments.length === 0 && (
                                     <tr>
-                                        <td colSpan={8} className="px-5 py-8 text-center text-[10px] font-bold uppercase tracking-widest text-gray-600">
-                                            {search || statusFilter !== "all" ? "No payments match your filters" : "No payments found"}
+                                        <td colSpan={9} className="px-5 py-8 text-center text-[10px] font-bold uppercase tracking-widest text-gray-600">
+                                            {search || statusFilter !== "all" ? t.admin_no_payments_match_filters : t.admin_no_payments_found}
                                         </td>
                                     </tr>
                                 )}
@@ -241,7 +346,7 @@ export function PaymentHistory() {
                 {pages > 1 && (
                     <div className="flex items-center justify-between px-5 py-3 border-t border-white/10 bg-white/[0.02]">
                         <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">
-                            Page {page} of {pages} · {total} payments
+                            {t.admin_page} {page} {t.admin_of} {pages} · {total} {t.payments}
                         </p>
                         <div className="flex items-center gap-1">
                             <button
@@ -262,6 +367,70 @@ export function PaymentHistory() {
                     </div>
                 )}
             </div>
+
+            <Dialog open={!!confirmDeletePaymentId} onOpenChange={(open) => !open && !deletingId && setConfirmDeletePaymentId(null)}>
+                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
+                            {t.admin_delete_payment_title}
+                        </DialogTitle>
+                        <DialogDescription className="text-xs font-semibold text-gray-400 leading-relaxed">
+                            {t.admin_confirm_delete_payment}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!!deletingId}
+                            onClick={() => setConfirmDeletePaymentId(null)}
+                            className="border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
+                        >
+                            {t.cancel}
+                        </Button>
+                        <Button
+                            type="button"
+                            disabled={!!deletingId || !confirmDeletePaymentId}
+                            onClick={() => confirmDeletePaymentId && handleDeletePayment(confirmDeletePaymentId)}
+                            className="bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 hover:text-white"
+                        >
+                            {deletingId ? <Loader2 className="w-4 h-4 animate-spin" /> : t.delete}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={!!confirmReconcilePaymentId} onOpenChange={(open) => !open && !reconcilingId && setConfirmReconcilePaymentId(null)}>
+                <DialogContent className="max-w-md border-primary/20 bg-[#0e0e0e] text-white rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
+                            {tr("admin_reconcile_payment_title", "Reconcile Payment")}
+                        </DialogTitle>
+                        <DialogDescription className="text-xs font-semibold text-gray-400 leading-relaxed">
+                            {tr("admin_reconcile_payment_desc", "This checks FastLipa for the latest status and updates this payment accordingly. Use this if webhook is delayed.")}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!!reconcilingId}
+                            onClick={() => setConfirmReconcilePaymentId(null)}
+                            className="border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
+                        >
+                            {t.cancel}
+                        </Button>
+                        <Button
+                            type="button"
+                            disabled={!!reconcilingId || !confirmReconcilePaymentId}
+                            onClick={() => confirmReconcilePaymentId && handleReconcilePayment(confirmReconcilePaymentId)}
+                            className="bg-primary/20 border border-primary/40 text-primary hover:bg-primary/30 hover:text-white"
+                        >
+                            {reconcilingId ? <Loader2 className="w-4 h-4 animate-spin" /> : tr("admin_reconcile_now", "Reconcile now")}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </motion.div>
     );
 }

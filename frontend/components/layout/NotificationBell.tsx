@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { Bell, Info, AlertTriangle, AlertCircle, CheckCircle, Trash2, Check } from "lucide-react";
+import { Bell, Info, AlertTriangle, AlertCircle, CheckCircle, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { io } from "socket.io-client";
 import Link from "next/link";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
 
 interface Notification {
     _id: string;
@@ -27,6 +29,8 @@ interface Notification {
 }
 
 export function NotificationBell() {
+    const { language } = useLocaleStore();
+    const t = translations[language];
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
 
@@ -35,13 +39,17 @@ export function NotificationBell() {
             const res = await api.get("/notifications");
             setNotifications(res.data.notifications);
             setUnreadCount(res.data.notifications.filter((n: Notification) => !n.isRead).length);
-        } catch (error) {
-            console.error("Failed to fetch notifications:", error);
+        } catch (error: any) {
+            if (!(error?.response?.status === 503 && error?.response?.data?.maintenance)) {
+                console.error("Failed to fetch notifications:", error);
+            }
         }
     }, []);
 
     useEffect(() => {
-        fetchNotifications();
+        queueMicrotask(() => {
+            fetchNotifications();
+        });
 
         const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "", {
             auth: { token: localStorage.getItem("token") }
@@ -69,7 +77,7 @@ export function NotificationBell() {
             );
             setUnreadCount(prev => Math.max(0, prev - 1));
         } catch (error) {
-            toast.error("Failed to mark as read");
+            toast.error(t.failed_mark_read);
         }
     };
 
@@ -78,9 +86,9 @@ export function NotificationBell() {
             await api.put("/notifications/read-all");
             setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
             setUnreadCount(0);
-            toast.success("All caught up!");
+            toast.success(t.all_caught_up);
         } catch (error) {
-            toast.error("Failed to mark all as read");
+            toast.error(t.failed_mark_all);
         }
     };
 
@@ -92,16 +100,7 @@ export function NotificationBell() {
             // Recalculate unread if needed, but it's easier to just refetch or filter
             setUnreadCount(prev => notifications.find(n => n._id === id && !n.isRead) ? Math.max(0, prev - 1) : prev);
         } catch (error) {
-            toast.error("Failed to delete notification");
-        }
-    };
-
-    const getIcon = (type: string) => {
-        switch (type) {
-            case "warning": return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
-            case "error": return <AlertCircle className="h-4 w-4 text-red-500" />;
-            case "success": return <CheckCircle className="h-4 w-4 text-green-500" />;
-            default: return <Info className="h-4 w-4 text-blue-500" />;
+            toast.error(t.failed_delete_notification);
         }
     };
 
@@ -120,13 +119,13 @@ export function NotificationBell() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-80 p-0 bg-[#0f0f0f]/95 backdrop-blur-2xl border-white/10 text-white shadow-2xl">
                 <div className="flex items-center justify-between p-4 border-b border-white/10">
-                    <h3 className="font-bold text-[11px] uppercase tracking-widest text-gray-400">Notifications</h3>
+                    <h3 className="font-bold text-[11px] uppercase tracking-widest text-gray-400">{t.notifications}</h3>
                     {unreadCount > 0 && (
                         <button
                             onClick={markAllAsRead}
                             className="text-[10px] uppercase tracking-widest font-bold text-primary hover:text-primary/80 transition-colors"
                         >
-                            Mark all as read
+                            {t.mark_all_read}
                         </button>
                     )}
                 </div>
@@ -134,7 +133,7 @@ export function NotificationBell() {
                     {notifications.length === 0 ? (
                         <div className="flex flex-col items-center justify-center p-8 text-center text-gray-500">
                             <Bell className="h-8 w-8 mb-2 opacity-20" />
-                            <p className="text-xs">No notifications yet</p>
+                            <p className="text-xs">{t.no_notifications}</p>
                         </div>
                     ) : (
                         notifications.map((n) => (
@@ -177,7 +176,7 @@ export function NotificationBell() {
                 <div className="p-3 border-t border-white/10 text-center">
                     <Link href="/dashboard/notifications" className="block w-full">
                         <Button variant="ghost" className="w-full text-[10px] uppercase tracking-widest font-bold text-gray-500 hover:text-white h-8">
-                            View All Activity
+                            {t.view_all}
                         </Button>
                     </Link>
                 </div>
@@ -185,3 +184,11 @@ export function NotificationBell() {
         </DropdownMenu>
     );
 }
+    function getIcon(type: string) {
+        switch (type) {
+            case "warning": return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
+            case "error": return <AlertCircle className="h-4 w-4 text-red-500" />;
+            case "success": return <CheckCircle className="h-4 w-4 text-green-500" />;
+            default: return <Info className="h-4 w-4 text-blue-500" />;
+        }
+    }

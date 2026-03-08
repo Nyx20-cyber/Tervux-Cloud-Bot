@@ -5,7 +5,7 @@ import { sessionManager } from "./whatsappService.js";
 
 /**
  * Comprehensive cleanup service for multi-tenant sessions
- * Handles ghost sessions, expired subscriptions, stale sessions, and orphaned files
+ * Handles ghost sessions, expired deployments, stale sessions, and orphaned files
  */
 
 /**
@@ -46,7 +46,7 @@ async function cleanExpiredBots() {
         }
 
         try {
-            await WhatsAppAuth.deleteMany({ sessionId: session._id });
+            await WhatsAppAuth.deleteMany({ sessionId: session._id.toString() });
         } catch (e) {
             console.error(`   Failed to delete auth records:`, e.message);
         }
@@ -74,7 +74,7 @@ async function cleanGhostSessions() {
     for (const ghost of ghosts) {
         console.log(`   👻 [Ghost] Cleaning pairing session ${ghost._id} (${ghost.phone || "unknown"})`);
         await sessionManager.destroySession(ghost._id.toString());
-        await WhatsAppAuth.deleteMany({ sessionId: ghost._id });
+        await WhatsAppAuth.deleteMany({ sessionId: ghost._id.toString() });
         await WhatsAppSession.deleteOne({ _id: ghost._id });
     }
 
@@ -97,7 +97,7 @@ async function cleanStaleDisconnected() {
     for (const session of stale) {
         console.log(`   🗑️ [Stale] Cleaning up session ${session._id}`);
         try {
-            await WhatsAppAuth.deleteMany({ sessionId: session._id });
+            await WhatsAppAuth.deleteMany({ sessionId: session._id.toString() });
         } catch (e) {
             console.error(`   Failed to delete auth records:`, e.message);
         }

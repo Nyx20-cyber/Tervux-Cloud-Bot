@@ -4,6 +4,7 @@ import "./globals.css";
 import ParticlesBackground from "@/components/ParticlesBackground";
 import { AuthProvider } from "@/components/providers/AuthProvider";
 import { Toaster } from "@/components/ui/sonner";
+import { translations } from "@/lib/translations";
 
 const outfit = Outfit({
   variable: "--font-outfit",
@@ -13,8 +14,8 @@ const outfit = Outfit({
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export const metadata: Metadata = {
-  title: "Tervux Cloud Bot | Easy WhatsApp Automation",
-  description: "Connect and automate your WhatsApp with ease. Fast. Secure. Professional.",
+  title: translations.en.site_title,
+  description: translations.en.site_description,
 };
 
 export default function RootLayout({

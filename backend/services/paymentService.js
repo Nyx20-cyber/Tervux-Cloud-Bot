@@ -37,6 +37,11 @@ export async function createTransaction(phoneNumber, amount, name) {
 
         const data = await response.json();
         console.log("💳 FastLipa create-transaction response:", JSON.stringify(data));
+
+        if (!response.ok) {
+            throw new Error(data?.message || "FastLipa rejected the transaction request");
+        }
+
         return data;
     } catch (error) {
         console.error("❌ FastLipa create-transaction error:", error);
@@ -57,6 +62,11 @@ export async function checkTransactionStatus(tranId) {
         );
 
         const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data?.message || "FastLipa rejected the status request");
+        }
+
         return data;
     } catch (error) {
         console.error("❌ FastLipa status check error:", error);

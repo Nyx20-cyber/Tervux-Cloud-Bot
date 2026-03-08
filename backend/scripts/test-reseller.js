@@ -19,7 +19,7 @@ async function runTest() {
         const meRes = await axios.get(`${API_URL}/auth/me`, config);
         console.log("   ✅ User:", meRes.data.user.email);
 
-        console.log("\n3. Pair a new session without subscription");
+        console.log("\n3. Pair a new session");
         const testPhone = "255" + Math.floor(100000000 + Math.random() * 900000000);
         let sessionId;
         try {
@@ -32,11 +32,11 @@ async function runTest() {
             return;
         }
 
-        console.log("\n4. Get sessions list to verify subscription field");
+        console.log("\n4. Get sessions list to verify deployment fields");
         const sessionsRes = await axios.get(`${API_URL}/sessions`, config);
         const session = sessionsRes.data.sessions.find(s => s._id === sessionId);
         console.log("   ✅ Session in list? ", !!session);
-        console.log("   ✅ Session subscription status:", session?.subscription?.status);
+        console.log("   ✅ Session deployment expiry:", session?.expiresAt || null);
 
         console.log("\n5. Test Checkout for this specific session");
         let paymentId;
@@ -53,11 +53,11 @@ async function runTest() {
             return;
         }
 
-        console.log("\n6. Check new GET /api/subscription (should list session subscriptions)");
+        console.log("\n6. Check GET /api/subscription (legacy path returns active deployments)");
         const subRes = await axios.get(`${API_URL}/subscription`, config);
-        console.log("   ✅ Subscriptions array length:", subRes.data.subscriptions?.length);
+        console.log("   ✅ Active deployments length:", subRes.data.subscriptions?.length);
         if (subRes.data.subscriptions?.length > 0) {
-            console.log("      First sub:", subRes.data.subscriptions[0]);
+            console.log("      First deployment:", subRes.data.subscriptions[0]);
         }
 
         console.log("\n7. Test pause session (even if pairing)");

@@ -9,6 +9,8 @@ import {
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
 
 interface AnnouncementRecord {
     _id: string;
@@ -33,6 +35,9 @@ const types = ["info", "warning", "maintenance", "update", "promo"] as const;
 const emptyForm = { title: "", message: "", type: "info" as string, isActive: true };
 
 export function AnnouncementSystem() {
+    const { language } = useLocaleStore();
+    const t = translations[language];
+    const typeLabel = (type: string) => (t[`admin_announcement_type_${type}` as keyof typeof t] as string) || type;
     const [announcements, setAnnouncements] = useState<AnnouncementRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
@@ -69,7 +74,7 @@ export function AnnouncementSystem() {
 
     const handleSave = async () => {
         if (!form.title || !form.message) {
-            toast.error("Title and message are required");
+            toast.error(t.admin_title_message_required);
             return;
         }
         setSaving(true);
@@ -77,16 +82,16 @@ export function AnnouncementSystem() {
             if (editingId) {
                 const res = await api.put(`/admin/announcements/${editingId}`, form);
                 setAnnouncements(prev => prev.map(a => a._id === editingId ? res.data.announcement : a));
-                toast.success("Announcement updated");
+                toast.success(t.admin_announcement_updated);
             } else {
                 const res = await api.post("/admin/announcements", form);
                 setAnnouncements(prev => [res.data.announcement, ...prev]);
-                toast.success("Announcement created");
+                toast.success(t.admin_announcement_created);
             }
             setShowForm(false);
             setEditingId(null);
         } catch (err: any) {
-            toast.error(err.response?.data?.error || "Failed to save");
+            toast.error(err.response?.data?.error || t.admin_failed_save);
         } finally {
             setSaving(false);
         }
@@ -97,9 +102,9 @@ export function AnnouncementSystem() {
         try {
             await api.delete(`/admin/announcements/${id}`);
             setAnnouncements(prev => prev.filter(a => a._id !== id));
-            toast.success("Announcement deleted");
+            toast.success(t.admin_announcement_deleted);
         } catch {
-            toast.error("Failed to delete");
+            toast.error(t.admin_failed_delete);
         } finally {
             setDeletingId(null);
         }
@@ -109,9 +114,9 @@ export function AnnouncementSystem() {
         try {
             const res = await api.put(`/admin/announcements/${a._id}`, { isActive: !a.isActive });
             setAnnouncements(prev => prev.map(x => x._id === a._id ? res.data.announcement : x));
-            toast.success(a.isActive ? "Announcement hidden" : "Announcement published");
+            toast.success(a.isActive ? t.admin_announcement_hidden : t.admin_announcement_published);
         } catch {
-            toast.error("Failed to toggle");
+            toast.error(t.admin_failed_toggle);
         }
     };
 
@@ -128,9 +133,9 @@ export function AnnouncementSystem() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                     <Megaphone className="h-5 w-5 text-orange-400" />
-                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Announcements</h2>
+                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{t.announcements}</h2>
                     <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500/30">
-                        {activeCount} Active
+                        {activeCount} {t.admin_active}
                     </span>
                 </div>
                 <button
@@ -138,7 +143,7 @@ export function AnnouncementSystem() {
                     className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/20 border border-primary/30 text-primary text-[10px] font-black uppercase tracking-widest hover:bg-primary/30 transition-all"
                 >
                     <Plus className="h-3.5 w-3.5" />
-                    New Announcement
+                    {t.admin_new_announcement}
                 </button>
             </div>
 
@@ -149,7 +154,7 @@ export function AnnouncementSystem() {
                 </div>
             ) : announcements.length === 0 ? (
                 <div className="p-8 text-center border border-white/10 border-dashed rounded-xl bg-white/5">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">No announcements yet</p>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">{t.admin_no_announcements_yet}</p>
                 </div>
             ) : (
                 <div className="space-y-3">
@@ -178,11 +183,11 @@ export function AnnouncementSystem() {
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 mb-1">
                                                 <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg ${tc.bg} ${tc.color} border ${tc.border}`}>
-                                                    {a.type}
+                                                    {typeLabel(a.type)}
                                                 </span>
                                                 {!a.isActive && (
                                                     <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg bg-gray-500/20 text-gray-500 border border-gray-500/30">
-                                                        Hidden
+                                                        {t.admin_hidden}
                                                     </span>
                                                 )}
                                             </div>
@@ -194,7 +199,7 @@ export function AnnouncementSystem() {
                                                 </span>
                                                 <span className="text-[9px] font-semibold text-gray-600">·</span>
                                                 <span className="text-[9px] font-semibold text-gray-600 tracking-widest">
-                                                    by {a.createdBy?.name || a.createdBy?.email || "Admin"}
+                                                    {t.admin_by} {a.createdBy?.name || a.createdBy?.email || t.admin_admin}
                                                 </span>
                                             </div>
                                         </div>
@@ -203,7 +208,7 @@ export function AnnouncementSystem() {
                                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                             <button
                                                 onClick={() => toggleActive(a)}
-                                                title={a.isActive ? "Hide" : "Publish"}
+                                                title={a.isActive ? t.admin_hide : t.admin_publish}
                                                 className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all"
                                             >
                                                 {a.isActive
@@ -251,22 +256,22 @@ export function AnnouncementSystem() {
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             onClick={e => e.stopPropagation()}
-                            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0e0e0e] backdrop-blur-2xl p-6 space-y-5 shadow-2xl"
+                            className="w-full max-w-lg max-h-[90vh] rounded-2xl border border-white/10 bg-[#0e0e0e] backdrop-blur-2xl shadow-2xl overflow-hidden flex flex-col"
                         >
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between p-6 pb-4 border-b border-white/5 shrink-0">
                                 <h3 className="text-sm font-bold uppercase tracking-widest text-white">
-                                    {editingId ? "Edit Announcement" : "New Announcement"}
+                                    {editingId ? t.admin_edit_announcement : t.admin_new_announcement}
                                 </h3>
                                 <button onClick={() => setShowForm(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-500">
                                     <X className="w-4 h-4" />
                                 </button>
                             </div>
 
-                            <div className="space-y-4">
+                            <div className="space-y-4 px-6 py-5 overflow-y-auto flex-1 min-h-0">
                                 {/* Type selector */}
                                 <div>
-                                    <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-2 block">Type</label>
-                                    <div className="flex gap-1.5">
+                                    <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-2 block">{t.admin_type}</label>
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                         {types.map(t => {
                                             const tc = typeConfig[t];
                                             const Icon = tc.icon;
@@ -274,13 +279,13 @@ export function AnnouncementSystem() {
                                                 <button
                                                     key={t}
                                                     onClick={() => setForm(f => ({ ...f, type: t }))}
-                                                    className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${form.type === t
+                                                    className={`flex items-center justify-center gap-1 px-2.5 py-2 rounded-lg text-[9px] font-black uppercase tracking-wide transition-all min-w-0 ${form.type === t
                                                         ? `${tc.bg} ${tc.color} border ${tc.border}`
                                                         : "bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10"
                                                         }`}
                                                 >
-                                                    <Icon className="w-3 h-3" />
-                                                    {t}
+                                                    <Icon className="w-3 h-3 shrink-0" />
+                                                    <span className="truncate">{typeLabel(t)}</span>
                                                 </button>
                                             );
                                         })}
@@ -289,34 +294,34 @@ export function AnnouncementSystem() {
 
                                 {/* Title */}
                                 <div>
-                                    <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">Title</label>
+                                    <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">{t.admin_title}</label>
                                     <input
                                         value={form.title}
                                         onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                                        placeholder="e.g. Scheduled Maintenance"
-                                        className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 tracking-widest"
+                                        placeholder={t.admin_scheduled_maintenance}
+                                        className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 tracking-wide"
                                     />
                                 </div>
 
                                 {/* Message */}
                                 <div>
-                                    <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">Message</label>
+                                    <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">{t.admin_message}</label>
                                     <textarea
                                         value={form.message}
                                         onChange={e => setForm(f => ({ ...f, message: e.target.value }))}
                                         rows={4}
-                                        placeholder="The announcement message..."
-                                        className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 tracking-widest resize-none"
+                                        placeholder={t.admin_announcement_message_placeholder}
+                                        className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 tracking-wide resize-none"
                                     />
                                 </div>
                             </div>
 
-                            <div className="flex justify-end gap-2 pt-2">
+                            <div className="flex justify-end gap-2 p-6 pt-4 border-t border-white/5 shrink-0">
                                 <button
                                     onClick={() => setShowForm(false)}
                                     className="px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-[10px] font-bold uppercase tracking-widest text-gray-400 hover:bg-white/10 transition-all"
                                 >
-                                    Cancel
+                                    {t.cancel}
                                 </button>
                                 <button
                                     onClick={handleSave}
@@ -324,7 +329,7 @@ export function AnnouncementSystem() {
                                     className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/20 border border-primary/30 text-primary text-[10px] font-black uppercase tracking-widest hover:bg-primary/30 transition-all disabled:opacity-50"
                                 >
                                     {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                                    {editingId ? "Update" : "Publish"}
+                                    {editingId ? t.admin_update : t.admin_publish}
                                 </button>
                             </div>
                         </motion.div>

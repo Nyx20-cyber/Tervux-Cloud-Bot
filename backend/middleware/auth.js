@@ -34,7 +34,7 @@ export async function authenticate(req, res, next) {
         }
 
         if (user.isBanned) {
-            return res.status(403).json({ error: "Account suspended" });
+            return res.status(403).json({ error: "Your account is suspended by administrator. Please contact support." });
         }
 
         req.user = user;

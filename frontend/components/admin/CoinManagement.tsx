@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
+import { useLocaleStore } from "@/store/useLocaleStore";
+import { translations } from "@/lib/translations";
 
 interface UserRecord {
     _id: string;
@@ -17,6 +19,8 @@ interface UserRecord {
 }
 
 export function CoinManagement() {
+    const { language } = useLocaleStore();
+    const t = translations[language];
     const [users, setUsers] = useState<UserRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [search, setSearch] = useState("");
@@ -55,7 +59,7 @@ export function CoinManagement() {
 
     const handleSubmit = async () => {
         if (!selectedUser || amount <= 0) {
-            toast.error("Select a user and enter a valid amount");
+            toast.error(t.admin_select_user_valid_amount);
             return;
         }
         setSending(true);
@@ -69,11 +73,11 @@ export function CoinManagement() {
                 u._id === selectedUser._id ? { ...u, coins: res.data.newBalance } : u
             ));
             setSelectedUser(prev => prev ? { ...prev, coins: res.data.newBalance } : null);
-            toast.success(`${mode === "add" ? "Added" : "Removed"} ${amount} coins. New balance: ${res.data.newBalance}`);
+            toast.success(`${mode === "add" ? t.admin_added : t.admin_removed} ${amount} ${t.coins_word}. ${t.admin_new_balance}: ${res.data.newBalance}`);
             setAmount(0);
             setReason("");
         } catch (err: any) {
-            toast.error(err.response?.data?.error || "Failed to adjust coins");
+            toast.error(err.response?.data?.error || t.admin_failed_adjust_coins);
         } finally {
             setSending(false);
         }
@@ -83,9 +87,9 @@ export function CoinManagement() {
 
     const handleBonusAll = async () => {
         const amt = Number(bonusAmount);
-        if (!amt || amt <= 0) return toast.error("Enter a valid coin amount");
-        if (!bonusReason.trim()) return toast.error("Please provide a reason for the bonus");
-        if (!confirm(`Give +${amt} coins to ALL users? This cannot be undone.`)) return;
+        if (!amt || amt <= 0) return toast.error(t.admin_enter_valid_coin_amount);
+        if (!bonusReason.trim()) return toast.error(t.admin_provide_bonus_reason);
+        if (!confirm(`${t.admin_confirm_give_bonus_prefix} +${amt} ${t.coins_word} ${t.admin_confirm_give_bonus_suffix}`)) return;
         setSendingBonus(true);
         setBonusResult(null);
         try {
@@ -98,10 +102,10 @@ export function CoinManagement() {
             setBonusAmount("");
             setBonusReason("");
             setBonusMessage("");
-            toast.success(`✅ ${res.data.usersRewarded} users received +${amt} coins!`);
+            toast.success(`✅ ${res.data.usersRewarded} ${t.users} ${t.admin_received} +${amt} ${t.coins_word}!`);
             fetchUsers();
         } catch (err: any) {
-            toast.error(err.response?.data?.error || "Failed to distribute bonus");
+            toast.error(err.response?.data?.error || t.admin_failed_distribute_bonus);
         } finally {
             setSendingBonus(false);
         }
@@ -121,9 +125,9 @@ export function CoinManagement() {
                         <Globe className="h-5 w-5 text-emerald-400" />
                     </div>
                     <div>
-                        <h3 className="text-sm font-black text-white uppercase tracking-tight">Give Bonus to All Users</h3>
+                        <h3 className="text-sm font-black text-white uppercase tracking-tight">{t.admin_give_bonus_all_users}</h3>
                         <p className="text-[9px] font-bold text-emerald-500/50 uppercase tracking-widest">
-                            Distributes coins to every registered user + sends each a notification
+                            {t.admin_give_bonus_all_users_desc}
                         </p>
                     </div>
                 </div>
@@ -131,7 +135,7 @@ export function CoinManagement() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {/* Amount */}
                     <div className="space-y-1.5">
-                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 block">Coins per User *</label>
+                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 block">{t.admin_coins_per_user} *</label>
                         <div className="relative">
                             <Coins className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-emerald-400" />
                             <input
@@ -139,7 +143,7 @@ export function CoinManagement() {
                                 min={1}
                                 value={bonusAmount}
                                 onChange={e => setBonusAmount(e.target.value)}
-                                placeholder="e.g. 50"
+                                placeholder={t.admin_example_50}
                                 className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-emerald-500/20 bg-black/40 text-sm font-black text-emerald-400 placeholder:text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 tracking-widest"
                             />
                         </div>
@@ -155,24 +159,24 @@ export function CoinManagement() {
 
                     {/* Reason */}
                     <div className="space-y-1.5">
-                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 block">Reason * (shown to users)</label>
+                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 block">{t.admin_reason_shown_to_users} *</label>
                         <input
                             type="text"
                             value={bonusReason}
                             onChange={e => setBonusReason(e.target.value)}
-                            placeholder="e.g. Platform launch bonus, Holiday gift..."
+                            placeholder={t.admin_bonus_reason_placeholder}
                             className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-black/40 text-xs font-bold text-white placeholder:text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 tracking-wide"
                         />
                     </div>
 
                     {/* Optional custom message */}
                     <div className="space-y-1.5">
-                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 block">Custom Notification Message (optional)</label>
+                        <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 block">{t.admin_custom_notification_optional}</label>
                         <input
                             type="text"
                             value={bonusMessage}
                             onChange={e => setBonusMessage(e.target.value)}
-                            placeholder="Leave blank for default message..."
+                            placeholder={t.admin_leave_blank_default_message}
                             className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-black/40 text-xs font-bold text-white placeholder:text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 tracking-wide"
                         />
                     </div>
@@ -183,7 +187,7 @@ export function CoinManagement() {
                     {bonusAmount && Number(bonusAmount) > 0 && (
                         <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black text-emerald-400 uppercase tracking-widest">
                             <Zap className="h-3 w-3" />
-                            {Number(bonusAmount)} coins × {users.length} users = {Number(bonusAmount) * users.length} total coins
+                            {Number(bonusAmount)} {t.coins_word} × {users.length} {t.users} = {Number(bonusAmount) * users.length} {t.admin_total_coins}
                         </div>
                     )}
                     <button
@@ -192,7 +196,7 @@ export function CoinManagement() {
                         className="sm:ml-auto flex items-center gap-2 px-8 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-black text-[10px] uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20"
                     >
                         {sendingBonus ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
-                        {sendingBonus ? "Distributing..." : "Give Bonus to All"}
+                        {sendingBonus ? t.admin_distributing : t.admin_give_bonus_all}
                     </button>
                 </div>
 
@@ -202,10 +206,10 @@ export function CoinManagement() {
                         <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
                         <div>
                             <p className="text-xs font-black text-white">
-                                ✅ {bonusResult.usersRewarded} users each received {bonusResult.totalCoinsDistributed / bonusResult.usersRewarded} coins
+                                ✅ {bonusResult.usersRewarded} {t.users} {t.admin_each_received} {bonusResult.totalCoinsDistributed / bonusResult.usersRewarded} {t.coins_word}
                             </p>
                             <p className="text-[9px] font-bold text-emerald-500/60 uppercase tracking-widest">
-                                {bonusResult.totalCoinsDistributed} total coins distributed · All users notified
+                                {bonusResult.totalCoinsDistributed} {t.admin_total_coins_distributed} · {t.admin_all_users_notified}
                             </p>
                         </div>
                     </div>
@@ -216,12 +220,12 @@ export function CoinManagement() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                     <Coins className="h-5 w-5 text-yellow-500" />
-                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">Coin Management</h2>
+                    <h2 className="text-lg font-semibold tracking-tight text-white uppercase">{t.coins_mgmt}</h2>
                 </div>
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-yellow-500/20 bg-yellow-500/5">
                     <Coins className="h-3.5 w-3.5 text-yellow-500" />
                     <span className="text-[10px] font-black uppercase tracking-widest text-yellow-500">
-                        {totalCoins.toLocaleString()} Total Coins in Circulation
+                        {totalCoins.toLocaleString()} {t.admin_total_coins_in_circulation}
                     </span>
                 </div>
             </div>
@@ -235,7 +239,7 @@ export function CoinManagement() {
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                             <input
                                 type="text"
-                                placeholder="Search users..."
+                                placeholder={t.admin_search_users}
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 backdrop-blur-md transition-all uppercase tracking-widest"
@@ -271,7 +275,7 @@ export function CoinManagement() {
                             ))}
                             {filteredUsers.length === 0 && (
                                 <div className="p-8 text-center text-[10px] font-bold uppercase tracking-widest text-gray-600">
-                                    No users found
+                                    {t.admin_no_users_found}
                                 </div>
                             )}
                         </div>
@@ -280,7 +284,7 @@ export function CoinManagement() {
 
                 {/* Adjustment Panel */}
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-5 space-y-5">
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Adjust Coins</h3>
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">{t.admin_adjust_coins}</h3>
 
                     {selectedUser ? (
                         <div className="space-y-4">
@@ -291,7 +295,7 @@ export function CoinManagement() {
                                 <div className="flex items-center gap-1 mt-2">
                                     <Coins className="h-4 w-4 text-yellow-500" />
                                     <span className="text-lg font-black text-yellow-500 tracking-widest">{selectedUser.coins}</span>
-                                    <span className="text-[9px] font-bold uppercase tracking-widest text-gray-600 ml-1">coins</span>
+                                    <span className="text-[9px] font-bold uppercase tracking-widest text-gray-600 ml-1">{t.coins_word}</span>
                                 </div>
                             </div>
 
@@ -305,7 +309,7 @@ export function CoinManagement() {
                                         }`}
                                 >
                                     <ArrowUpRight className="w-3.5 h-3.5" />
-                                    Add
+                                    {t.admin_add}
                                 </button>
                                 <button
                                     onClick={() => setMode("remove")}
@@ -315,13 +319,13 @@ export function CoinManagement() {
                                         }`}
                                 >
                                     <ArrowDownRight className="w-3.5 h-3.5" />
-                                    Remove
+                                    {t.admin_remove}
                                 </button>
                             </div>
 
                             {/* Amount */}
                             <div>
-                                <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">Amount</label>
+                                <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">{t.admin_amount}</label>
                                 <input
                                     type="number"
                                     min={1}
@@ -347,12 +351,12 @@ export function CoinManagement() {
 
                             {/* Reason */}
                             <div>
-                                <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">Reason (optional)</label>
+                                <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1 block">{t.admin_reason_optional}</label>
                                 <input
                                     type="text"
                                     value={reason}
                                     onChange={e => setReason(e.target.value)}
-                                    placeholder="e.g. Bonus, Refund..."
+                                    placeholder={t.admin_bonus_refund_placeholder}
                                     className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 tracking-widest"
                                 />
                             </div>
@@ -371,14 +375,14 @@ export function CoinManagement() {
                                 ) : (
                                     <Send className="w-3.5 h-3.5" />
                                 )}
-                                {mode === "add" ? `Add ${amount} Coins` : `Remove ${amount} Coins`}
+                                {mode === "add" ? `${t.admin_add} ${amount} ${t.coins_word}` : `${t.admin_remove} ${amount} ${t.coins_word}`}
                             </button>
                         </div>
                     ) : (
                         <div className="flex flex-col items-center justify-center py-12 space-y-3 text-center">
                             <Coins className="h-8 w-8 text-gray-700" />
                             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">
-                                Select a user from the list to manage their coins
+                                {t.admin_select_user_manage_coins}
                             </p>
                         </div>
                     )}

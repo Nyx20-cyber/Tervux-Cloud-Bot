@@ -24,12 +24,15 @@ export default function DeploymentsPage() {
     useEffect(() => {
         fetchSessions();
 
-        const socket = io({
+        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        const socket = io(backendUrl, {
+            transports: ["websocket", "polling"],
+            path: "/socket.io",
             auth: { token: localStorage.getItem("token") }
         });
 
-        socket.on("session_update", (data) => {
-            updateSessionLocally(data.sessionId, { status: data.status });
+        socket.on("session_update", (data: { sessionId: string; status: string; isLive?: boolean }) => {
+            updateSessionLocally(data.sessionId, { status: data.status, isLive: data.isLive });
         });
 
         return () => {
@@ -109,7 +112,7 @@ function SessionCard({ session }: { session: any }) {
         setIsDeploying(true);
         try {
             await deploySession(session._id);
-            toast.success(language === "sw" ? "Boti imetumwa kwa mafanikio!" : "Bot deployed successfully!");
+            toast.success(t.bot_deployed_success);
             // Refresh sessions to get new status
             fetchSessions();
             // Refresh user for updated coin balance
@@ -117,7 +120,7 @@ function SessionCard({ session }: { session: any }) {
             updateCoins(res.data.user.coins);
             setIsDeployDialogOpen(false);
         } catch (error: any) {
-            toast.error(error.response?.data?.error || (language === "sw" ? "Imeshindwa kutuma boti. Angalia salio la sarafu 🪙." : "Failed to deploy bot. Check coin 🪙 balance."));
+            toast.error(error.response?.data?.error || t.failed_deploy_bot_insufficient);
         } finally {
             setIsDeploying(false);
         }
@@ -129,10 +132,10 @@ function SessionCard({ session }: { session: any }) {
 
         try {
             await updateSessionStatus(session._id, targetStatus);
-            toast.success(language === "sw" ? `Kikao ${targetStatus === "active" ? "kimeanzishwa" : "kimesitishwa"}` : `Connection ${isPaused ? 'resumed' : 'paused'}`);
+            toast.success(targetStatus === "active" ? t.session_resumed : t.session_paused);
             setIsPauseDialogOpen(false);
         } catch (error: any) {
-            toast.error(error.response?.data?.error || (language === "sw" ? "Imeshindwa kubadilisha hali" : "Action failed"));
+            toast.error(error.response?.data?.error || t.failed_change_status);
         } finally {
             setIsActioning(false);
         }
@@ -142,11 +145,11 @@ function SessionCard({ session }: { session: any }) {
         setIsActioning(true);
         try {
             await api.delete(`/sessions/${session._id}`);
-            toast.success(language === "sw" ? "Kifaa kimefutwa" : "Device disconnected");
+            toast.success(t.device_disconnected);
             fetchSessions();
             setIsDeleteDialogOpen(false);
         } catch (error: any) {
-            toast.error(language === "sw" ? "Imeshindwa kufuta kifaa" : "Failed to delete session");
+            toast.error(t.failed_delete_session);
         } finally {
             setIsActioning(false);
         }
@@ -161,7 +164,7 @@ function SessionCard({ session }: { session: any }) {
                         <Network className="w-4 h-4" />
                     </div>
                     <div>
-                        <p className="text-sm font-bold text-white tracking-widest">{session.phone || 'Unknown'}</p>
+                        <p className="text-sm font-bold text-white tracking-widest">{session.phone || t.unknown_phone}</p>
                         <p className={`text-[9px] font-bold uppercase tracking-widest ${isActive ? 'text-primary' : isError ? 'text-destructive' : isPaused ? 'text-amber-500' : 'text-gray-500'}`}>
                             {session.status}
                         </p>
@@ -175,7 +178,7 @@ function SessionCard({ session }: { session: any }) {
                     <p className="text-[10px] text-primary font-bold uppercase tracking-widest">{t.deployed_to_node}</p>
                     {remainingDays !== null && (
                         <p className={`text-[9px] font-bold uppercase tracking-widest ${remainingDays > 5 ? 'text-gray-400' : 'text-amber-500'}`}>
-                            {remainingDays > 0 ? `${remainingDays} ${language === 'sw' ? 'Siku zilizobaki' : 'Days Remaining'}` : (language === 'sw' ? 'Inaisha Leo' : 'Expiring Today')}
+                            {remainingDays > 0 ? `${remainingDays} ${t.days_remaining}` : t.expiring_today}
                         </p>
                     )}
                 </div>
@@ -249,7 +252,7 @@ function SessionCard({ session }: { session: any }) {
                             {t.cancel}
                         </Button>
                         <Button onClick={handleDeploy} disabled={isDeploying} className="bg-primary text-black hover:bg-primary/90 font-bold uppercase tracking-widest px-6 shadow-lg shadow-primary/20">
-                            {isDeploying ? (language === 'sw' ? 'Inatuma...' : 'Deploying...') : t.deploy_now}
+                            {isDeploying ? t.deploying : t.deploy_now}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -261,13 +264,10 @@ function SessionCard({ session }: { session: any }) {
                     <DialogHeader>
                         <DialogTitle className="text-xl font-bold text-white uppercase tracking-widest flex items-center gap-2">
                             {isPaused ? <PlayCircle className="w-5 h-5 text-primary" /> : <PauseCircle className="w-5 h-5 text-amber-500" />}
-                            {language === 'sw' ? 'Thibitisha' : 'Confirm'} {isPaused ? t.resume : t.pause}
+                            {t.confirm_action} {isPaused ? t.resume : t.pause}
                         </DialogTitle>
                         <DialogDescription className="text-gray-400 mt-2">
-                            {isPaused
-                                ? (language === 'sw' ? "Kuanzisha tena kifaa hiki kitakiunganisha kwenye mtandao wa WhatsApp na kukiruhusu kujibu amri tena." : "Resuming this device will reconnect it to the WhatsApp network and allow it to respond to commands again.")
-                                : (language === 'sw' ? "Kusitisha kifaa hiki kutakizuia kwa muda kujibu ujumbe na amri. Unaweza kuanzisha tena wakati wowote." : "Pausing this device will temporarily stop it from responding to messages and commands. You can resume it at any time.")
-                            }
+                            {isPaused ? t.resume_description : t.pause_description}
                         </DialogDescription>
                     </DialogHeader>
 
@@ -276,7 +276,7 @@ function SessionCard({ session }: { session: any }) {
                             {t.cancel}
                         </Button>
                         <Button onClick={handlePauseResume} disabled={isActioning} className={`${isPaused ? 'bg-primary text-black hover:bg-primary/90 shadow-primary/20' : 'bg-amber-500 text-black hover:bg-amber-500/90 shadow-amber-500/20'} font-bold uppercase tracking-widest px-6 shadow-lg`}>
-                            {isActioning ? (isPaused ? (language === 'sw' ? 'Inaanzisha...' : 'Resuming...') : (language === 'sw' ? 'Inasitisha...' : 'Pausing...')) : (isPaused ? t.resume : t.pause)}
+                            {isActioning ? (isPaused ? t.resuming : t.pausing) : (isPaused ? t.resume : t.pause)}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -288,17 +288,17 @@ function SessionCard({ session }: { session: any }) {
                     <DialogHeader>
                         <DialogTitle className="text-xl font-bold text-white uppercase tracking-widest flex items-center gap-2">
                             <Trash2 className="w-5 h-5 text-destructive" />
-                            {language === 'sw' ? 'Thibitisha Kufuta' : 'Confirm Disconnect'}
+                            {t.confirm_disconnect}
                         </DialogTitle>
                         <DialogDescription className="text-gray-400 mt-2">
-                            {language === 'sw' ? "Je, una uhakika unataka kukata na kufuta kifaa hiki? Hatua hii haiwezi kutenguliwa." : "Are you sure you want to disconnect and delete this device? This action cannot be undone."}
+                            {t.confirm_disconnect_desc}
                         </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-4 py-4">
                         <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/20">
                             <p className="text-sm text-destructive font-bold">
-                                {language === 'sw' ? "Onyo: Muda wowote wa boti uliobakia utapotea!" : "Warning: Any active deployment will be forfeited!"}
+                                {t.warning_active_forfeited}
                             </p>
                         </div>
                     </div>
@@ -308,7 +308,7 @@ function SessionCard({ session }: { session: any }) {
                             {t.cancel}
                         </Button>
                         <Button onClick={handleDelete} disabled={isActioning} className="bg-destructive text-white hover:bg-destructive/90 font-bold uppercase tracking-widest px-6 shadow-lg shadow-destructive/20">
-                            {isActioning ? (language === 'sw' ? 'Inafuta...' : 'Deleting...') : t.confirm}
+                            {isActioning ? t.deleting : t.confirm}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

@@ -24,20 +24,24 @@ export default function PairPage() {
     const [pairingCode, setPairingCode] = useState("");
     const [errorMsg, setErrorMsg] = useState("");
     const socketRef = useRef<Socket | null>(null);
+    const socketWarningShownRef = useRef(false);
 
     const [sessionId, setSessionId] = useState("");
     const fetchSessions = useSessionStore(state => state.fetchSessions);
     const createPairingReq = useSessionStore(state => state.createPairingReq);
-    const { token, user } = useAuthStore();
+    const { token } = useAuthStore();
     const router = useRouter();
 
     useEffect(() => {
         if (!token) return;
 
-        // Initialize socket directly to backend
-        const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        // Prefer same-origin (Next proxy) to avoid CORS/mixed-content issues in production.
+        const backendUrl =
+            process.env.NEXT_PUBLIC_SOCKET_URL ||
+            (typeof window !== "undefined" ? window.location.origin : process.env.NEXT_PUBLIC_API_URL) ||
+            "http://localhost:5000";
         const newSocket = io(backendUrl, {
-            transports: ["websocket", "polling"],
+            transports: ["polling", "websocket"],
             path: "/socket.io",
             auth: { token },
             reconnectionAttempts: 5,
@@ -46,8 +50,19 @@ export default function PairPage() {
 
         socketRef.current = newSocket;
 
-        newSocket.on("connect", () => console.log("Socket connected:", newSocket.id));
-        newSocket.on("connect_error", (err) => console.error("Socket connection error:", err.message));
+        newSocket.on("connect", () => {
+            socketWarningShownRef.current = false;
+            console.log("Socket connected:", newSocket.id);
+        });
+        newSocket.on("connect_error", () => {
+            // Connection attempts may fail transiently; avoid noisy console error spam.
+        });
+        newSocket.io.on("reconnect_failed", () => {
+            if (socketWarningShownRef.current) return;
+            socketWarningShownRef.current = true;
+            console.warn("Realtime socket connection failed after retries.");
+            toast.warning("Realtime connection issue. Pairing may be delayed; please retry.");
+        });
 
         newSocket.on("qr_update", (data: { qr: string; sessionId: string }) => {
             setQrCode(data.qr);
@@ -71,14 +86,17 @@ export default function PairPage() {
 
         newSocket.on("queue_ready", (data: { message?: string }) => {
             setStatus(prev => {
+                if (prev === "queued") {
+                    toast.success(data.message || t.pair_queue_ready);
+                    return "loading";
+                }
                 if (prev === "waiting" || prev === "linked") return prev;
-                toast.success(data.message || (language === "sw" ? "Zamu yako! Inatengeneza muunganisho..." : "Your turn! Generating connection..."));
-                return "loading";
+                return prev === "loading" ? prev : "loading";
             });
         });
 
         newSocket.on("pairing_success", (data: { message?: string; sessionId: string }) => {
-            toast.success(data.message || (language === "sw" ? "Kifaa kimeunganishwa kwa mafanikio!" : "Device connected successfully!"));
+            toast.success(data.message || t.pair_success);
             setStatus("linked");
             setSessionId(data.sessionId);
             fetchSessions();
@@ -91,11 +109,11 @@ export default function PairPage() {
         newSocket.on("pairing_error", (err: { error?: string }) => {
             setStatus(prev => {
                 if (prev === "waiting" || prev === "linked") {
-                    toast.error(err.error || (language === "sw" ? "Suala la muunganisho — kodi yako inaweza bado kufanya kazi. Ingiza haraka." : "Connection issue — your code may still work. Enter it quickly."));
+                    toast.error(err.error || t.pair_connection_issue);
                     return prev;
                 }
-                setErrorMsg(err.error || (language === "sw" ? "Hitilafu ya Muunganisho" : "Connection Error"));
-                toast.error(err.error || (language === "sw" ? "Imeshindwa kuunganisha kifaa" : "Failed to connect device"));
+                setErrorMsg(err.error || t.pair_connection_error);
+                toast.error(err.error || t.pair_connect_failed);
                 return "error";
             });
         });
@@ -104,17 +122,17 @@ export default function PairPage() {
             newSocket.disconnect();
             socketRef.current = null;
         };
-    }, [token, fetchSessions, router, language]);
+    }, [token, fetchSessions, router, t]);
 
     const handlePair = async () => {
         if (phone.startsWith("+") || phone.startsWith("0")) {
-            setErrorMsg(language === "sw" ? "Umbizo batili. Tumia umbizo kamili la kimataifa bila + au sifuri ya kwanza (mf. 2557...)" : "Invalid format. Use full international format without + or leading zero (e.g. 2557...)");
+            setErrorMsg(t.pair_invalid_format);
             setStatus("error");
             return;
         }
 
         if (phone.replace(/\D/g, "").length < 10) {
-            setErrorMsg(language === "sw" ? "Namba ya simu ni fupi mno. Tafadhali jumuisha kodi ya nchi (mf. 255712345678)." : "Phone number is too short. Please include country code (e.g. 255712345678).");
+            setErrorMsg(t.pair_phone_too_short);
             setStatus("error");
             return;
         }
@@ -127,22 +145,14 @@ export default function PairPage() {
         const loadingTimeout = setTimeout(() => {
             setStatus(prev => {
                 if (prev === "loading") {
-                    setErrorMsg(language === "sw" ? "Muda wa muunganisho umeisha. Server imechukua muda mrefu mno. Tafadhali jaribu tena." : "Connection timed out. The server took too long. Please try again.");
+                    setErrorMsg(t.pair_timeout);
                     return "error";
                 }
                 return prev;
             });
-        }, 90000);
+        }, 180000);
 
         try {
-            if (socketRef.current) {
-                socketRef.current.emit("start_pairing", {
-                    method,
-                    userId: user?._id,
-                    phoneNumber: method === "code" ? phone.replace(/\D/g, "") : null
-                });
-            }
-
             const data = await createPairingReq(phone.replace(/\D/g, ""), method);
             if (data.status === "queued") {
                 clearTimeout(loadingTimeout);
@@ -162,9 +172,13 @@ export default function PairPage() {
         }
     };
 
-    const handleCopy = () => {
-        navigator.clipboard.writeText(pairingCode);
-        toast.success(language === "sw" ? "Kodi imenakiliwa!" : "Code copied to clipboard");
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(pairingCode);
+            toast.success(t.pair_code_copied);
+        } catch {
+            toast.error("Failed to copy code. Please copy manually.");
+        }
     };
 
     return (
@@ -237,7 +251,7 @@ export default function PairPage() {
                                                 />
                                             </div>
                                             <p className="text-[9px] text-gray-600 font-medium uppercase tracking-wider ml-1">
-                                                {language === "sw" ? "* Usiongeze sifuri ya mwanzo. Jumuisha kodi ya nchi." : "* Omit leading zero. Include country prefix."}
+                                                {t.pair_phone_hint}
                                             </p>
                                         </div>
 
@@ -308,7 +322,7 @@ export default function PairPage() {
                                                     ) : (
                                                         <div className="flex flex-col items-center justify-center gap-3 w-[250px] h-[250px] bg-gray-100/50 rounded-lg text-gray-400">
                                                             <Loader2 className="h-6 w-6 animate-spin" />
-                                                            <span className="text-[10px] font-bold uppercase tracking-widest">Awaiting Payload...</span>
+                                                            <span className="text-[10px] font-bold uppercase tracking-widest">{t.pair_awaiting_payload}</span>
                                                         </div>
                                                     )
                                                 ) : (
@@ -320,7 +334,7 @@ export default function PairPage() {
                                                         )) : (
                                                             <div className="flex flex-col items-center justify-center gap-3 text-gray-400 px-4">
                                                                 <Loader2 className="h-6 w-6 animate-spin" />
-                                                                <span className="text-[10px] font-bold uppercase tracking-widest">Awaiting Code...</span>
+                                                                <span className="text-[10px] font-bold uppercase tracking-widest">{t.pair_awaiting_code}</span>
                                                             </div>
                                                         )}
                                                     </div>
@@ -332,7 +346,7 @@ export default function PairPage() {
                                             <div className="flex flex-wrap justify-center gap-4">
                                                 <div className="flex gap-2">
                                                     <Button variant="outline" onClick={handleCopy} className="h-8 px-4 rounded-full border border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary hover:text-primary text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all">
-                                                        <Copy className="h-3 w-3 mr-2" /> {language === "sw" ? "Nakili" : "Copy"}
+                                                        <Copy className="h-3 w-3 mr-2" /> {t.copy_code}
                                                     </Button>
                                                 </div>
                                             </div>
@@ -368,7 +382,7 @@ export default function PairPage() {
                                             {errorMsg}
                                         </p>
                                         <Button variant="outline" onClick={() => setStatus("idle")} className="mt-4 border-white/10 text-white hover:bg-white/10 uppercase tracking-widest text-[10px]">
-                                            {language === "sw" ? "Jaribu Tena" : "Try Again"}
+                                            {t.try_again}
                                         </Button>
                                     </div>
                                 )}
@@ -410,11 +424,7 @@ export default function PairPage() {
                                     <AlertCircle className="w-4 h-4" />
                                     <span className="text-[10px] font-bold uppercase tracking-widest">{t.account_responsibility}</span>
                                 </div>
-                                <p className="text-xs text-gray-400 leading-relaxed font-medium">
-                                    {t.account_responsibility_desc.split('not our responsibility')[0]}
-                                    <span className="text-white font-bold">{language === "sw" ? "si jukumu letu" : "not our responsibility"}</span>
-                                    {t.account_responsibility_desc.split('not our responsibility')[1] || t.account_responsibility_desc.split('si jukumu letu')[1]}
-                                </p>
+                                <p className="text-xs text-gray-400 leading-relaxed font-medium">{t.account_responsibility_desc}</p>
                             </div>
 
                             <div className="space-y-3 p-6 rounded-2xl bg-primary/5 border border-primary/10">
@@ -422,11 +432,7 @@ export default function PairPage() {
                                     <ShieldCheck className="w-4 h-4" />
                                     <span className="text-[10px] font-bold uppercase tracking-widest">{t.data_protection_risk}</span>
                                 </div>
-                                <p className="text-xs text-gray-400 leading-relaxed font-medium">
-                                    {t.data_protection_risk_desc.split('not 100% free')[0].split('si bure 100%')[0]}
-                                    <span className="text-white font-bold">{language === "sw" ? "si bure 100%" : "not 100% free"}</span>
-                                    {t.data_protection_risk_desc.split('not 100% free')[1] || t.data_protection_risk_desc.split('si bure 100%')[1]}
-                                </p>
+                                <p className="text-xs text-gray-400 leading-relaxed font-medium">{t.data_protection_risk_desc}</p>
                             </div>
                         </div>
                     </div>

@@ -35,7 +35,7 @@ export default function NotificationsPage() {
             const res = await api.get("/notifications");
             setNotifications(res.data.notifications);
         } catch (error) {
-            toast.error(language === "sw" ? "Imeshindwa kupakia taarifa" : "Failed to load notifications");
+            toast.error(t.failed_load_notifications);
         } finally {
             setIsLoading(false);
         }
@@ -64,7 +64,7 @@ export default function NotificationsPage() {
                 prev.map(n => n._id === id ? { ...n, isRead: true } : n)
             );
         } catch (error) {
-            toast.error(language === "sw" ? "Imeshindwa kuhifadhi" : "Failed to mark as read");
+            toast.error(t.failed_mark_read);
         }
     };
 
@@ -72,9 +72,9 @@ export default function NotificationsPage() {
         try {
             await api.put("/notifications/read-all");
             setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-            toast.success(language === "sw" ? "Taarifa zote zimetiwa alama ya kusomwa" : "All notifications marked as read");
+            toast.success(t.all_notifications_marked_read);
         } catch (error) {
-            toast.error(language === "sw" ? "Imeshindwa kuhifadhi taarifa zote" : "Failed to mark all as read");
+            toast.error(t.failed_mark_all);
         }
     };
 
@@ -82,9 +82,9 @@ export default function NotificationsPage() {
         try {
             await api.delete(`/notifications/${id}`);
             setNotifications(prev => prev.filter(n => n._id !== id));
-            toast.success(language === "sw" ? "Taarifa imefutwa" : "Notification deleted");
+            toast.success(t.notification_deleted);
         } catch (error) {
-            toast.error(language === "sw" ? "Imeshindwa kufuta taarifa" : "Failed to delete notification");
+            toast.error(t.failed_delete_notification);
         }
     };
 
@@ -112,7 +112,7 @@ export default function NotificationsPage() {
                             {t.notifications_center}
                         </h1>
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mt-1">
-                            {language === "sw" ? "Pata habari za hivi karibuni za mfumo" : "Stay updated with system alerts and activities"}
+                            {t.notifications_subheading}
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -140,7 +140,7 @@ export default function NotificationsPage() {
                                 : "text-gray-500 hover:text-white hover:bg-white/5"
                         )}
                     >
-                        {language === "sw" ? "SHUGHULI ZOTE" : "ALL ACTIVITIES"}
+                        {t.all_activities}
                     </button>
                     <button
                         onClick={() => setFilter("unread")}
@@ -151,7 +151,7 @@ export default function NotificationsPage() {
                                 : "text-gray-500 hover:text-white hover:bg-white/5"
                         )}
                     >
-                        {language === "sw" ? "AMBAZO HAZIJASOMWA" : "UNREAD"}
+                        {t.unread}
                         {notifications.filter(n => !n.isRead).length > 0 && (
                             <span className={cn(
                                 "h-2 w-2 rounded-full",
@@ -166,7 +166,7 @@ export default function NotificationsPage() {
                     {isLoading ? (
                         <div className="p-20 text-center flex flex-col items-center gap-4">
                             <div className="w-10 h-10 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
-                            <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest">{language === "sw" ? "Inapakia..." : "Loading history..."}</p>
+                            <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest">{t.loading_history}</p>
                         </div>
                     ) : filteredNotifications.length === 0 ? (
                         <motion.div
@@ -178,7 +178,7 @@ export default function NotificationsPage() {
                                 <Bell className="w-16 h-16 text-gray-800 group-hover:text-primary/40 transition-colors" />
                             </div>
                             <div className="space-y-2">
-                                <h3 className="text-white font-black uppercase tracking-[0.2em] text-sm">{language === "sw" ? "Umepata Zote!" : "All caught up!"}</h3>
+                                <h3 className="text-white font-black uppercase tracking-[0.2em] text-sm">{t.all_caught_up}</h3>
                                 <p className="text-[11px] text-gray-600 font-bold uppercase tracking-widest max-w-xs">{t.no_notifications}</p>
                             </div>
                         </motion.div>

@@ -6,6 +6,7 @@ import Payment from "../models/Payment.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import Notification from "../models/Notification.js";
 import { createTransaction, getBalance } from "../services/paymentService.js";
+import { emitUpdate } from "../services/socketService.js";
 
 const router = Router();
 
@@ -13,49 +14,43 @@ const router = Router();
 
 /**
  * GET /api/subscription
- * Get user's current subscription
+ * Legacy endpoint: return user's active deployments
  */
 router.get("/", authenticate, async (req, res) => {
     try {
-        const sessions = await WhatsAppSession.find({ userId: req.user._id }).populate("subscription.planId");
+        const sessions = await WhatsAppSession.find({ userId: req.user._id });
+        const activeDeployments = sessions
+            .filter((session) => session.expiresAt && new Date(session.expiresAt) > new Date())
+            .map((session) => ({
+                sessionId: session._id,
+                phone: session.phone,
+                status: session.status,
+                expiresAt: session.expiresAt
+            }));
 
-        const subscriptions = [];
         for (const session of sessions) {
-            const sub = session.subscription;
-            if (sub?.status === "active") {
-                subscriptions.push({
-                    sessionId: session._id,
-                    phone: session.phone,
-                    plan: sub.planId,
-                    status: sub.status || "none",
-                    activatedAt: sub.activatedAt || null
+            if (!session.expiresAt) continue;
+            const daysLeft = Math.ceil((new Date(session.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+            if (daysLeft <= 2 && daysLeft > 0) {
+                const lastNotif = await Notification.findOne({
+                    userId: req.user._id,
+                    title: "Deployment Expiring",
+                    createdAt: { $gt: new Date(Date.now() - 24 * 60 * 60 * 1000) }
                 });
 
-                // Check for expiry (e.g., < 2 days)
-                if (session.expiresAt) {
-                    const daysLeft = Math.ceil((new Date(session.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                    if (daysLeft <= 2 && daysLeft > 0) {
-                        // Create notification if not already sent recently
-                        const lastNotif = await Notification.findOne({
-                            userId: req.user._id,
-                            title: "Subscription Expiring",
-                            createdAt: { $gt: new Date(Date.now() - 24 * 60 * 60 * 1000) } // within last 24h
-                        });
-
-                        if (!lastNotif) {
-                            await Notification.create({
-                                userId: req.user._id,
-                                title: "Subscription Expiring",
-                                message: `Your subscription for ${session.phone} expires in ${daysLeft} day(s). Renew now to avoid service interruption.`,
-                                type: "warning",
-                                link: "/dashboard/billing"
-                            });
-                        }
-                    }
+                if (!lastNotif) {
+                    await Notification.create({
+                        userId: req.user._id,
+                        title: "Deployment Expiring",
+                        message: `Your deployment for ${session.phone} expires in ${daysLeft} day(s). Top up coins to keep it active.`,
+                        type: "warning",
+                        link: "/dashboard/billing"
+                    });
                 }
             }
         }
-        res.json({ subscriptions });
+
+        res.json({ subscriptions: activeDeployments });
     } catch (error) {
         console.error("Get subscription error:", error);
         res.status(500).json({ error: "Failed to get subscription" });
@@ -70,9 +65,19 @@ router.get("/", authenticate, async (req, res) => {
 router.post("/checkout", authenticate, async (req, res) => {
     try {
         const { planSlug, payerPhone } = req.body;
+        const normalizedPhone = String(payerPhone || "").replace(/\D/g, "");
+        console.log("[CHECKOUT] Request received", {
+            userId: req.user?._id?.toString?.(),
+            planSlug,
+            payerPhone: normalizedPhone
+        });
 
-        if (!planSlug || !payerPhone) {
+        if (!planSlug || !normalizedPhone) {
             return res.status(400).json({ error: "planSlug and payerPhone are required" });
+        }
+
+        if (!/^(0|\+?255)?[67]\d{8}$/.test(String(payerPhone).trim())) {
+            return res.status(400).json({ error: "Please provide a valid Tanzanian mobile number" });
         }
 
         const plan = await Plan.findOne({ slug: planSlug, isActive: true });
@@ -80,41 +85,108 @@ router.post("/checkout", authenticate, async (req, res) => {
             return res.status(404).json({ error: "Plan not found" });
         }
 
-        // Create FastLipa transaction (sends M-Pesa/Tigo push to phone)
-        const fastlipaResult = await createTransaction(
-            payerPhone,
-            plan.price,
-            req.user.name
-        );
+        const pendingCutoff = new Date(Date.now() - 3 * 60 * 1000);
+        const existingPending = await Payment.findOne({
+            userId: req.user._id,
+            planId: plan._id,
+            payerPhone: normalizedPhone,
+            status: "pending",
+            createdAt: { $gt: pendingCutoff }
+        }).sort({ createdAt: -1 });
 
-        // FastLipa returns: { status, message, data: { tranID, amount, number, network, status, time } }
-        const tranId = fastlipaResult.data?.tranID || fastlipaResult.tranid || fastlipaResult.id || null;
-
-        if (!tranId) {
-            console.error("FastLipa: No transaction ID in response:", JSON.stringify(fastlipaResult));
-            return res.status(502).json({ error: "Payment gateway error — no transaction ID returned" });
+        if (existingPending) {
+            console.log("[CHECKOUT] Existing pending payment found", {
+                userId: req.user._id.toString(),
+                paymentId: existingPending._id.toString(),
+                transactionId: existingPending.fastlipaTransactionId || null
+            });
+            return res.status(409).json({
+                error: "You already have a pending payment request. Complete or wait for it to expire before trying again.",
+                paymentId: existingPending._id,
+                transactionId: existingPending.fastlipaTransactionId
+            });
         }
 
-        // Save payment record as pending with full gateway response
+        // Create local draft first so every checkout attempt has an auditable DB record.
         const payment = await Payment.create({
             userId: req.user._id,
             planId: plan._id,
             amount: plan.price,
             currency: "TZS",
-            fastlipaTransactionId: tranId,
             status: "pending",
-            payerPhone,
-            gatewayResponse: fastlipaResult
+            payerPhone: normalizedPhone,
+            gatewayResponse: {
+                draft: true,
+                createdAt: new Date().toISOString()
+            }
+        });
+        emitUpdate("admin_payment_updated", {
+            paymentId: payment._id.toString(),
+            status: "pending"
         });
 
-        res.json({
-            success: true,
-            message: "Payment initiated. Check your phone for M-Pesa/Tigo prompt.",
-            paymentId: payment._id,
-            transactionId: tranId,
-            amount: plan.price,
-            plan: plan.name
-        });
+        try {
+            // Create FastLipa transaction (sends M-Pesa/Tigo push to phone)
+            const fastlipaResult = await createTransaction(
+                normalizedPhone,
+                plan.price,
+                req.user.name
+            );
+
+            // FastLipa returns: { status, message, data: { tranID, amount, number, network, status, time } }
+            const tranId = fastlipaResult.data?.tranID || fastlipaResult.tranid || fastlipaResult.id || null;
+
+            if (!tranId) {
+                console.error("FastLipa: No transaction ID in response:", JSON.stringify(fastlipaResult));
+                payment.status = "failed";
+                payment.failureReason = "Gateway did not return transaction ID.";
+                payment.gatewayResponse = fastlipaResult;
+                await payment.save();
+                return res.status(502).json({
+                    error: "Payment gateway error — no transaction ID returned",
+                    paymentId: payment._id
+                });
+            }
+
+            payment.fastlipaTransactionId = tranId;
+            payment.gatewayResponse = fastlipaResult;
+            await payment.save();
+
+            console.log("[CHECKOUT] Payment draft upgraded to pending", {
+                paymentId: payment._id.toString(),
+                transactionId: tranId
+            });
+
+            res.json({
+                success: true,
+                message: "Payment initiated. Check your phone for M-Pesa/Tigo prompt.",
+                paymentId: payment._id,
+                transactionId: tranId,
+                amount: plan.price,
+                plan: plan.name
+            });
+        } catch (gatewayError) {
+            payment.status = "failed";
+            payment.failureReason = gatewayError.message || "Payment gateway request failed";
+            payment.gatewayResponse = {
+                gatewayError: payment.failureReason
+            };
+            await payment.save();
+            emitUpdate("admin_payment_updated", {
+                paymentId: payment._id.toString(),
+                status: "failed"
+            });
+
+            console.error("[CHECKOUT] Gateway request failed", {
+                paymentId: payment._id.toString(),
+                error: payment.failureReason
+            });
+
+            return res.status(502).json({
+                error: payment.failureReason,
+                paymentId: payment._id
+            });
+        }
     } catch (error) {
         console.error("Checkout error:", error);
         res.status(500).json({ error: error.message || "Payment initiation failed" });
@@ -155,19 +227,14 @@ router.get("/payment-status/:paymentId", authenticate, async (req, res) => {
             return res.json({ status: "cancelled", message: payment.failureReason || "Payment was cancelled." });
         }
 
-        // Still pending — auto-cancel if older than 60s (FastLipa won't update after this)
+        // Still pending — allow verifier/webhook to continue settlement window.
         const paymentAge = Date.now() - new Date(payment.createdAt).getTime();
-
-        if (paymentAge > 60000) {
-            payment.status = "cancelled";
-            payment.failureReason = "Payment expired — no confirmation received.";
-            await payment.save();
-            return res.json({ status: "cancelled", message: "Payment expired. You did not confirm in time. No charges were made." });
-        }
 
         res.json({
             status: "pending",
-            message: "Waiting for payment confirmation..."
+            message: paymentAge > 120000
+                ? "Payment is still being verified. Keep this page open or check again shortly."
+                : "Waiting for payment confirmation..."
         });
     } catch (error) {
         console.error("Payment status error:", error);
@@ -196,7 +263,7 @@ router.get("/balance", authenticate, requireAdmin, async (req, res) => {
 router.get("/payments", authenticate, async (req, res) => {
     try {
         const payments = await Payment.find({ userId: req.user._id })
-            .populate("planId", "name price durationDays")
+            .populate("planId", "name price")
             .sort({ createdAt: -1 })
             .limit(20);
         res.json({ payments });

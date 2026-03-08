@@ -6,18 +6,19 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { Loader2 } from "lucide-react";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const { isAuthenticated, checkAuth } = useAuthStore();
+    const { isAuthenticated, checkAuth, token } = useAuthStore();
     const router = useRouter();
     const pathname = usePathname();
     const [isChecking, setIsChecking] = useState(true);
 
     useEffect(() => {
         const verify = async () => {
+            setIsChecking(true);
             await checkAuth();
             setIsChecking(false);
         };
         verify();
-    }, [checkAuth]);
+    }, [checkAuth, token]);
 
     useEffect(() => {
         if (!isChecking) {

@@ -28,11 +28,7 @@ async function run() {
         userId: user._id,
         phone: "1234567890",
         status: "active",
-        subscription: {
-            status: "active",
-            activatedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
-            expiresAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) // Expired 2 days ago
-        }
+        expiresAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) // Expired 2 days ago
     });
     console.log("Created fake expired session:", session._id);
     

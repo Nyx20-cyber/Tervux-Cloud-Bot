@@ -33,9 +33,11 @@ import { translations } from "@/lib/translations";
 
 interface Session {
     _id: string;
-    phoneNumber: string;
-    config: Record<string, any>;
+    phone?: string;
+    settings?: Record<string, any>;
     status: string;
+    expiresAt?: string | null;
+    isLive?: boolean;
     updatedAt: string;
 }
 
@@ -52,6 +54,9 @@ function ConfigurationsContent() {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+
+    const cloneSettings = (value?: Record<string, any>) => JSON.parse(JSON.stringify(value || {}));
 
     useEffect(() => {
         fetchSessions();
@@ -62,7 +67,7 @@ function ConfigurationsContent() {
             const session = sessions.find(s => s._id === sessionIdParam);
             if (session) {
                 setSelectedSession(session);
-                setConfig(session.config || {});
+                setConfig(cloneSettings(session.settings));
             }
         }
     }, [sessionIdParam, sessions]);
@@ -70,12 +75,19 @@ function ConfigurationsContent() {
     const fetchSessions = async () => {
         try {
             const res = await api.get("/sessions");
-            // Only show active or paused bots for configuration
-            const deployedBots = res.data.sessions ? res.data.sessions.filter((s: any) => s.status === "active" || s.status === "paused") : [];
+            // Show only deployed + non-expired bots for configuration.
+            const now = Date.now();
+            const deployedBots = res.data.sessions
+                ? res.data.sessions.filter((s: any) =>
+                    s.expiresAt &&
+                    new Date(s.expiresAt).getTime() > now &&
+                    s.status !== "pairing"
+                )
+                : [];
             setSessions(deployedBots);
             setIsLoading(false);
         } catch (error) {
-            toast.error(language === "sw" ? "Imeshindwa kupakia vikao" : "Failed to fetch sessions");
+            toast.error(t.failed_fetch_sessions);
             setIsLoading(false);
         }
     };
@@ -84,18 +96,23 @@ function ConfigurationsContent() {
         if (!selectedSession) return;
         setIsSaving(true);
         try {
-            await api.post(`/sessions/${selectedSession._id}/config`, { config });
-            toast.success(language === "sw" ? "Mipangilio imehifadhiwa!" : "Configurations saved successfully!");
+            const res = await api.put(`/sessions/${selectedSession._id}/settings`, config);
+            const savedSettings = cloneSettings(res.data?.settings || config);
+            setConfig(savedSettings);
+            setSelectedSession(prev => prev ? { ...prev, settings: savedSettings } : prev);
+            setSessions(prev => prev.map(s => s._id === selectedSession._id ? { ...s, settings: savedSettings } : s));
+            toast.success(t.configurations_saved);
+            setIsConfirmOpen(false);
             fetchSessions();
         } catch (error) {
-            toast.error(language === "sw" ? "Imeshindwa kuhifadhi mipangilio" : "Failed to save configurations");
+            toast.error(t.failed_save_configurations);
         } finally {
             setIsSaving(false);
         }
     };
 
     const filteredSessions = sessions.filter(s =>
-        (s.phoneNumber || "").includes(searchTerm)
+        (s.phone || "").includes(searchTerm)
     );
 
     return (
@@ -136,7 +153,7 @@ function ConfigurationsContent() {
                                             key={session._id}
                                             onClick={() => {
                                                 setSelectedSession(session);
-                                                setConfig(session.config || {});
+                                                setConfig(cloneSettings(session.settings));
                                                 router.push(`/dashboard/configurations?session=${session._id}`);
                                             }}
                                             className={cn(
@@ -149,7 +166,7 @@ function ConfigurationsContent() {
                                             <div className="flex items-center gap-3">
                                                 <Smartphone className="w-4 h-4" />
                                                 <div className="text-left">
-                                                    <p className="text-[10px] font-bold uppercase tracking-widest">{session.phoneNumber}</p>
+                                                    <p className="text-[10px] font-bold uppercase tracking-widest">{session.phone || "-"}</p>
                                                     <p className={cn("text-[8px] font-bold uppercase tracking-tighter opacity-60", selectedSession?._id === session._id ? "text-black" : "text-gray-500")}>
                                                         {t.last_updated}: {new Date(session.updatedAt).toLocaleDateString(language === "sw" ? 'sw-TZ' : 'en-US')}
                                                     </p>
@@ -169,13 +186,13 @@ function ConfigurationsContent() {
                             <div className="bg-white/5 border border-white/10 p-6 sm:p-8 rounded-2xl backdrop-blur-md space-y-8">
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
                                     <div>
-                                        <h3 className="text-xl font-bold text-white uppercase tracking-tight">{t.settings_for} {selectedSession.phoneNumber}</h3>
-                                        <p className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mt-1">Status: {selectedSession.status}</p>
+                                        <h3 className="text-xl font-bold text-white uppercase tracking-tight">{t.settings_for} {selectedSession.phone || "-"}</h3>
+                                        <p className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mt-1">{t.status_label}: {selectedSession.status}</p>
                                     </div>
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => setConfig(selectedSession.config || {})}
+                                        onClick={() => setConfig(cloneSettings(selectedSession.settings))}
                                         className="border-white/10 text-white font-bold uppercase tracking-widest text-[9px] h-9 px-4 rounded-xl hover:bg-white/10"
                                     >
                                         <RotateCcw className="w-3 h-3 mr-2" />
@@ -224,7 +241,7 @@ function ConfigurationsContent() {
                                 </div>
 
                                 <div className="pt-6 border-t border-white/10">
-                                    <Dialog>
+                                    <Dialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
                                         <DialogTrigger asChild>
                                             <Button className="w-full h-12 bg-primary hover:bg-primary/90 text-black font-bold uppercase tracking-widest text-[10px] rounded-xl shadow-lg shadow-primary/20">
                                                 <Save className="w-4 h-4 mr-2" />
@@ -242,7 +259,11 @@ function ConfigurationsContent() {
                                                 </DialogDescription>
                                             </DialogHeader>
                                             <DialogFooter className="mt-6 gap-3">
-                                                <Button variant="ghost" className="flex-1 h-11 text-gray-400 hover:text-white border-white/10 font-bold uppercase tracking-widest text-[9px] rounded-xl">
+                                                <Button
+                                                    variant="ghost"
+                                                    onClick={() => setIsConfirmOpen(false)}
+                                                    className="flex-1 h-11 text-gray-400 hover:text-white border-white/10 font-bold uppercase tracking-widest text-[9px] rounded-xl"
+                                                >
                                                     {t.cancel}
                                                 </Button>
                                                 <Button
