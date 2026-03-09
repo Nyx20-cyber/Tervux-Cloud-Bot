@@ -132,7 +132,7 @@ class SessionManager {
         this.MAX_RECONNECT_ATTEMPTS = 10;
         this.CONFIG_CACHE_TTL = 5000;
         this.RUNTIME_HEALTH_INTERVAL_MS = Number.parseInt(process.env.WA_RUNTIME_HEALTH_INTERVAL_MS || "30000", 10);
-        this.RUNTIME_STALE_MS = Number.parseInt(process.env.WA_RUNTIME_STALE_MS || "90000", 10);
+        this.RUNTIME_STALE_MS = Number.parseInt(process.env.WA_RUNTIME_STALE_MS || "120000", 10);
         this.pairingRecoveryAttempts = new Map();
         this.pairingRunTokens = new Map();
         this.cancelledPairingUsers = new Set();
@@ -503,12 +503,15 @@ class SessionManager {
                     try {
                         const config = await this.getSessionConfig(sessionId);
                         if (sock.ws?.readyState !== 1) {
-                            throw new Error("socket_not_open");
+                            console.warn(`🩺 [${sessionId}] Heartbeat noticed closed socket. Reconnecting.`);
+                            await this.connectSession(sessionId);
+                            return;
                         }
 
-                        const probePresence = config?.alwaysOnline ? "available" : "unavailable";
-                        await sock.sendPresenceUpdate(probePresence);
-                        this._touchSession(sessionId);
+                        if (config?.alwaysOnline) {
+                            await sock.sendPresenceUpdate("available");
+                            this._touchSession(sessionId);
+                        }
                     } catch (e) {
                         console.warn(`🩺 [${sessionId}] Session heartbeat failed: ${e.message}`);
                         await this.connectSession(sessionId).catch((reErr) => {
