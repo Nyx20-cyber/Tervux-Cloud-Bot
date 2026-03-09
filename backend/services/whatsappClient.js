@@ -154,6 +154,37 @@ class SessionManager {
         }
     }
 
+    _pruneProcessedMessages(entry, now = Date.now()) {
+        if (!entry?.processedMessageIds) return;
+        const ttlMs = 10 * 60 * 1000;
+        for (const [msgId, seenAt] of entry.processedMessageIds) {
+            if (now - seenAt > ttlMs) {
+                entry.processedMessageIds.delete(msgId);
+            }
+        }
+
+        const maxEntries = 3000;
+        while (entry.processedMessageIds.size > maxEntries) {
+            const oldestKey = entry.processedMessageIds.keys().next().value;
+            if (!oldestKey) break;
+            entry.processedMessageIds.delete(oldestKey);
+        }
+    }
+
+    markMessageProcessed(sessionId, messageId) {
+        if (!messageId) return true;
+        const entry = this.sessions.get(sessionId);
+        if (!entry?.processedMessageIds) return true;
+
+        const now = Date.now();
+        this._pruneProcessedMessages(entry, now);
+        if (entry.processedMessageIds.has(messageId)) {
+            return false;
+        }
+        entry.processedMessageIds.set(messageId, now);
+        return true;
+    }
+
     startHealthMonitor() {
         if (this.healthMonitor) {
             clearInterval(this.healthMonitor);
@@ -418,6 +449,7 @@ class SessionManager {
             configCache: null,
             configCacheTime: 0,
             messageCache: new Map(),
+            processedMessageIds: new Map(),
             lastActivityAt: Date.now()
         });
 
@@ -700,11 +732,19 @@ class SessionManager {
         });
 
         // Command Handler
-        sock.ev.on("messages.upsert", async ({ messages, type }) => {
-            if (type !== "notify" && type !== "append") return;
+        sock.ev.on("messages.upsert", async ({ messages }) => {
             this._touchSession(sessionId);
             for (const m of messages) {
                 if (!m.message) continue;
+                const messageId = m.key?.id || `${m.key?.remoteJid || "unknown"}:${String(m.messageTimestamp || "")}`;
+                if (!this.markMessageProcessed(sessionId, messageId)) continue;
+
+                // Ignore stale history batches so old commands are not replayed after reconnect.
+                const tsSeconds = Number(m.messageTimestamp || 0);
+                if (tsSeconds > 0) {
+                    const ageMs = Date.now() - (tsSeconds * 1000);
+                    if (ageMs > 5 * 60 * 1000) continue;
+                }
 
                 const messageText = m.message.conversation ||
                     m.message.extendedTextMessage?.text ||
@@ -1133,7 +1173,8 @@ ${text}
         this.sessions.set(sessionId, {
             sock, reconnectAttempts: 0,
             configCache: null, configCacheTime: 0,
-            messageCache: new Map()
+            messageCache: new Map(),
+            processedMessageIds: new Map()
         });
 
         // Request pairing code flow
