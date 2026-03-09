@@ -137,6 +137,10 @@ class SessionManager {
         this.connectingSessions = new Map();
     }
 
+    _isSocketOpen(sock) {
+        return !!(sock?.user && sock?.ws?.readyState === 1);
+    }
+
     /**
      * Get config for a specific session from DB with caching
      */
@@ -185,13 +189,13 @@ class SessionManager {
 
     isConnected(sessionId) {
         const entry = this.sessions.get(sessionId);
-        return entry?.sock?.user ? true : false;
+        return this._isSocketOpen(entry?.sock);
     }
 
     getActiveCount() {
         let count = 0;
         for (const [, entry] of this.sessions) {
-            if (entry.sock?.user) count++;
+            if (this._isSocketOpen(entry?.sock)) count++;
         }
         return count;
     }
@@ -201,8 +205,17 @@ class SessionManager {
      */
     async connectSession(sessionId) {
         const existing = this.sessions.get(sessionId);
-        if (existing?.sock?.user) {
+        if (this._isSocketOpen(existing?.sock)) {
             return existing.sock;
+        }
+        // If an old/stale socket object is present, fully close it before creating a new one.
+        if (existing?.sock) {
+            try {
+                if (existing.sock.onlineInterval) clearInterval(existing.sock.onlineInterval);
+                existing.sock.end(undefined);
+                if (existing.sock.ws && existing.sock.ws.readyState !== 3) existing.sock.ws.close();
+            } catch { }
+            this.sessions.delete(sessionId);
         }
         if (this.connectingSessions.has(sessionId)) {
             return this.connectingSessions.get(sessionId);
