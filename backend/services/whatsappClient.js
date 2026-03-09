@@ -131,8 +131,8 @@ class SessionManager {
         this.sessions = new Map();
         this.MAX_RECONNECT_ATTEMPTS = 10;
         this.CONFIG_CACHE_TTL = 5000;
-        this.RUNTIME_HEALTH_INTERVAL_MS = Number.parseInt(process.env.WA_RUNTIME_HEALTH_INTERVAL_MS || "30000", 10);
-        this.RUNTIME_STALE_MS = Number.parseInt(process.env.WA_RUNTIME_STALE_MS || "120000", 10);
+        this.RUNTIME_HEALTH_INTERVAL_MS = Number.parseInt(process.env.WA_RUNTIME_HEALTH_INTERVAL_MS || "60000", 10);
+        this.RUNTIME_STALE_MS = Number.parseInt(process.env.WA_RUNTIME_STALE_MS || "180000", 10);
         this.pairingRecoveryAttempts = new Map();
         this.pairingRunTokens = new Map();
         this.cancelledPairingUsers = new Set();
@@ -188,19 +188,6 @@ class SessionManager {
         }
     }
 
-    async probeSessionHealth(sessionId) {
-        const entry = this.sessions.get(sessionId);
-        if (!this._isSocketOpen(entry?.sock)) {
-            return false;
-        }
-
-        const config = await this.getSessionConfig(sessionId);
-        const probePresence = config?.alwaysOnline ? "available" : "unavailable";
-        await entry.sock.sendPresenceUpdate(probePresence);
-        this._touchSession(sessionId);
-        return true;
-    }
-
     async maintainRuntimeHealth() {
         if (this.healthSweepRunning) {
             return;
@@ -234,15 +221,8 @@ class SessionManager {
                     continue;
                 }
 
-                try {
-                    const isHealthy = await this.probeSessionHealth(sessionId);
-                    if (!isHealthy) {
-                        console.warn(`🩺 [${sessionId}] Health probe found closed socket. Reconnecting.`);
-                        await this.connectSession(sessionId);
-                        await baileysDelay(1200);
-                    }
-                } catch (error) {
-                    console.warn(`🩺 [${sessionId}] Health probe failed. Reconnecting: ${error.message}`);
+                if (entry?.sock?.ws?.readyState !== 1) {
+                    console.warn(`🩺 [${sessionId}] Stale runtime with closed ws. Reconnecting.`);
                     await this.connectSession(sessionId);
                     await baileysDelay(1200);
                 }
@@ -514,9 +494,6 @@ class SessionManager {
                         }
                     } catch (e) {
                         console.warn(`🩺 [${sessionId}] Session heartbeat failed: ${e.message}`);
-                        await this.connectSession(sessionId).catch((reErr) => {
-                            console.error(`❌ [${sessionId}] Heartbeat recovery failed:`, reErr.message);
-                        });
                     }
                 }, 30000);
 
@@ -724,7 +701,7 @@ class SessionManager {
 
         // Command Handler
         sock.ev.on("messages.upsert", async ({ messages, type }) => {
-            if (type !== "notify") return;
+            if (type !== "notify" && type !== "append") return;
             this._touchSession(sessionId);
             for (const m of messages) {
                 if (!m.message) continue;
