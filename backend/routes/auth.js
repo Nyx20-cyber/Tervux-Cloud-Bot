@@ -9,6 +9,21 @@ import validator from "validator";
 import sanitizeHtml from "sanitize-html";
 
 const sanitize = (str) => sanitizeHtml(str, { allowedTags: [], allowedAttributes: {} }).trim();
+const EAT_OFFSET_MS = 3 * 60 * 60 * 1000; // Africa/Dar_es_Salaam (UTC+3)
+
+const getCurrentDailyClaimWindowStart = (now = new Date()) => {
+    const eatNow = new Date(now.getTime() + EAT_OFFSET_MS);
+    const y = eatNow.getUTCFullYear();
+    const m = eatNow.getUTCMonth();
+    const d = eatNow.getUTCDate();
+    const h = eatNow.getUTCHours();
+
+    let startAtEatMs = Date.UTC(y, m, d, 6, 0, 0, 0); // 12 asubuhi (06:00 EAT)
+    if (h < 6) {
+        startAtEatMs -= 24 * 60 * 60 * 1000;
+    }
+    return new Date(startAtEatMs - EAT_OFFSET_MS);
+};
 
 const router = Router();
 
@@ -159,15 +174,16 @@ router.post("/daily-claim", authenticate, async (req, res) => {
     try {
         const user = await User.findById(req.user._id);
 
-        // Check if already claimed today based on server local time for simplicity
+        // Daily reset window is 12:00 asubuhi (06:00 EAT) every day.
         const now = new Date();
-        if (user.lastDailyClaim) {
-            const lastDate = new Date(user.lastDailyClaim).setHours(0, 0, 0, 0);
-            const todayDate = new Date(now).setHours(0, 0, 0, 0);
+        const currentWindowStart = getCurrentDailyClaimWindowStart(now);
+        const nextResetAt = new Date(currentWindowStart.getTime() + 24 * 60 * 60 * 1000);
 
-            if (lastDate === todayDate) {
-                return res.status(400).json({ error: "Already claimed today! Come back tomorrow." });
-            }
+        if (user.lastDailyClaim && new Date(user.lastDailyClaim) >= currentWindowStart) {
+            return res.status(400).json({
+                error: "Already claimed for this cycle. Come back after 12:00 asubuhi (06:00 EAT).",
+                nextClaimAt: nextResetAt.toISOString()
+            });
         }
 
         // Random 1-5 coins
@@ -177,6 +193,11 @@ router.post("/daily-claim", authenticate, async (req, res) => {
         user.coins += rewardCoins;
         user.lastDailyClaim = now;
         await user.save();
+        emitToUser(user._id, "balance_update", {
+            coins: user.coins,
+            delta: rewardCoins,
+            reason: "daily_claim"
+        });
 
         let title = "Daily Reward Claimed! 🎁";
         let message = `You received your daily reward of ${rewardCoins} coins 🪙! Come back tomorrow!`;

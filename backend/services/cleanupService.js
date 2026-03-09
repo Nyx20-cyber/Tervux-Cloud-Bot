@@ -2,6 +2,7 @@ import WhatsAppSession from "../models/WhatsAppSession.js";
 import User from "../models/User.js";
 import WhatsAppAuth from "../models/WhatsAppAuth.js";
 import { sessionManager } from "./whatsappService.js";
+import { emitToUser, emitUpdate } from "./socketService.js";
 
 /**
  * Comprehensive cleanup service for multi-tenant sessions
@@ -15,13 +16,106 @@ export async function runCleanup() {
     console.log("🧹 [Cleanup] Starting maintenance cycle...");
 
     try {
+        await healUnresponsiveLiveSessions();
         await cleanGhostSessions();
+        await cleanUndeployedSessions();
         await cleanStaleDisconnected();
         await cleanOrphanedMongoAuth();
         await cleanExpiredBots();
         console.log("✅ [Cleanup] Maintenance cycle complete.");
     } catch (error) {
         console.error("❌ [Cleanup] Maintenance failed:", error.message);
+    }
+}
+
+/**
+ * Undeployed linked sessions:
+ * If a session has no deployment (expiresAt = null) for over 24 hours, remove it automatically.
+ */
+async function cleanUndeployedSessions() {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const staleUndeployed = await WhatsAppSession.find({
+        expiresAt: null,
+        status: { $in: ["active", "paused", "disconnected"] },
+        createdAt: { $lt: cutoff }
+    }).select("_id userId status createdAt");
+
+    let removed = 0;
+    for (const session of staleUndeployed) {
+        const sessionId = session._id.toString();
+        const userId = session.userId?.toString?.() || String(session.userId);
+        const hasAuth = await WhatsAppAuth.exists({ sessionId, type: "creds" });
+
+        try {
+            if (hasAuth && !sessionManager.isConnected(sessionId)) {
+                await sessionManager.connectSession(sessionId);
+            }
+            await sessionManager.sendUndeployedSessionRemovalMessage(sessionId, { removedAt: new Date() });
+            await new Promise((r) => setTimeout(r, 1200));
+        } catch (e) {
+            console.warn(`   ⚠️ [Undeployed] Failed to send removal notice for ${sessionId}:`, e.message);
+        }
+
+        try {
+            await sessionManager.destroySession(sessionId);
+        } catch (e) {
+            console.warn(`   ⚠️ [Undeployed] Failed to destroy runtime session ${sessionId}:`, e.message);
+        }
+
+        try {
+            await WhatsAppAuth.deleteMany({ sessionId });
+        } catch (e) {
+            console.warn(`   ⚠️ [Undeployed] Failed to delete auth for ${sessionId}:`, e.message);
+        }
+
+        await WhatsAppSession.deleteOne({ _id: session._id });
+        emitToUser(userId, "session_deleted", {
+            sessionId,
+            reason: "undeployed_timeout"
+        });
+        emitUpdate("admin_session_deleted", {
+            sessionId,
+            reason: "undeployed_timeout"
+        });
+        removed += 1;
+    }
+
+    if (removed > 0) {
+        console.log(`   🧹 [Undeployed] Removed ${removed} undeployed session(s) older than 24h.`);
+    }
+}
+
+/**
+ * Self-heal runtime/live mismatch:
+ * If session is marked active/paused/disconnected (and not expired) but socket is not live,
+ * try reconnecting automatically.
+ */
+async function healUnresponsiveLiveSessions() {
+    const now = new Date();
+    const candidates = await WhatsAppSession.find({
+        status: { $in: ["active", "paused", "disconnected"] },
+        expiresAt: { $gt: now }
+    }).select("_id status expiresAt");
+
+    let healed = 0;
+    for (const session of candidates) {
+        const sid = session._id.toString();
+        if (sessionManager.isConnected(sid)) continue;
+
+        const hasAuth = await WhatsAppAuth.exists({ sessionId: sid, type: "creds" });
+        if (!hasAuth) continue;
+
+        try {
+            console.log(`   🩺 [Heal] Reconnecting stale session ${sid} (${session.status})...`);
+            await sessionManager.connectSession(sid);
+            healed++;
+        } catch (error) {
+            console.warn(`   ⚠️ [Heal] Reconnect failed for ${sid}: ${error.message}`);
+        }
+    }
+
+    if (healed > 0) {
+        console.log(`   ✅ [Heal] Reconnected ${healed} stale session(s).`);
     }
 }
 
@@ -33,25 +127,47 @@ async function cleanExpiredBots() {
 
     const expiredSessions = await WhatsAppSession.find({
         expiresAt: { $lt: now, $ne: null },
-        status: { $in: ["active", "paused"] }
+        status: { $in: ["active", "paused", "disconnected", "expired"] }
     });
 
     for (const session of expiredSessions) {
         console.log(`   ⏳ [Expired] Auto-deleting expired 30-day session ${session._id} (${session.phone || "unknown"})`);
+        const sessionId = session._id.toString();
+        const userId = session.userId?.toString?.() || String(session.userId);
+        const hasAuth = await WhatsAppAuth.exists({ sessionId, type: "creds" });
+
+        // Best effort: send final expiry message before session shutdown/deletion.
+        try {
+            if (hasAuth && !sessionManager.isConnected(sessionId)) {
+                await sessionManager.connectSession(sessionId);
+            }
+            await sessionManager.sendDeploymentExpiredMessage(sessionId, { expiredAt: session.expiresAt });
+            await new Promise((r) => setTimeout(r, 1200));
+        } catch (e) {
+            console.warn(`   ⚠️ [Expired] Failed to send final expiry message for ${sessionId}:`, e.message);
+        }
 
         try {
-            await sessionManager.destroySession(session._id.toString());
+            await sessionManager.destroySession(sessionId);
         } catch (e) {
             console.error(`   Failed to destroy session manager instance:`, e.message);
         }
 
         try {
-            await WhatsAppAuth.deleteMany({ sessionId: session._id.toString() });
+            await WhatsAppAuth.deleteMany({ sessionId });
         } catch (e) {
             console.error(`   Failed to delete auth records:`, e.message);
         }
 
         await WhatsAppSession.deleteOne({ _id: session._id });
+        emitToUser(userId, "session_deleted", {
+            sessionId,
+            reason: "expired"
+        });
+        emitUpdate("admin_session_deleted", {
+            sessionId,
+            reason: "expired"
+        });
     }
 
     if (expiredSessions.length > 0) {

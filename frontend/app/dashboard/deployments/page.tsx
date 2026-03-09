@@ -7,7 +7,6 @@ import { useSessionStore } from "@/store/useSessionStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { io } from "socket.io-client";
 import { Button } from "@/components/ui/button";
-import { differenceInDays } from "date-fns";
 import Link from "next/link";
 import { toast } from "sonner";
 import { api } from "@/store/useAuthStore";
@@ -35,8 +34,13 @@ export default function DeploymentsPage() {
         socket.on("session_update", (data: { sessionId: string; status: string; isLive?: boolean }) => {
             updateSessionLocally(data.sessionId, { status: data.status, isLive: data.isLive });
         });
+        socket.on("session_deleted", () => {
+            fetchSessions();
+        });
 
+        const refresh = setInterval(() => fetchSessions(), 60_000);
         return () => {
+            clearInterval(refresh);
             socket.disconnect();
         };
     }, [fetchSessions, updateSessionLocally, token]);
@@ -96,14 +100,16 @@ function SessionCard({ session }: { session: any }) {
     const { updateSessionLocally, fetchSessions, updateSessionStatus, deploySession } = useSessionStore();
     const { user, updateCoins } = useAuthStore();
     const router = useRouter();
+    const [nowMs, setNowMs] = useState(Date.now());
 
     const [isDeploying, setIsDeploying] = useState(false);
     const isPaused = session.status === "paused";
     const isActive = session.status === "active";
     const isError = ["disconnected", "expired", "failed"].includes(session.status);
     const isDeployed = !!session.expiresAt;
-    const remainingDays = session.expiresAt ? differenceInDays(new Date(session.expiresAt), new Date()) : null;
-    const isSubExpired = !isDeployed || (remainingDays !== null && remainingDays < 0);
+    const remainingMs = session.expiresAt ? (new Date(session.expiresAt).getTime() - nowMs) : null;
+    const remainingDays = remainingMs !== null ? Math.ceil(remainingMs / (1000 * 60 * 60 * 24)) : null;
+    const isSubExpired = !isDeployed || (remainingMs !== null && remainingMs <= 0);
 
     const [isDeployDialogOpen, setIsDeployDialogOpen] = useState(false);
     const [isPauseDialogOpen, setIsPauseDialogOpen] = useState(false);
@@ -165,6 +171,11 @@ function SessionCard({ session }: { session: any }) {
             setIsActioning(false);
         }
     };
+
+    useEffect(() => {
+        const timer = setInterval(() => setNowMs(Date.now()), 60_000);
+        return () => clearInterval(timer);
+    }, []);
 
     return (
         <div className={`p-4 sm:p-5 rounded-xl sm:rounded-2xl border ${isActive ? 'border-primary/30 bg-primary/5' : isError ? 'border-destructive/30 bg-destructive/5' : isPaused ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-white/5'} flex flex-col gap-3 sm:gap-4 backdrop-blur-md transition-all`}>

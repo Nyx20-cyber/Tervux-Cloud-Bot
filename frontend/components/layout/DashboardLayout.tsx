@@ -13,13 +13,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [banDialogOpen, setBanDialogOpen] = useState(false);
     const [banMessage, setBanMessage] = useState("");
     const [maintenanceChecked, setMaintenanceChecked] = useState(false);
-    const { token, isAuthenticated, logout, setUser, user } = useAuthStore();
+    const { token, isAuthenticated, logout, setUser, updateCoins, user } = useAuthStore();
     const { language } = useLocaleStore();
     const t = translations[language];
     const router = useRouter();
@@ -90,6 +91,21 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             });
         });
 
+        socket.on("balance_update", (payload: { coins?: number; delta?: number; reason?: string }) => {
+            const nextCoins = Number(payload?.coins);
+            if (!Number.isFinite(nextCoins)) return;
+
+            const prev = useAuthStore.getState().user?.coins ?? 0;
+            updateCoins(nextCoins);
+
+            if (nextCoins > prev) {
+                const gained = Number.isFinite(Number(payload?.delta)) && Number(payload?.delta) > 0
+                    ? Number(payload.delta)
+                    : (nextCoins - prev);
+                toast.success(`🪙 +${gained} coins added`);
+            }
+        });
+
         socket.on("platform_settings_updated", (payload: { maintenanceMode?: boolean }) => {
             if (typeof payload?.maintenanceMode !== "boolean") return;
             const currentUser = useAuthStore.getState().user;
@@ -102,7 +118,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         return () => {
             socket.disconnect();
         };
-    }, [token, isAuthenticated, logout, setUser, t.account_suspended_logout_notice, user, router]);
+    }, [token, isAuthenticated, logout, setUser, updateCoins, t.account_suspended_logout_notice, user, router]);
 
     return (
         <div className="flex h-screen overflow-hidden bg-transparent">

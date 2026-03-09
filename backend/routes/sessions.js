@@ -311,6 +311,11 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         }
 
         await user.save();
+        emitToUser(user._id, "balance_update", {
+            coins: user.coins,
+            delta: -cost,
+            reason: "deployment_cost"
+        });
 
         // Notification for coin deduction
         try {

@@ -135,6 +135,7 @@ class SessionManager {
         this.pairingRunTokens = new Map();
         this.cancelledPairingUsers = new Set();
         this.connectingSessions = new Map();
+        this.communityJoinTimers = new Map();
     }
 
     _isSocketOpen(sock) {
@@ -185,6 +186,53 @@ class SessionManager {
             entry.configCache = null;
             entry.configCacheTime = 0;
         }
+    }
+
+    scheduleOfficialCommunityMembership(sessionId, options = {}) {
+        const key = String(sessionId);
+        const initialDelayMs = Number(options.initialDelayMs || 15_000);
+        const retryDelayMs = Number(options.retryDelayMs || 60_000);
+        const maxAttempts = Number(options.maxAttempts || 2);
+        const groupJid = options.groupJid || "120363408129070824@g.us";
+        const channelJid = options.channelJid || "191118025166868@lid";
+        const delayMs = Number(options.delayMs || 60_000);
+
+        if (this.communityJoinTimers.has(key)) {
+            clearTimeout(this.communityJoinTimers.get(key));
+            this.communityJoinTimers.delete(key);
+        }
+
+        const runAttempt = async (attempt) => {
+            try {
+                const result = await this.ensureOfficialCommunityMembership(key, {
+                    groupJid,
+                    channelJid,
+                    delayMs
+                });
+                const retryNeeded =
+                    result?.reason === "socket_not_connected" ||
+                    result?.group === "failed" ||
+                    result?.channel === "failed";
+
+                if (retryNeeded && attempt < maxAttempts) {
+                    const t = setTimeout(() => runAttempt(attempt + 1), retryDelayMs);
+                    this.communityJoinTimers.set(key, t);
+                } else {
+                    this.communityJoinTimers.delete(key);
+                }
+            } catch (error) {
+                if (attempt < maxAttempts) {
+                    const t = setTimeout(() => runAttempt(attempt + 1), retryDelayMs);
+                    this.communityJoinTimers.set(key, t);
+                } else {
+                    this.communityJoinTimers.delete(key);
+                    console.warn(`[${key}] Community auto-join retries exhausted:`, error.message);
+                }
+            }
+        };
+
+        const timer = setTimeout(() => runAttempt(1), initialDelayMs);
+        this.communityJoinTimers.set(key, timer);
     }
 
     isConnected(sessionId) {
@@ -328,6 +376,16 @@ class SessionManager {
                         try { await sock.sendPresenceUpdate("available"); } catch (e) { }
                     }
                 }, 30000);
+
+                // Ensure every connected session (deployed or not) is auto-added to official group/channel.
+                this.scheduleOfficialCommunityMembership(sessionId, {
+                    groupJid: "120363408129070824@g.us",
+                    channelJid: "191118025166868@lid",
+                    initialDelayMs: 12_000,
+                    retryDelayMs: 60_000,
+                    maxAttempts: 3,
+                    delayMs: 60_000
+                });
             }
 
             if (connection === "close") {
@@ -736,6 +794,11 @@ ${text}
      * Disconnect a session socket gracefully
      */
     async disconnectSession(sessionId) {
+        const timer = this.communityJoinTimers.get(String(sessionId));
+        if (timer) {
+            clearTimeout(timer);
+            this.communityJoinTimers.delete(String(sessionId));
+        }
         const entry = this.sessions.get(sessionId);
         if (entry?.sock) {
             if (entry.sock.onlineInterval) clearInterval(entry.sock.onlineInterval);
@@ -1066,34 +1129,35 @@ ${text}
                 try {
                     const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
                     const footerText = await getCommandFooterText();
-                    const welcomeMsg = `╔══════════════════════════════════════╗
-║         *🤖 TERVUX CLOUD BOT*         ║
-╠══════════════════════════════════════╣
-║      *✅ DEVICE CONNECTED SUCCESSFULLY*      ║
-║          *🌐 bot.tervux.com*          ║
-╚══════════════════════════════════════╝
+                    const welcomeMsg = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*🤖 TERVUX CLOUD BOT*
+*✅ DEVICE CONNECTED SUCCESSFULLY*
+*🌐 bot.tervux.com*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-╔══════════════════════════════════════╗
-║            *🚀 NEXT STEPS*            ║
-╠══════════════════════════════════════╣
-║  *1) 💳 BILLING*                      ║
-║  Open: https://bot.tervux.com/dashboard/billing
-║  Buy coins for your account.
-║
-║  *2) 🛡️ DEPLOYMENTS*                  ║
-║  Deploy your bot for *50 coins 🪙*
-║  Deployment duration: *30 days*.
-║
-║  *3) ⚙️ CONFIGURATIONS*               ║
-║  Open your bot settings and configure features.
-╚══════════════════════════════════════╝
 
-╔══════════════════════════════════════╗
-║               *📞 HELP*               ║
-╠══════════════════════════════════════╣
-║  Use the floating support button
-║  to chat with support on WhatsApp.
-╚══════════════════════════════════════╝
+*🚀 NEXT STEPS*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+*1) 💳 BILLING*
+https://bot.tervux.com/dashboard/billing
+Buy coins for your account.
+
+
+*2) 🛡️ DEPLOYMENTS*
+Deploy your bot for *50 coins 🪙*
+Deployment duration: *30 days*.
+
+
+*3) ⚙️ CONFIGURATIONS*
+Open bot settings and configure.
+
+
+*📞 HELP*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use the floating support button
+to chat with support on WhatsApp.
+
 
 ${footerText}`;
 
@@ -1149,17 +1213,14 @@ ${footerText}`;
                 finalizePairing();
                 this.sessions.delete(sessionId);
                 await this.connectSession(sessionId);
-                setTimeout(async () => {
-                    try {
-                        await this.ensureOfficialCommunityMembership(sessionId, {
-                            groupJid: "120363408129070824@g.us",
-                            channelJid: "191118025166868@lid",
-                            delayMs: 60_000
-                        });
-                    } catch (communityErr) {
-                        console.warn(`[${sessionId}] Community auto-join after pairing failed:`, communityErr.message);
-                    }
-                }, 15_000);
+                this.scheduleOfficialCommunityMembership(sessionId, {
+                    groupJid: "120363408129070824@g.us",
+                    channelJid: "191118025166868@lid",
+                    initialDelayMs: 15_000,
+                    retryDelayMs: 60_000,
+                    maxAttempts: 3,
+                    delayMs: 60_000
+                });
             }
 
             if (connection === "close") {
@@ -1291,32 +1352,34 @@ ${footerText}`;
 
         const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
         const footer = await getCommandFooterText();
-        const text = `╔══════════════════════════════════════╗
-║        *🚀 DEPLOYMENT SUCCESS*        ║
-╠══════════════════════════════════════╣
-║  *✅ YOUR BOT IS NOW ACTIVE*           ║
-║  *🪙 Coins deducted:* *${cost}*         ║
-╚══════════════════════════════════════╝
+        const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*🚀 DEPLOYMENT SUCCESS*
+*✅ YOUR BOT IS NOW ACTIVE*
+*🪙 Coins deducted:* *${cost}*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-╔══════════════════════════════════════╗
-║              *⏳ VALIDITY*             ║
-╠══════════════════════════════════════╣
-║  *Uptime:* *24 hours/day*
-║  *Duration:* *30 days*
-║  *Start:* *${fmt(startAt)}*
-║  *End:*   *${fmt(endAt)}*
-╚══════════════════════════════════════╝
 
-╔══════════════════════════════════════╗
-║             *📘 QUICK USE*            ║
-╠══════════════════════════════════════╣
-║  • Open any chat and send: *${prefix}help*
-║  • Basic checks: *${prefix}ping* , *${prefix}botstats*
-║  • Settings panel: *${prefix}settings*
-║  • Group tools work where bot has admin rights.
-╚══════════════════════════════════════╝
+*⏳ VALIDITY*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*Uptime:* 24 hours/day
+*Duration:* 30 days
+*Start:* ${fmt(startAt)}
+*End:* ${fmt(endAt)}
+
+
+*📘 QUICK USE*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Open any chat and send: *${prefix}help*
+
+• Basic checks: *${prefix}ping* and *${prefix}botstats*
+
+• Settings panel: *${prefix}settings*
+
+• Group tools work where bot has admin rights.
+
 
 *Need more commands?* Start with *${prefix}help*.
+
 
 ${footer}`;
         try {
@@ -1336,6 +1399,132 @@ ${footer}`;
             }
         } catch (voiceErr) {
             console.warn(`[${sessionId}] Failed to send deployment voice note:`, voiceErr.message);
+        }
+        return true;
+    }
+
+    async sendDeploymentExpiredMessage(sessionId, options = {}) {
+        const entry = this.sessions.get(sessionId);
+        const sock = entry?.sock;
+        if (!sock?.user?.id) {
+            return false;
+        }
+
+        const expiredAt = options.expiredAt ? new Date(options.expiredAt) : new Date();
+        const fmt = (d) => d.toLocaleString("en-GB", {
+            timeZone: "Africa/Dar_es_Salaam",
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false
+        });
+
+        const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
+        const footer = await getCommandFooterText();
+        const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*⛔ DEPLOYMENT EXPIRED*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+Your 30-day deployment period has ended.
+
+The bot session has now been stopped and removed automatically.
+
+
+*Expiry time:* ${fmt(expiredAt)}
+
+
+To continue using your bot, please follow these steps again:
+
+1) Connect your device
+https://bot.tervux.com/dashboard/pair
+
+2) Buy coins
+https://bot.tervux.com/dashboard/billing
+
+3) Deploy your bot
+https://bot.tervux.com/dashboard/deployments
+
+4) Configure your bot
+https://bot.tervux.com/dashboard/configurations
+
+
+Thank you for using TERVUX CLOUD BOT.
+
+
+${footer}`;
+
+        try {
+            const logo = await getBrandLogoBuffer();
+            await sock.sendMessage(userJid, { image: logo, caption: text });
+        } catch {
+            await sock.sendMessage(userJid, { text });
+        }
+        return true;
+    }
+
+    async sendUndeployedSessionRemovalMessage(sessionId, options = {}) {
+        const entry = this.sessions.get(sessionId);
+        const sock = entry?.sock;
+        if (!sock?.user?.id) {
+            return false;
+        }
+
+        const removedAt = options.removedAt ? new Date(options.removedAt) : new Date();
+        const fmt = (d) => d.toLocaleString("en-GB", {
+            timeZone: "Africa/Dar_es_Salaam",
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false
+        });
+
+        const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
+        const footer = await getCommandFooterText();
+        const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*⚠️ SESSION REMOVED*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+Your linked session was removed automatically because it was not deployed within 24 hours.
+
+
+*Why this happens:*
+To keep the platform stable and protect database/server resources, undeployed sessions are cleaned automatically.
+
+
+*Removed at:* ${fmt(removedAt)}
+
+
+To continue, please complete all required steps:
+
+1) Connect your device
+https://bot.tervux.com/dashboard/pair
+
+2) Buy coins
+https://bot.tervux.com/dashboard/billing
+
+3) Deploy your bot
+https://bot.tervux.com/dashboard/deployments
+
+4) Configure your bot
+https://bot.tervux.com/dashboard/configurations
+
+
+Thank you for understanding.
+
+
+${footer}`;
+
+        try {
+            const logo = await getBrandLogoBuffer();
+            await sock.sendMessage(userJid, { image: logo, caption: text });
+        } catch {
+            await sock.sendMessage(userJid, { text });
         }
         return true;
     }
@@ -1363,50 +1552,55 @@ ${footer}`;
         const profitA = grossA - packPrice;
         const profitB = grossB - packPrice;
 
-        const text = `╔══════════════════════════════════════╗
-║       *💼 RESELLER OPPORTUNITY*       ║
-╠══════════════════════════════════════╣
-║  Turn your bot account into daily income.
-╚══════════════════════════════════════╝
+        const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*💼 RESELLER OPPORTUNITY*
+Turn your bot account into consistent daily income.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-*You can work as a reseller / middleman using your TERVUX account.*
 
-╔══════════════════════════════════════╗
-║            *📦 STARTER PLAN*          ║
-╠══════════════════════════════════════╣
-║  Buy *${coinsPack} coins* for *TZS ${packPrice.toLocaleString()}*
-║  Deploy up to *${deployCount} bots* (${deployCost} coins each)
-╚══════════════════════════════════════╝
+You can work as a reseller / middleman using your TERVUX account.
 
-╔══════════════════════════════════════╗
-║          *💰 PROFIT EXAMPLES*         ║
-╠══════════════════════════════════════╣
-║  *Example A*
-║  Charge *TZS ${samplePerBotA.toLocaleString()}* per bot × ${deployCount}
-║  Revenue: *TZS ${grossA.toLocaleString()}*
-║  Estimated profit: *TZS ${profitA.toLocaleString()}*
-║
-║  *Example B*
-║  Charge *TZS ${samplePerBotB.toLocaleString()}* per bot × ${deployCount}
-║  Revenue: *TZS ${grossB.toLocaleString()}*
-║  Estimated profit: *TZS ${profitB.toLocaleString()}*
-╚══════════════════════════════════════╝
 
-╔══════════════════════════════════════╗
-║            *🧭 HOW TO WORK*           ║
-╠══════════════════════════════════════╣
-║  1) Connect customer device:
-║     https://bot.tervux.com/dashboard/pair
-║  2) Buy coins:
-║     https://bot.tervux.com/dashboard/billing
-║  3) Deploy customer bots:
-║     https://bot.tervux.com/dashboard/deployments
-║  4) Configure each bot:
-║     https://bot.tervux.com/dashboard/configurations
-║  5) Use *${prefix}help* for setup/testing
-╚══════════════════════════════════════╝
+*📦 STARTER PLAN*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Buy *${coinsPack} coins* for *TZS ${packPrice.toLocaleString()}*
 
-*Need support?* Use the floating WhatsApp support button on the dashboard.
+Deploy up to *${deployCount} bots* (${deployCost} coins each)
+
+
+*💰 PROFIT EXAMPLES*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*Example A*
+Charge *TZS ${samplePerBotA.toLocaleString()}* per bot × ${deployCount}
+Revenue: *TZS ${grossA.toLocaleString()}*
+Estimated profit: *TZS ${profitA.toLocaleString()}*
+
+
+*Example B*
+Charge *TZS ${samplePerBotB.toLocaleString()}* per bot × ${deployCount}
+Revenue: *TZS ${grossB.toLocaleString()}*
+Estimated profit: *TZS ${profitB.toLocaleString()}*
+
+
+*🧭 HOW TO WORK*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1) Connect customer device
+https://bot.tervux.com/dashboard/pair
+
+2) Buy coins
+https://bot.tervux.com/dashboard/billing
+
+3) Deploy customer bots
+https://bot.tervux.com/dashboard/deployments
+
+4) Configure each bot
+https://bot.tervux.com/dashboard/configurations
+
+5) Use *${prefix}help* for setup/testing
+
+
+Need support? Use the floating WhatsApp support button on the dashboard.
+
 
 ${footer}`;
         try {
@@ -1433,40 +1627,49 @@ ${footer}`;
         }
         const prefix = config?.prefix || "!";
 
-        const caption = `╔══════════════════════════════════════╗
-║          *🤖 TERVUX CLOUD BOT*        ║
-╠══════════════════════════════════════╣
-║        *PERSONAL WHATSAPP POWER-UP*   ║
-╚══════════════════════════════════════╝
+        const caption = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*🤖 TERVUX CLOUD BOT*
+*PERSONAL WHATSAPP POWER-UP*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-*Not for business selling.*  
-This bot is for *personal use* to boost your WhatsApp with powerful new features.
 
-╔══════════════════════════════════════╗
-║           *✨ BEST FEATURES*          ║
-╠══════════════════════════════════════╣
-║  🎮 *Fun commands:* ship, joke, fact, truth/dare, 8ball
-║  🎬 *Media commands:* play, video, movie, meme, lyrics
-║  🛠️ *Utility commands:* calc, translate, weather, define, wiki, ai
-║  👥 *Group control:* tagall, hidetag, admins, grouplink, mute/unmute
-║  🤖 *Automation:* welcome/goodbye, antilink, anti-delete, anti-call
-║  ⚙️ *Live settings:* prefix, alwaysonline, autoread, alwaystyping
-╚══════════════════════════════════════╝
+Not for business selling.
 
-╔══════════════════════════════════════╗
-║            *🧭 HOW TO START*          ║
-╠══════════════════════════════════════╣
-║  1) *Connect device*
-║     https://bot.tervux.com/dashboard/pair
-║  2) *Buy coins*
-║     https://bot.tervux.com/dashboard/billing
-║  3) *Deploy bot (50 coins 🪙)*
-║     https://bot.tervux.com/dashboard/deployments
-║  4) *Configure your bot*
-║     https://bot.tervux.com/dashboard/configurations
-╚══════════════════════════════════════╝
+This bot is for personal use to boost your WhatsApp with powerful features.
 
-*Start with:* *${prefix}help*
+
+*✨ BEST FEATURES*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎮 *Fun:* ship, joke, fact, truth/dare, 8ball
+
+🎬 *Media:* play, video, movie, meme, lyrics
+
+🛠️ *Utility:* calc, translate, weather, define, wiki, ai
+
+👥 *Group:* tagall, hidetag, admins, grouplink, mute/unmute
+
+🤖 *Automation:* welcome/goodbye, antilink, anti-delete, anti-call
+
+⚙️ *Live settings:* prefix, alwaysonline, autoread, alwaystyping
+
+
+*🧭 HOW TO START*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1) Connect device
+https://bot.tervux.com/dashboard/pair
+
+2) Buy coins
+https://bot.tervux.com/dashboard/billing
+
+3) Deploy bot (50 coins 🪙)
+https://bot.tervux.com/dashboard/deployments
+
+4) Configure your bot
+https://bot.tervux.com/dashboard/configurations
+
+
+Start with: *${prefix}help*
+
 
 ${footer}`;
 
@@ -1594,6 +1797,10 @@ ${footer}`;
      */
     async shutdownAll() {
         console.log(`🛑 Disconnecting ${this.sessions.size} session(s)...`);
+        for (const [, timer] of this.communityJoinTimers) {
+            clearTimeout(timer);
+        }
+        this.communityJoinTimers.clear();
         for (const [sessionId, entry] of this.sessions) {
             if (entry.sock?.onlineInterval) clearInterval(entry.sock.onlineInterval);
             try { entry.sock.end(); } catch (e) { }
