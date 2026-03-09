@@ -131,15 +131,125 @@ class SessionManager {
         this.sessions = new Map();
         this.MAX_RECONNECT_ATTEMPTS = 10;
         this.CONFIG_CACHE_TTL = 5000;
+        this.RUNTIME_HEALTH_INTERVAL_MS = Number.parseInt(process.env.WA_RUNTIME_HEALTH_INTERVAL_MS || "30000", 10);
+        this.RUNTIME_STALE_MS = Number.parseInt(process.env.WA_RUNTIME_STALE_MS || "90000", 10);
         this.pairingRecoveryAttempts = new Map();
         this.pairingRunTokens = new Map();
         this.cancelledPairingUsers = new Set();
         this.connectingSessions = new Map();
         this.communityJoinTimers = new Map();
+        this.healthMonitor = null;
+        this.healthWarmupTimer = null;
+        this.healthSweepRunning = false;
     }
 
     _isSocketOpen(sock) {
         return !!(sock?.user && sock?.ws?.readyState === 1);
+    }
+
+    _touchSession(sessionId) {
+        const entry = this.sessions.get(sessionId);
+        if (entry) {
+            entry.lastActivityAt = Date.now();
+        }
+    }
+
+    startHealthMonitor() {
+        if (this.healthMonitor) {
+            clearInterval(this.healthMonitor);
+        }
+        if (this.healthWarmupTimer) {
+            clearTimeout(this.healthWarmupTimer);
+        }
+
+        this.healthMonitor = setInterval(() => {
+            this.maintainRuntimeHealth().catch((error) => {
+                console.error("❌ [WA Health] Runtime health sweep failed:", error.message);
+            });
+        }, this.RUNTIME_HEALTH_INTERVAL_MS);
+
+        this.healthWarmupTimer = setTimeout(() => {
+            this.maintainRuntimeHealth().catch((error) => {
+                console.error("❌ [WA Health] Initial runtime health sweep failed:", error.message);
+            });
+        }, 15_000);
+
+        console.log(`🩺 WhatsApp runtime health monitor scheduled every ${Math.round(this.RUNTIME_HEALTH_INTERVAL_MS / 1000)}s.`);
+    }
+
+    stopHealthMonitor() {
+        if (this.healthMonitor) {
+            clearInterval(this.healthMonitor);
+            this.healthMonitor = null;
+        }
+        if (this.healthWarmupTimer) {
+            clearTimeout(this.healthWarmupTimer);
+            this.healthWarmupTimer = null;
+        }
+    }
+
+    async probeSessionHealth(sessionId) {
+        const entry = this.sessions.get(sessionId);
+        if (!this._isSocketOpen(entry?.sock)) {
+            return false;
+        }
+
+        const config = await this.getSessionConfig(sessionId);
+        const probePresence = config?.alwaysOnline ? "available" : "unavailable";
+        await entry.sock.sendPresenceUpdate(probePresence);
+        this._touchSession(sessionId);
+        return true;
+    }
+
+    async maintainRuntimeHealth() {
+        if (this.healthSweepRunning) {
+            return;
+        }
+
+        this.healthSweepRunning = true;
+        try {
+            const now = new Date();
+            const runtimeCandidates = await WhatsAppSession.find({
+                status: { $in: ["active", "paused", "disconnected"] },
+                expiresAt: { $gt: now }
+            }).select("_id status userId");
+
+            for (const session of runtimeCandidates) {
+                const sessionId = session._id.toString();
+                const hasAuth = await WhatsAppAuth.exists({ sessionId, type: "creds" });
+                if (!hasAuth) {
+                    continue;
+                }
+
+                if (!this.isConnected(sessionId)) {
+                    console.warn(`🩺 [${sessionId}] Runtime health reconnect (${session.status}).`);
+                    await this.connectSession(sessionId);
+                    await baileysDelay(1200);
+                    continue;
+                }
+
+                const entry = this.sessions.get(sessionId);
+                const lastActivityAt = entry?.lastActivityAt || 0;
+                if (!lastActivityAt || Date.now() - lastActivityAt < this.RUNTIME_STALE_MS) {
+                    continue;
+                }
+
+                try {
+                    const isHealthy = await this.probeSessionHealth(sessionId);
+                    if (!isHealthy) {
+                        console.warn(`🩺 [${sessionId}] Health probe found closed socket. Reconnecting.`);
+                        await this.connectSession(sessionId);
+                        await baileysDelay(1200);
+                    }
+                } catch (error) {
+                    console.warn(`🩺 [${sessionId}] Health probe failed. Reconnecting: ${error.message}`);
+                    await this.connectSession(sessionId);
+                    await baileysDelay(1200);
+                }
+            }
+        } finally {
+            this.healthSweepRunning = false;
+        }
     }
 
     /**
@@ -307,6 +417,16 @@ class SessionManager {
         // Auto reactions
         addAutoReaction(sock);
 
+        if (typeof sock.ws?.on === "function") {
+            sock.ws.on("open", () => this._touchSession(sessionId));
+            sock.ws.on("close", () => this._touchSession(sessionId));
+            sock.ws.on("error", (error) => {
+                console.warn(`🩺 [${sessionId}] Low-level websocket error: ${error.message}`);
+            });
+            sock.ws.on("ping", () => this._touchSession(sessionId));
+            sock.ws.on("pong", () => this._touchSession(sessionId));
+        }
+
         // Preserve reconnect attempt counter across reconnect cycles until a successful open.
         const previousEntry = this.sessions.get(sessionId);
         const previousReconnectAttempts = previousEntry?.reconnectAttempts || 0;
@@ -317,11 +437,13 @@ class SessionManager {
             reconnectAttempts: previousReconnectAttempts,
             configCache: null,
             configCacheTime: 0,
-            messageCache: new Map()
+            messageCache: new Map(),
+            lastActivityAt: Date.now()
         });
 
         // Save creds on update
         sock.ev.on("creds.update", async () => {
+            this._touchSession(sessionId);
             await saveCreds();
         });
 
@@ -329,6 +451,7 @@ class SessionManager {
         sock.ev.on("connection.update", async (update) => {
             const { connection, lastDisconnect } = update;
             const entry = this.sessions.get(sessionId);
+            this._touchSession(sessionId);
 
             if (connection === "connecting") {
                 console.log(`🔌 [${sessionId}] Connecting...`);
@@ -371,9 +494,26 @@ class SessionManager {
                 // Always Online heartbeat
                 if (sock.onlineInterval) clearInterval(sock.onlineInterval);
                 sock.onlineInterval = setInterval(async () => {
-                    const config = await this.getSessionConfig(sessionId);
-                    if (config?.alwaysOnline && sock.ws?.readyState === 1) {
-                        try { await sock.sendPresenceUpdate("available"); } catch (e) { }
+                    const currentEntry = this.sessions.get(sessionId);
+                    if (currentEntry?.sock !== sock) {
+                        clearInterval(sock.onlineInterval);
+                        return;
+                    }
+
+                    try {
+                        const config = await this.getSessionConfig(sessionId);
+                        if (sock.ws?.readyState !== 1) {
+                            throw new Error("socket_not_open");
+                        }
+
+                        const probePresence = config?.alwaysOnline ? "available" : "unavailable";
+                        await sock.sendPresenceUpdate(probePresence);
+                        this._touchSession(sessionId);
+                    } catch (e) {
+                        console.warn(`🩺 [${sessionId}] Session heartbeat failed: ${e.message}`);
+                        await this.connectSession(sessionId).catch((reErr) => {
+                            console.error(`❌ [${sessionId}] Heartbeat recovery failed:`, reErr.message);
+                        });
                     }
                 }, 30000);
 
@@ -467,6 +607,7 @@ class SessionManager {
 
         // Anti-Call
         sock.ev.on("call", async (node) => {
+            this._touchSession(sessionId);
             const config = await this.getSessionConfig(sessionId);
             if (!config?.antiCall) return;
             for (const call of node) {
@@ -483,11 +624,13 @@ class SessionManager {
 
         // Group events
         sock.ev.on("group-participants.update", async (update) => {
+            this._touchSession(sessionId);
             await handleGroupParticipantsUpdate(sock, update);
         });
 
         // Status auto-actions
         sock.ev.on("messages.upsert", async ({ messages }) => {
+            this._touchSession(sessionId);
             for (const m of messages) {
                 if (m.key.remoteJid === "status@broadcast" && !m.key.fromMe) {
                     if (m.message?.protocolMessage || m.message?.reactionMessage) continue;
@@ -510,6 +653,7 @@ class SessionManager {
         sock.ev.on("messages.upsert", async ({ messages }) => {
             const entry = this.sessions.get(sessionId);
             if (!entry) return;
+            this._touchSession(sessionId);
             for (const m of messages) {
                 if (!m.message || m.message.protocolMessage || m.message.reactionMessage || m.message.pollUpdateMessage) continue;
                 const msgType = Object.keys(m.message)[0];
@@ -531,6 +675,7 @@ class SessionManager {
 
         // Anti-Delete restore
         sock.ev.on("messages.update", async (updates) => {
+            this._touchSession(sessionId);
             const config = await this.getSessionConfig(sessionId);
             const entry = this.sessions.get(sessionId);
             if (!entry) return;
@@ -577,6 +722,7 @@ class SessionManager {
         // Command Handler
         sock.ev.on("messages.upsert", async ({ messages, type }) => {
             if (type !== "notify") return;
+            this._touchSession(sessionId);
             for (const m of messages) {
                 if (!m.message) continue;
 
@@ -1797,6 +1943,7 @@ ${footer}`;
      */
     async shutdownAll() {
         console.log(`🛑 Disconnecting ${this.sessions.size} session(s)...`);
+        this.stopHealthMonitor();
         for (const [, timer] of this.communityJoinTimers) {
             clearTimeout(timer);
         }

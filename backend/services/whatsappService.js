@@ -10,6 +10,7 @@ export const sessionManager = new SessionManager();
 export async function initWhatsAppService() {
     console.log("🔄 Initializing WhatsApp Service (Multi-Tenant)...");
     await sessionManager.reconnectAll();
+    sessionManager.startHealthMonitor();
     console.log("✅ WhatsApp Service initialized.");
 }
 
