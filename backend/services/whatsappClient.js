@@ -147,7 +147,7 @@ class SessionManager {
     }
 
     _isSocketOpen(sock) {
-        return !!(sock?.user && sock?.ws?.readyState === 1);
+        return !!(sock?.ws?.readyState === 1);
     }
 
     _touchSession(sessionId) {
@@ -306,6 +306,12 @@ class SessionManager {
 
                 const existing = this.sessions.get(sessionId);
                 if (this._isSocketConnecting(existing) || this.reconnectTimers.has(sessionId)) {
+                    continue;
+                }
+
+                const wsState = existing?.sock?.ws?.readyState;
+                if (wsState === 0 || wsState === 2) {
+                    // Connecting/closing states are transitional; let them settle.
                     continue;
                 }
 
@@ -530,7 +536,8 @@ class SessionManager {
             messageCache: new Map(),
             processedMessageIds: new Map(),
             lastActivityAt: Date.now(),
-            connectStartedAt: Date.now()
+            connectStartedAt: Date.now(),
+            heartbeatFailures: 0
         });
 
         // Save creds on update
@@ -553,6 +560,7 @@ class SessionManager {
                 console.log(`✅ [${sessionId}] Connected!`);
                 if (entry) entry.reconnectAttempts = 0;
                 if (entry) entry.connectStartedAt = 0;
+                if (entry) entry.heartbeatFailures = 0;
                 this._resetReconnectState(sessionId);
                 try {
                     await saveCreds();
@@ -597,8 +605,15 @@ class SessionManager {
                     try {
                         const config = await this.getSessionConfig(sessionId);
                         if (sock.ws?.readyState !== 1) {
-                            console.warn(`🩺 [${sessionId}] Heartbeat noticed closed socket. Reconnecting.`);
-                            this._scheduleReconnect(sessionId);
+                            if (currentEntry) {
+                                currentEntry.heartbeatFailures = (currentEntry.heartbeatFailures || 0) + 1;
+                            }
+                            const failures = currentEntry?.heartbeatFailures || 0;
+                            if (failures >= 3) {
+                                console.warn(`🩺 [${sessionId}] Heartbeat closed-socket threshold hit (${failures}). Reconnecting.`);
+                                if (currentEntry) currentEntry.heartbeatFailures = 0;
+                                this._scheduleReconnect(sessionId);
+                            }
                             return;
                         }
 
@@ -606,8 +621,17 @@ class SessionManager {
                             await sock.sendPresenceUpdate("available");
                             this._touchSession(sessionId);
                         }
+                        if (currentEntry) currentEntry.heartbeatFailures = 0;
                     } catch (e) {
-                        console.warn(`🩺 [${sessionId}] Session heartbeat failed: ${e.message}`);
+                        if (currentEntry) {
+                            currentEntry.heartbeatFailures = (currentEntry.heartbeatFailures || 0) + 1;
+                        }
+                        const failures = currentEntry?.heartbeatFailures || 0;
+                        console.warn(`🩺 [${sessionId}] Session heartbeat failed (${failures}): ${e.message}`);
+                        if (failures >= 3) {
+                            if (currentEntry) currentEntry.heartbeatFailures = 0;
+                            this._scheduleReconnect(sessionId);
+                        }
                     }
                 }, 30000);
 
