@@ -133,11 +133,14 @@ class SessionManager {
         this.CONFIG_CACHE_TTL = 5000;
         this.RUNTIME_HEALTH_INTERVAL_MS = Number.parseInt(process.env.WA_RUNTIME_HEALTH_INTERVAL_MS || "60000", 10);
         this.RUNTIME_STALE_MS = Number.parseInt(process.env.WA_RUNTIME_STALE_MS || "180000", 10);
+        this.SOCKET_CONNECT_GRACE_MS = Number.parseInt(process.env.WA_SOCKET_CONNECT_GRACE_MS || "45000", 10);
         this.pairingRecoveryAttempts = new Map();
         this.pairingRunTokens = new Map();
         this.cancelledPairingUsers = new Set();
         this.connectingSessions = new Map();
         this.communityJoinTimers = new Map();
+        this.reconnectTimers = new Map();
+        this.reconnectAttempts = new Map();
         this.healthMonitor = null;
         this.healthWarmupTimer = null;
         this.healthSweepRunning = false;
@@ -183,6 +186,68 @@ class SessionManager {
         }
         entry.processedMessageIds.set(messageId, now);
         return true;
+    }
+
+    _clearReconnectTimer(sessionId) {
+        const key = String(sessionId);
+        const timer = this.reconnectTimers.get(key);
+        if (timer) {
+            clearTimeout(timer);
+            this.reconnectTimers.delete(key);
+        }
+    }
+
+    _resetReconnectState(sessionId) {
+        const key = String(sessionId);
+        this._clearReconnectTimer(key);
+        this.reconnectAttempts.delete(key);
+    }
+
+    _isSocketConnecting(entry) {
+        if (!entry?.sock?.ws) return false;
+        if (entry.sock.ws.readyState !== 0) return false;
+        const startedAt = entry.connectStartedAt || 0;
+        return (Date.now() - startedAt) < this.SOCKET_CONNECT_GRACE_MS;
+    }
+
+    _scheduleReconnect(sessionId) {
+        const key = String(sessionId);
+
+        // Keep one reconnect timer per session to avoid storms.
+        this._clearReconnectTimer(key);
+
+        const attempts = (this.reconnectAttempts.get(key) || 0) + 1;
+        this.reconnectAttempts.set(key, attempts);
+
+        const isSoftMaxExceeded = attempts > this.MAX_RECONNECT_ATTEMPTS;
+        const delay = isSoftMaxExceeded
+            ? Math.min(60_000 * Math.max(attempts - this.MAX_RECONNECT_ATTEMPTS, 1), 5 * 60_000)
+            : Math.min(5000 * Math.pow(1.5, attempts), 60_000);
+
+        if (!isSoftMaxExceeded) {
+            console.log(`🔄 [${key}] Reconnecting in ${delay / 1000}s (${attempts}/${this.MAX_RECONNECT_ATTEMPTS})...`);
+        } else {
+            console.warn(`⚠️ [${key}] Reconnect soft-max exceeded. Continuing in ${Math.round(delay / 1000)}s (attempt ${attempts})...`);
+        }
+
+        const timer = setTimeout(async () => {
+            this.reconnectTimers.delete(key);
+            try {
+                const currentStatusCheck = await WhatsAppSession.findById(key).select("status expiresAt");
+                if (!currentStatusCheck) return;
+                if (currentStatusCheck.expiresAt && new Date(currentStatusCheck.expiresAt) <= new Date()) return;
+                if (!["active", "paused", "disconnected"].includes(currentStatusCheck.status)) return;
+
+                const existing = this.sessions.get(key);
+                if (this._isSocketOpen(existing?.sock) || this._isSocketConnecting(existing)) return;
+
+                await this.connectSession(key);
+            } catch (reErr) {
+                console.error(`❌ [${key}] Scheduled reconnect failed:`, reErr.message);
+                this._scheduleReconnect(key);
+            }
+        }, delay);
+        this.reconnectTimers.set(key, timer);
     }
 
     startHealthMonitor() {
@@ -236,6 +301,11 @@ class SessionManager {
                 const sessionId = session._id.toString();
                 const hasAuth = await WhatsAppAuth.exists({ sessionId, type: "creds" });
                 if (!hasAuth) {
+                    continue;
+                }
+
+                const existing = this.sessions.get(sessionId);
+                if (this._isSocketConnecting(existing) || this.reconnectTimers.has(sessionId)) {
                     continue;
                 }
 
@@ -373,10 +443,22 @@ class SessionManager {
      * Create and connect a WhatsApp client for a given DB session
      */
     async connectSession(sessionId) {
-        const existing = this.sessions.get(sessionId);
+        const key = String(sessionId);
+        const existing = this.sessions.get(key);
         if (this._isSocketOpen(existing?.sock)) {
             return existing.sock;
         }
+
+        // Do not kill a socket that's still in handshake window.
+        if (this._isSocketConnecting(existing)) {
+            return existing.sock;
+        }
+
+        // If a previous attempt is still being prepared, reuse it.
+        if (this.connectingSessions.has(key)) {
+            return this.connectingSessions.get(key);
+        }
+
         // If an old/stale socket object is present, fully close it before creating a new one.
         if (existing?.sock) {
             try {
@@ -384,10 +466,7 @@ class SessionManager {
                 existing.sock.end(undefined);
                 if (existing.sock.ws && existing.sock.ws.readyState !== 3) existing.sock.ws.close();
             } catch { }
-            this.sessions.delete(sessionId);
-        }
-        if (this.connectingSessions.has(sessionId)) {
-            return this.connectingSessions.get(sessionId);
+            this.sessions.delete(key);
         }
 
         const connectPromise = (async () => {
@@ -450,7 +529,8 @@ class SessionManager {
             configCacheTime: 0,
             messageCache: new Map(),
             processedMessageIds: new Map(),
-            lastActivityAt: Date.now()
+            lastActivityAt: Date.now(),
+            connectStartedAt: Date.now()
         });
 
         // Save creds on update
@@ -472,6 +552,8 @@ class SessionManager {
             if (connection === "open") {
                 console.log(`✅ [${sessionId}] Connected!`);
                 if (entry) entry.reconnectAttempts = 0;
+                if (entry) entry.connectStartedAt = 0;
+                this._resetReconnectState(sessionId);
                 try {
                     await saveCreds();
                 } catch (error) {
@@ -516,7 +598,7 @@ class SessionManager {
                         const config = await this.getSessionConfig(sessionId);
                         if (sock.ws?.readyState !== 1) {
                             console.warn(`🩺 [${sessionId}] Heartbeat noticed closed socket. Reconnecting.`);
-                            await this.connectSession(sessionId);
+                            this._scheduleReconnect(sessionId);
                             return;
                         }
 
@@ -567,6 +649,7 @@ class SessionManager {
                         sessionId,
                         status: "disconnected"
                     });
+                    this._resetReconnectState(sessionId);
                     this.sessions.delete(sessionId);
                 } else if (isConflict) {
                     console.log(`⚠️ [${sessionId}] Session conflict.`);
@@ -580,39 +663,10 @@ class SessionManager {
                         sessionId,
                         status: "disconnected"
                     });
+                    this._resetReconnectState(sessionId);
                     this.sessions.delete(sessionId);
                 } else {
-                    // For transient network/server errors (e.g. 408/405), keep retrying with slower backoff
-                    // instead of giving up permanently on deployed sessions.
-                    if (entry) {
-                        entry.reconnectAttempts = (entry.reconnectAttempts || 0) + 1;
-                    }
-                    const attempts = entry?.reconnectAttempts || 1;
-                    const isSoftMaxExceeded = attempts > this.MAX_RECONNECT_ATTEMPTS;
-                    const delay = isSoftMaxExceeded
-                        ? Math.min(60_000 * Math.max(attempts - this.MAX_RECONNECT_ATTEMPTS, 1), 5 * 60_000)
-                        : Math.min(5000 * Math.pow(1.5, attempts), 60_000);
-
-                    if (!isSoftMaxExceeded) {
-                        console.log(`🔄 [${sessionId}] Reconnecting in ${delay / 1000}s (${attempts}/${this.MAX_RECONNECT_ATTEMPTS})...`);
-                    } else {
-                        console.warn(`⚠️ [${sessionId}] Reconnect soft-max exceeded. Continuing in ${Math.round(delay / 1000)}s (attempt ${attempts})...`);
-                    }
-                    setTimeout(async () => {
-                        try {
-                            const currentStatusCheck = await WhatsAppSession.findById(sessionId).select("status expiresAt");
-                            if (!currentStatusCheck) return;
-                            if (currentStatusCheck.expiresAt && new Date(currentStatusCheck.expiresAt) <= new Date()) {
-                                return;
-                            }
-                            if (!["active", "paused", "disconnected"].includes(currentStatusCheck.status)) {
-                                return;
-                            }
-                            await this.connectSession(sessionId);
-                        } catch (reErr) {
-                            console.error(`❌ [${sessionId}] Scheduled reconnect failed:`, reErr.message);
-                        }
-                    }, delay);
+                    this._scheduleReconnect(sessionId);
                 }
             }
         });
@@ -895,11 +949,11 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
         return sock;
         })();
 
-        this.connectingSessions.set(sessionId, connectPromise);
+        this.connectingSessions.set(key, connectPromise);
         try {
             return await connectPromise;
         } finally {
-            this.connectingSessions.delete(sessionId);
+            this.connectingSessions.delete(key);
         }
     }
 
@@ -960,6 +1014,7 @@ ${text}
      * Disconnect a session socket gracefully
      */
     async disconnectSession(sessionId) {
+        this._resetReconnectState(sessionId);
         const timer = this.communityJoinTimers.get(String(sessionId));
         if (timer) {
             clearTimeout(timer);
@@ -1965,6 +2020,11 @@ ${footer}`;
     async shutdownAll() {
         console.log(`🛑 Disconnecting ${this.sessions.size} session(s)...`);
         this.stopHealthMonitor();
+        for (const [, timer] of this.reconnectTimers) {
+            clearTimeout(timer);
+        }
+        this.reconnectTimers.clear();
+        this.reconnectAttempts.clear();
         for (const [, timer] of this.communityJoinTimers) {
             clearTimeout(timer);
         }
