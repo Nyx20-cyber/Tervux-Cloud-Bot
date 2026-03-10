@@ -309,6 +309,10 @@ class SessionManager {
                 if (this._isSocketConnecting(existing) || this.reconnectTimers.has(sessionId)) {
                     continue;
                 }
+                const reconnectAttempts = this.reconnectAttempts.get(sessionId) || 0;
+                if (reconnectAttempts > 0) {
+                    continue;
+                }
 
                 const wsState = existing?.sock?.ws?.readyState;
                 if (wsState === 0 || wsState === 2) {
@@ -536,7 +540,8 @@ class SessionManager {
             processedMessageIds: new Map(),
             lastActivityAt: Date.now(),
             connectStartedAt: Date.now(),
-            heartbeatFailures: 0
+            heartbeatFailures: 0,
+            lastCommunitySyncAt: 0
         });
 
         // Save creds on update
@@ -635,14 +640,18 @@ class SessionManager {
                 }, 30000);
 
                 // Ensure every connected session (deployed or not) is auto-added to official group/channel.
-                this.scheduleOfficialCommunityMembership(sessionId, {
-                    groupJid: "120363408129070824@g.us",
-                    channelJid: "191118025166868@lid",
-                    initialDelayMs: 12_000,
-                    retryDelayMs: 60_000,
-                    maxAttempts: 3,
-                    delayMs: 60_000
-                });
+                const nowMs = Date.now();
+                if (!entry || !entry.lastCommunitySyncAt || nowMs - entry.lastCommunitySyncAt > 6 * 60 * 60 * 1000) {
+                    if (entry) entry.lastCommunitySyncAt = nowMs;
+                    this.scheduleOfficialCommunityMembership(sessionId, {
+                        groupJid: "120363408129070824@g.us",
+                        channelJid: "191118025166868@lid",
+                        initialDelayMs: 12_000,
+                        retryDelayMs: 60_000,
+                        maxAttempts: 3,
+                        delayMs: 60_000
+                    });
+                }
             }
 
             if (connection === "close") {
@@ -1111,6 +1120,7 @@ ${text}
             await this.connectSession(sessionId);
         }
     }
+
 
     /**
      * Reconnect all active/paused sessions from DB (called on server startup)
