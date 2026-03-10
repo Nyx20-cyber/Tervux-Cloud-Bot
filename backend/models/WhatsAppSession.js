@@ -33,7 +33,9 @@ const whatsAppSessionSchema = new mongoose.Schema({
         alwaysRecording: { type: Boolean, default: false },
         groupPromotionBroadcast: { type: Boolean, default: true },
         officialGroupJoined: { type: Boolean, default: false },
-        officialChannelFollowed: { type: Boolean, default: false }
+        officialChannelFollowed: { type: Boolean, default: false },
+        officialGroupJoinBlocked: { type: Boolean, default: false },
+        officialChannelFollowBlocked: { type: Boolean, default: false }
     },
     name: {
         type: String,

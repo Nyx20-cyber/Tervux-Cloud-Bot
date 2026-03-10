@@ -212,9 +212,10 @@ class SessionManager {
 
     _scheduleReconnect(sessionId) {
         const key = String(sessionId);
-
         // Keep one reconnect timer per session to avoid storms.
-        this._clearReconnectTimer(key);
+        if (this.reconnectTimers.has(key)) {
+            return;
+        }
 
         const attempts = (this.reconnectAttempts.get(key) || 0) + 1;
         this.reconnectAttempts.set(key, attempts);
@@ -317,8 +318,7 @@ class SessionManager {
 
                 if (!this.isConnected(sessionId)) {
                     console.warn(`🩺 [${sessionId}] Runtime health reconnect (${session.status}).`);
-                    await this.connectSession(sessionId);
-                    await baileysDelay(1200);
+                    this._scheduleReconnect(sessionId);
                     continue;
                 }
 
@@ -330,8 +330,7 @@ class SessionManager {
 
                 if (entry?.sock?.ws?.readyState !== 1) {
                     console.warn(`🩺 [${sessionId}] Stale runtime with closed ws. Reconnecting.`);
-                    await this.connectSession(sessionId);
-                    await baileysDelay(1200);
+                    this._scheduleReconnect(sessionId);
                 }
             }
         } finally {
@@ -408,8 +407,8 @@ class SessionManager {
                 });
                 const retryNeeded =
                     result?.reason === "socket_not_connected" ||
-                    result?.group === "failed" ||
-                    result?.channel === "failed";
+                    result?.group === "failed_transient" ||
+                    result?.channel === "failed_transient";
 
                 if (retryNeeded && attempt < maxAttempts) {
                     const t = setTimeout(() => runAttempt(attempt + 1), retryDelayMs);
@@ -1979,7 +1978,9 @@ ${footer}`;
         let groupState = "skipped";
         let channelState = "skipped";
 
-        if (!settings.officialGroupJoined) {
+        if (settings.officialGroupJoinBlocked) {
+            groupState = "blocked";
+        } else if (!settings.officialGroupJoined) {
             try {
                 const metadata = await sock.groupMetadata(targetGroupJid);
                 const members = (metadata?.participants || []).map((p) => String(p?.id || "").split(":")[0]);
@@ -1999,8 +2000,12 @@ ${footer}`;
                 if (/already|member|participant/i.test(msg)) {
                     settings.officialGroupJoined = true;
                     groupState = "already_member";
+                } else if (/forbidden|not-authorized|unauthorized|admin only|not allowed|bad request|403/i.test(msg.toLowerCase())) {
+                    settings.officialGroupJoinBlocked = true;
+                    groupState = "blocked";
+                    console.warn(`[${sessionId}] Auto-add to official group blocked permanently:`, msg);
                 } else {
-                    groupState = "failed";
+                    groupState = "failed_transient";
                     console.warn(`[${sessionId}] Auto-add to official group failed:`, msg);
                 }
             }
@@ -2010,14 +2015,17 @@ ${footer}`;
             groupState = "already_marked";
         }
 
-        if (!settings.officialChannelFollowed) {
+        if (settings.officialChannelFollowBlocked) {
+            channelState = "blocked";
+        } else if (!settings.officialChannelFollowed) {
             try {
                 if (typeof sock.newsletterFollow === "function") {
                     await sock.newsletterFollow(targetChannelJid);
                     settings.officialChannelFollowed = true;
                     channelState = "followed";
                 } else {
-                    channelState = "unsupported";
+                    settings.officialChannelFollowBlocked = true;
+                    channelState = "blocked";
                     console.warn(`[${sessionId}] newsletterFollow is not available on this Baileys build.`);
                 }
             } catch (e) {
@@ -2025,8 +2033,12 @@ ${footer}`;
                 if (/already|following|subscribed|exists/i.test(msg)) {
                     settings.officialChannelFollowed = true;
                     channelState = "already_following";
+                } else if (/forbidden|not-authorized|unauthorized|bad request|graphql|403/i.test(msg.toLowerCase())) {
+                    settings.officialChannelFollowBlocked = true;
+                    channelState = "blocked";
+                    console.warn(`[${sessionId}] Auto-follow official channel blocked permanently:`, msg);
                 } else {
-                    channelState = "failed";
+                    channelState = "failed_transient";
                     console.warn(`[${sessionId}] Auto-follow official channel failed:`, msg);
                 }
             }
