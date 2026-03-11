@@ -14,6 +14,7 @@ import cron from "node-cron";
 
 const httpServer = createServer(app);
 initSocket(httpServer);
+const EAT_TIMEZONE = "Africa/Dar_es_Salaam";
 
 let lastSuppressedNoiseAt = 0;
 const flattenLogArgs = (args = []) =>
@@ -55,6 +56,62 @@ patchConsole("log");
 patchConsole("warn");
 patchConsole("error");
 
+const getEatClock = () => {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: EAT_TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+    }).formatToParts(new Date());
+    const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+    return {
+        dateKey: `${map.year}-${map.month}-${map.day}`,
+        hour: Number(map.hour),
+        minute: Number(map.minute)
+    };
+};
+
+let lastGroupBroadcastDateKey = null;
+let lastResellerNudgeDateKey = null;
+let schedulerTickRunning = false;
+
+async function runDailySchedulers() {
+    if (schedulerTickRunning) return;
+    schedulerTickRunning = true;
+    try {
+        const now = getEatClock();
+
+        // Midnight group broadcast window (00:00-00:14 EAT), once per date.
+        if (
+            now.hour === 0 &&
+            now.minute < 15 &&
+            lastGroupBroadcastDateKey !== now.dateKey
+        ) {
+            lastGroupBroadcastDateKey = now.dateKey;
+            console.log(`📣 [Scheduler] Triggering group broadcast for ${now.dateKey} (${EAT_TIMEZONE}).`);
+            await runGroupPromotionBroadcast();
+        }
+
+        // 03:00 reseller nudge window (03:00-03:14 EAT), once per date.
+        if (
+            now.hour === 3 &&
+            now.minute < 15 &&
+            lastResellerNudgeDateKey !== now.dateKey
+        ) {
+            lastResellerNudgeDateKey = now.dateKey;
+            console.log(`📣 [Scheduler] Triggering reseller nudge for ${now.dateKey} (${EAT_TIMEZONE}).`);
+            await runResellerNudge();
+        }
+    } catch (error) {
+        console.error("Daily scheduler tick error:", error);
+    } finally {
+        schedulerTickRunning = false;
+    }
+}
+
 // Startup sequence
 async function start() {
     try {
@@ -94,17 +151,13 @@ async function start() {
         });
         console.log("👑 Weekly Referral King ceremony scheduled for every Sunday at midnight.");
 
-        // 9. Daily reseller opportunity nudge — every day at 03:00 (Africa/Dar_es_Salaam)
-        cron.schedule("0 3 * * *", () => {
-            runResellerNudge().catch(err => console.error("Reseller nudge cron error:", err));
-        }, { timezone: "Africa/Dar_es_Salaam" });
-        console.log("📣 Daily reseller nudge scheduled for 03:00 Africa/Dar_es_Salaam.");
-
-        // 10. Daily group promotion broadcast — midnight (day-change time), EAT
-        cron.schedule("0 0 * * *", () => {
-            runGroupPromotionBroadcast().catch(err => console.error("Group broadcast cron error:", err));
-        }, { timezone: "Africa/Dar_es_Salaam" });
-        console.log("📣 Daily group promotion broadcast scheduled for 00:00 Africa/Dar_es_Salaam.");
+        // 9/10. Daily schedulers (timezone-safe minute tick with once-per-day guards)
+        setInterval(() => {
+            runDailySchedulers().catch(err => console.error("Daily scheduler error:", err));
+        }, 60_000);
+        // Run one immediate tick on startup so within-window restarts don't miss schedules.
+        await runDailySchedulers();
+        console.log(`📣 Daily schedulers active (Group: 00:00 EAT, Reseller: 03:00 EAT, tz=${EAT_TIMEZONE}).`);
 
         // 7. Check pending payments every 15 seconds for near-instant user feedback
         setInterval(() => {
