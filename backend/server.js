@@ -15,6 +15,46 @@ import cron from "node-cron";
 const httpServer = createServer(app);
 initSocket(httpServer);
 
+let lastSuppressedNoiseAt = 0;
+const flattenLogArgs = (args = []) =>
+    args
+        .map((v) => {
+            if (typeof v === "string") return v;
+            if (v instanceof Error) return `${v.name}: ${v.message}`;
+            try { return JSON.stringify(v); } catch { return String(v); }
+        })
+        .join(" ")
+        .toLowerCase();
+
+const isWaNoiseLog = (args = []) => {
+    const text = flattenLogArgs(args);
+    return (
+        text.includes("failed to decrypt message with any known session") ||
+        text.includes("messagecountererror") ||
+        text.includes("key used already or never filled") ||
+        text.includes("removing old closed session: sessionentry")
+    );
+};
+
+const patchConsole = (method) => {
+    const original = console[method].bind(console);
+    console[method] = (...args) => {
+        if (isWaNoiseLog(args)) {
+            const now = Date.now();
+            if (now - lastSuppressedNoiseAt > 60_000) {
+                lastSuppressedNoiseAt = now;
+                original("⚠️ Suppressed repeated WhatsApp decrypt/session noise logs.");
+            }
+            return;
+        }
+        original(...args);
+    };
+};
+
+patchConsole("log");
+patchConsole("warn");
+patchConsole("error");
+
 // Startup sequence
 async function start() {
     try {

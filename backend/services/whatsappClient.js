@@ -146,8 +146,10 @@ class SessionManager {
         this.healthSweepRunning = false;
     }
 
-    _isSocketOpen(sock) {
-        return !!(sock?.ws?.readyState === 1);
+    _isSocketOpen(entry) {
+        if (!entry) return false;
+        if (entry.connectionState === "open") return true;
+        return !!(entry.sock?.ws?.readyState === 1);
     }
 
     _touchSession(sessionId) {
@@ -204,7 +206,9 @@ class SessionManager {
     }
 
     _isSocketConnecting(entry) {
-        if (!entry?.sock?.ws) return false;
+        if (!entry) return false;
+        if (entry.connectionState === "connecting") return true;
+        if (!entry.sock?.ws) return false;
         if (entry.sock.ws.readyState !== 0) return false;
         const startedAt = entry.connectStartedAt || 0;
         return (Date.now() - startedAt) < this.SOCKET_CONNECT_GRACE_MS;
@@ -240,7 +244,7 @@ class SessionManager {
                 if (!["active", "paused", "disconnected"].includes(currentStatusCheck.status)) return;
 
                 const existing = this.sessions.get(key);
-                if (this._isSocketOpen(existing?.sock) || this._isSocketConnecting(existing)) return;
+                if (this._isSocketOpen(existing) || this._isSocketConnecting(existing)) return;
 
                 await this.connectSession(key);
             } catch (reErr) {
@@ -314,9 +318,7 @@ class SessionManager {
                     continue;
                 }
 
-                const wsState = existing?.sock?.ws?.readyState;
-                if (wsState === 0 || wsState === 2) {
-                    // Connecting/closing states are transitional; let them settle.
+                if (existing?.connectionState === "connecting") {
                     continue;
                 }
 
@@ -332,7 +334,7 @@ class SessionManager {
                     continue;
                 }
 
-                if (entry?.sock?.ws?.readyState !== 1) {
+                if (entry?.connectionState !== "open") {
                     console.warn(`🩺 [${sessionId}] Stale runtime with closed ws. Reconnecting.`);
                     this._scheduleReconnect(sessionId);
                 }
@@ -437,15 +439,29 @@ class SessionManager {
 
     isConnected(sessionId) {
         const entry = this.sessions.get(sessionId);
-        return this._isSocketOpen(entry?.sock);
+        return this._isSocketOpen(entry);
     }
 
     getActiveCount() {
         let count = 0;
         for (const [, entry] of this.sessions) {
-            if (this._isSocketOpen(entry?.sock)) count++;
+            if (this._isSocketOpen(entry)) count++;
         }
         return count;
+    }
+
+    getRuntimeState(sessionId) {
+        const key = String(sessionId);
+        const entry = this.sessions.get(key);
+        return {
+            hasEntry: !!entry,
+            connectionState: entry?.connectionState || "none",
+            isConnected: this._isSocketOpen(entry),
+            isConnecting: this._isSocketConnecting(entry),
+            reconnectScheduled: this.reconnectTimers.has(key),
+            reconnectAttempts: this.reconnectAttempts.get(key) || 0,
+            lastActivityAt: entry?.lastActivityAt || 0
+        };
     }
 
     /**
@@ -454,7 +470,7 @@ class SessionManager {
     async connectSession(sessionId) {
         const key = String(sessionId);
         const existing = this.sessions.get(key);
-        if (this._isSocketOpen(existing?.sock)) {
+        if (this._isSocketOpen(existing)) {
             return existing.sock;
         }
 
@@ -473,7 +489,7 @@ class SessionManager {
             try {
                 if (existing.sock.onlineInterval) clearInterval(existing.sock.onlineInterval);
                 existing.sock.end(undefined);
-                if (existing.sock.ws && existing.sock.ws.readyState !== 3) existing.sock.ws.close();
+                if (existing.sock.ws) existing.sock.ws.close();
             } catch { }
             this.sessions.delete(key);
         }
@@ -540,6 +556,7 @@ class SessionManager {
             processedMessageIds: new Map(),
             lastActivityAt: Date.now(),
             connectStartedAt: Date.now(),
+            connectionState: "connecting",
             heartbeatFailures: 0,
             lastCommunitySyncAt: 0
         });
@@ -557,6 +574,7 @@ class SessionManager {
             this._touchSession(sessionId);
 
             if (connection === "connecting") {
+                if (entry) entry.connectionState = "connecting";
                 console.log(`🔌 [${sessionId}] Connecting...`);
             }
 
@@ -565,6 +583,7 @@ class SessionManager {
                 if (entry) entry.reconnectAttempts = 0;
                 if (entry) entry.connectStartedAt = 0;
                 if (entry) entry.heartbeatFailures = 0;
+                if (entry) entry.connectionState = "open";
                 this._resetReconnectState(sessionId);
                 try {
                     await saveCreds();
@@ -608,7 +627,7 @@ class SessionManager {
 
                     try {
                         const config = await this.getSessionConfig(sessionId);
-                        if (sock.ws?.readyState !== 1) {
+                        if (!currentEntry || currentEntry.connectionState !== "open") {
                             if (currentEntry) {
                                 currentEntry.heartbeatFailures = (currentEntry.heartbeatFailures || 0) + 1;
                             }
@@ -656,6 +675,7 @@ class SessionManager {
 
             if (connection === "close") {
                 if (sock.onlineInterval) clearInterval(sock.onlineInterval);
+                if (entry) entry.connectionState = "closed";
 
                 const error = lastDisconnect?.error;
                 const statusCode = error?.output?.statusCode;

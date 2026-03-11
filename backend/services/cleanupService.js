@@ -93,14 +93,23 @@ async function cleanUndeployedSessions() {
 async function healUnresponsiveLiveSessions() {
     const now = new Date();
     const candidates = await WhatsAppSession.find({
-        status: { $in: ["active", "paused", "disconnected"] },
+        status: { $in: ["active", "paused"] },
         expiresAt: { $gt: now }
-    }).select("_id status expiresAt");
+    }).select("_id status expiresAt lastConnected");
 
     let healed = 0;
     for (const session of candidates) {
         const sid = session._id.toString();
-        if (sessionManager.isConnected(sid)) continue;
+        const runtime = sessionManager.getRuntimeState(sid);
+        if (runtime.isConnected || runtime.isConnecting || runtime.reconnectScheduled) continue;
+
+        // If runtime still has a socket entry that is not explicitly closed,
+        // avoid forcing a second reconnect from cleanup.
+        if (runtime.hasEntry && runtime.connectionState !== "closed") continue;
+
+        const lastConnectedMs = session.lastConnected ? new Date(session.lastConnected).getTime() : 0;
+        const connectedRecently = lastConnectedMs > 0 && (Date.now() - lastConnectedMs) < 2 * 60 * 1000;
+        if (connectedRecently) continue;
 
         const hasAuth = await WhatsAppAuth.exists({ sessionId: sid, type: "creds" });
         if (!hasAuth) continue;
