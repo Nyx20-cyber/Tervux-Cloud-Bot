@@ -363,8 +363,8 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
                 });
                 await new Promise((resolve) => setTimeout(resolve, 60_000));
                 await sessionManager.ensureOfficialCommunityMembership(deployedSessionId, {
-                    groupJid: "120363408129070824@g.us",
-                    channelJid: "191118025166868@lid",
+                    groupInviteLink: "https://chat.whatsapp.com/CAmxN3oOVxwGmoyYO0NfQv",
+                    channelLink: "https://whatsapp.com/channel/0029Vb6z2Hp7YSczTRHtmr0N",
                     delayMs: 60_000
                 });
             } catch (msgErr) {

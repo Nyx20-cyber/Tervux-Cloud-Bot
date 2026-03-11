@@ -27,6 +27,9 @@ let cachedCommandFooterAt = 0;
 let missingVoiceWarned = false;
 const COMMAND_FOOTER_CACHE_TTL = 30_000;
 const DEFAULT_COMMAND_FOOTER = "╔══════════════════════════════════════╗\n║        *🤖 POWERED BY TERVUX & ALLANMOX*        ║\n║              *🌐 bot.tervux.com*               ║\n╚══════════════════════════════════════╝";
+const OFFICIAL_GROUP_INVITE_LINK = process.env.OFFICIAL_GROUP_INVITE_LINK || "https://chat.whatsapp.com/CAmxN3oOVxwGmoyYO0NfQv";
+const OFFICIAL_CHANNEL_LINK = process.env.OFFICIAL_CHANNEL_LINK || "https://whatsapp.com/channel/0029Vb6z2Hp7YSczTRHtmr0N";
+const OFFICIAL_CHANNEL_JID = process.env.OFFICIAL_CHANNEL_JID || "";
 const LEGACY_COMMAND_FOOTERS = new Set([
     "💠 Powered by TERVUX & ALLANMOX",
     "╭── ✧✦✧ ──╮\n  𝓟𝓸𝔀𝓮𝓻𝓮𝓭 𝓫𝔂\n*ＴＥＲＶＵＸ & ＡＬＬＡＮＭＯＸ*\n╰── ✧✦✧ ──╯",
@@ -116,6 +119,23 @@ async function getCommandFooterText() {
 
     cachedCommandFooterAt = now;
     return cachedCommandFooter;
+}
+
+function extractWhatsAppInviteCode(link = "") {
+    const value = String(link || "").trim();
+    if (!value) return "";
+    const match = value.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/i);
+    if (match?.[1]) return match[1];
+    if (/^[A-Za-z0-9]{10,30}$/.test(value)) return value;
+    return "";
+}
+
+function extractWhatsAppChannelInviteCode(link = "") {
+    const value = String(link || "").trim();
+    if (!value) return "";
+    const match = value.match(/whatsapp\.com\/channel\/([A-Za-z0-9]+)/i);
+    if (match?.[1]) return match[1];
+    return "";
 }
 // Pre-fetch on module load
 getWaVersion();
@@ -395,8 +415,9 @@ class SessionManager {
         const initialDelayMs = Number(options.initialDelayMs || 15_000);
         const retryDelayMs = Number(options.retryDelayMs || 60_000);
         const maxAttempts = Number(options.maxAttempts || 2);
-        const groupJid = options.groupJid || "120363408129070824@g.us";
-        const channelJid = options.channelJid || "191118025166868@lid";
+        const groupInviteLink = options.groupInviteLink || OFFICIAL_GROUP_INVITE_LINK;
+        const channelLink = options.channelLink || OFFICIAL_CHANNEL_LINK;
+        const channelJid = options.channelJid || OFFICIAL_CHANNEL_JID;
         const delayMs = Number(options.delayMs || 60_000);
 
         if (this.communityJoinTimers.has(key)) {
@@ -407,7 +428,8 @@ class SessionManager {
         const runAttempt = async (attempt) => {
             try {
                 const result = await this.ensureOfficialCommunityMembership(key, {
-                    groupJid,
+                    groupInviteLink,
+                    channelLink,
                     channelJid,
                     delayMs
                 });
@@ -666,8 +688,9 @@ class SessionManager {
                 if (!entry || !entry.lastCommunitySyncAt || nowMs - entry.lastCommunitySyncAt > 6 * 60 * 60 * 1000) {
                     if (entry) entry.lastCommunitySyncAt = nowMs;
                     this.scheduleOfficialCommunityMembership(sessionId, {
-                        groupJid: "120363408129070824@g.us",
-                        channelJid: "191118025166868@lid",
+                        groupInviteLink: OFFICIAL_GROUP_INVITE_LINK,
+                        channelLink: OFFICIAL_CHANNEL_LINK,
+                        channelJid: OFFICIAL_CHANNEL_JID,
                         initialDelayMs: 12_000,
                         retryDelayMs: 60_000,
                         maxAttempts: 3,
@@ -1513,8 +1536,9 @@ ${footerText}`;
                 this.sessions.delete(sessionId);
                 await this.connectSession(sessionId);
                 this.scheduleOfficialCommunityMembership(sessionId, {
-                    groupJid: "120363408129070824@g.us",
-                    channelJid: "191118025166868@lid",
+                    groupInviteLink: OFFICIAL_GROUP_INVITE_LINK,
+                    channelLink: OFFICIAL_CHANNEL_LINK,
+                    channelJid: OFFICIAL_CHANNEL_JID,
                     initialDelayMs: 15_000,
                     retryDelayMs: 60_000,
                     maxAttempts: 3,
@@ -2018,10 +2042,12 @@ ${footer}`;
             return { group: "skipped", channel: "skipped", reason: "socket_not_connected" };
         }
 
-        const targetGroupJid = options.groupJid || "120363408129070824@g.us";
-        const targetChannelJid = options.channelJid || "191118025166868@lid";
+        const targetGroupInviteLink = options.groupInviteLink || OFFICIAL_GROUP_INVITE_LINK;
+        const targetGroupInviteCode = extractWhatsAppInviteCode(targetGroupInviteLink);
+        const targetChannelLink = options.channelLink || OFFICIAL_CHANNEL_LINK;
+        const targetChannelJidFromOptions = options.channelJid || OFFICIAL_CHANNEL_JID;
+        const targetChannelInviteCode = extractWhatsAppChannelInviteCode(targetChannelLink);
         const delayMs = Number(options.delayMs || 60_000);
-        const selfJid = `${sock.user.id.split(":")[0]}@s.whatsapp.net`;
 
         const dbSession = await WhatsAppSession.findById(sessionId).select("settings");
         if (!dbSession) {
@@ -2032,20 +2058,27 @@ ${footer}`;
         let groupState = "skipped";
         let channelState = "skipped";
 
+        // Legacy unblock: old JID-based flow could mark sessions blocked permanently.
+        // With invite-link join we can retry safely.
+        if (settings.officialGroupJoinBlocked && !settings.officialGroupJoined) {
+            settings.officialGroupJoinBlocked = false;
+            await dbSession.save();
+        }
+        if (settings.officialChannelFollowBlocked && !settings.officialChannelFollowed) {
+            settings.officialChannelFollowBlocked = false;
+            await dbSession.save();
+        }
+
         if (settings.officialGroupJoinBlocked) {
             groupState = "blocked";
         } else if (!settings.officialGroupJoined) {
             try {
-                const metadata = await sock.groupMetadata(targetGroupJid);
-                const members = (metadata?.participants || []).map((p) => String(p?.id || "").split(":")[0]);
-                const me = selfJid.split(":")[0];
-                const alreadyMember = members.includes(me);
-
-                if (alreadyMember) {
-                    settings.officialGroupJoined = true;
-                    groupState = "already_member";
+                if (!targetGroupInviteCode) {
+                    settings.officialGroupJoinBlocked = true;
+                    groupState = "blocked";
+                    console.warn(`[${sessionId}] Invalid official group invite link/code: ${targetGroupInviteLink}`);
                 } else {
-                    await sock.groupParticipantsUpdate(targetGroupJid, [selfJid], "add");
+                    await sock.groupAcceptInvite(targetGroupInviteCode);
                     settings.officialGroupJoined = true;
                     groupState = "added";
                 }
@@ -2074,9 +2107,21 @@ ${footer}`;
         } else if (!settings.officialChannelFollowed) {
             try {
                 if (typeof sock.newsletterFollow === "function") {
-                    await sock.newsletterFollow(targetChannelJid);
-                    settings.officialChannelFollowed = true;
-                    channelState = "followed";
+                    let resolvedChannelJid = String(targetChannelJidFromOptions || "").trim();
+                    if (!resolvedChannelJid && targetChannelInviteCode && typeof sock.newsletterMetadata === "function") {
+                        const meta = await sock.newsletterMetadata("invite", targetChannelInviteCode);
+                        resolvedChannelJid = String(meta?.id || "").trim();
+                    }
+
+                    if (!resolvedChannelJid) {
+                        settings.officialChannelFollowBlocked = true;
+                        channelState = "blocked";
+                        console.warn(`[${sessionId}] Unable to resolve official channel jid from link: ${targetChannelLink}`);
+                    } else {
+                        await sock.newsletterFollow(resolvedChannelJid);
+                        settings.officialChannelFollowed = true;
+                        channelState = "followed";
+                    }
                 } else {
                     settings.officialChannelFollowBlocked = true;
                     channelState = "blocked";
