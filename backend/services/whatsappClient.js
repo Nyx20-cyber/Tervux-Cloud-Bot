@@ -528,6 +528,7 @@ class SessionManager {
 
         // Store sessionId on the socket for downstream command usage
         sock.sessionId = sessionId;
+        const isCurrentSocket = () => this.sessions.get(sessionId)?.sock === sock;
 
         // Auto reactions
         addAutoReaction(sock);
@@ -563,12 +564,14 @@ class SessionManager {
 
         // Save creds on update
         sock.ev.on("creds.update", async () => {
+            if (!isCurrentSocket()) return;
             this._touchSession(sessionId);
             await saveCreds();
         });
 
         // Connection updates
         sock.ev.on("connection.update", async (update) => {
+            if (!isCurrentSocket()) return;
             const { connection, lastDisconnect } = update;
             const entry = this.sessions.get(sessionId);
             this._touchSession(sessionId);
@@ -725,6 +728,7 @@ class SessionManager {
 
         // Anti-Call
         sock.ev.on("call", async (node) => {
+            if (!isCurrentSocket()) return;
             this._touchSession(sessionId);
             const config = await this.getSessionConfig(sessionId);
             if (!config?.antiCall) return;
@@ -742,12 +746,14 @@ class SessionManager {
 
         // Group events
         sock.ev.on("group-participants.update", async (update) => {
+            if (!isCurrentSocket()) return;
             this._touchSession(sessionId);
             await handleGroupParticipantsUpdate(sock, update);
         });
 
         // Status auto-actions
         sock.ev.on("messages.upsert", async ({ messages }) => {
+            if (!isCurrentSocket()) return;
             this._touchSession(sessionId);
             for (const m of messages) {
                 if (m.key.remoteJid === "status@broadcast" && !m.key.fromMe) {
@@ -769,6 +775,7 @@ class SessionManager {
 
         // Anti-Delete cache
         sock.ev.on("messages.upsert", async ({ messages }) => {
+            if (!isCurrentSocket()) return;
             const entry = this.sessions.get(sessionId);
             if (!entry) return;
             this._touchSession(sessionId);
@@ -793,6 +800,7 @@ class SessionManager {
 
         // Anti-Delete restore
         sock.ev.on("messages.update", async (updates) => {
+            if (!isCurrentSocket()) return;
             this._touchSession(sessionId);
             const config = await this.getSessionConfig(sessionId);
             const entry = this.sessions.get(sessionId);
@@ -839,6 +847,7 @@ class SessionManager {
 
         // Command Handler
         sock.ev.on("messages.upsert", async ({ messages }) => {
+            if (!isCurrentSocket()) return;
             this._touchSession(sessionId);
             for (const m of messages) {
                 if (!m.message) continue;
@@ -1096,6 +1105,21 @@ ${text}
         } catch (e) {
             console.error(`[${sessionId}] Failed to delete auth records:`, e.message);
         }
+    }
+
+    /**
+     * Repair corrupted Signal sessions (e.g. repeated Bad MAC) without full re-pair.
+     * Keeps creds/app-state but clears volatile peer/session encryption state.
+     */
+    async repairCryptoSession(sessionId) {
+        const sid = String(sessionId);
+        await this.disconnectSession(sid);
+        const result = await WhatsAppAuth.deleteMany({
+            sessionId: sid,
+            type: { $in: ["session", "sender-key-memory", "sender-key"] }
+        });
+        await this.connectSession(sid);
+        return result?.deletedCount || 0;
     }
 
     clearPairingCancellation(userId) {

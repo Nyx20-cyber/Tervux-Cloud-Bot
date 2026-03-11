@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
+import WhatsAppAuth from "../models/WhatsAppAuth.js";
 import User from "../models/User.js";
 import Notification from "../models/Notification.js";
 import { sessionManager } from "../services/whatsappService.js";
@@ -568,6 +569,43 @@ router.post("/:id/resume", authenticate, async (req, res) => {
     } catch (error) {
         console.error("Resume session error:", error);
         res.status(500).json({ error: "Failed to resume session" });
+    }
+});
+
+/**
+ * POST /api/sessions/:id/repair
+ * Repair Signal crypto state for sessions stuck with repeated Bad MAC/decrypt errors.
+ */
+router.post("/:id/repair", authenticate, async (req, res) => {
+    try {
+        const session = await WhatsAppSession.findOne({
+            _id: req.params.id,
+            userId: req.user._id
+        });
+        if (!session) {
+            return res.status(404).json({ error: "Session not found" });
+        }
+
+        const hasCreds = await WhatsAppAuth.exists({
+            sessionId: session._id.toString(),
+            type: "creds"
+        });
+        if (!hasCreds) {
+            return res.status(400).json({
+                error: "No saved auth creds found for this session. Please pair again."
+            });
+        }
+
+        const deletedKeys = await sessionManager.repairCryptoSession(session._id.toString());
+
+        res.json({
+            success: true,
+            message: "Crypto session repair completed.",
+            deletedKeys
+        });
+    } catch (error) {
+        console.error("Repair session error:", error);
+        res.status(500).json({ error: "Failed to repair session crypto state" });
     }
 });
 
