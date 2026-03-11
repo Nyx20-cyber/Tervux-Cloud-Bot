@@ -140,7 +140,13 @@ async function start() {
         // 5. Reconnect all active WhatsApp sessions from DB
         await initWhatsAppService();
 
-        // 6. Schedule cleanup every 5 minutes
+        // 6. Cleanup every 5 minutes (interval-based for reliability)
+        setInterval(() => {
+            runCleanup().catch(err => console.error("Cleanup interval error:", err));
+        }, 5 * 60 * 1000);
+        // Immediate startup cleanup pass
+        await runCleanup();
+        // Keep cron as secondary safety trigger
         cron.schedule("*/5 * * * *", () => {
             runCleanup().catch(err => console.error("Cleanup cron error:", err));
         });

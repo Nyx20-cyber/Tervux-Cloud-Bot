@@ -1,6 +1,7 @@
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import User from "../models/User.js";
 import WhatsAppAuth from "../models/WhatsAppAuth.js";
+import mongoose from "mongoose";
 import { sessionManager } from "./whatsappService.js";
 import { emitToUser, emitUpdate } from "./socketService.js";
 
@@ -8,24 +9,41 @@ import { emitToUser, emitUpdate } from "./socketService.js";
  * Comprehensive cleanup service for multi-tenant sessions
  * Handles ghost sessions, expired deployments, stale sessions, and orphaned files
  */
+let cleanupRunning = false;
 
 /**
  * Run all cleanup tasks
  */
 export async function runCleanup() {
+    if (cleanupRunning) {
+        console.log("🧹 [Cleanup] Previous cycle still running; skipping overlap.");
+        return;
+    }
+    cleanupRunning = true;
     console.log("🧹 [Cleanup] Starting maintenance cycle...");
 
     try {
-        await healUnresponsiveLiveSessions();
-        await cleanGhostSessions();
-        await cleanUndeployedSessions();
-        await cleanStaleDisconnected();
-        await cleanOrphanedMongoAuth();
-        await cleanExpiredBots();
-        console.log("✅ [Cleanup] Maintenance cycle complete.");
-    } catch (error) {
-        console.error("❌ [Cleanup] Maintenance failed:", error.message);
+        const tasks = [
+            ["heal", healUnresponsiveLiveSessions],
+            ["ghost", cleanGhostSessions],
+            ["undeployed", cleanUndeployedSessions],
+            ["stale", cleanStaleDisconnected],
+            ["orphan", cleanOrphanedMongoAuth],
+            ["expired", cleanExpiredBots]
+        ];
+
+        for (const [name, task] of tasks) {
+            try {
+                await task();
+            } catch (error) {
+                console.error(`❌ [Cleanup] Task '${name}' failed:`, error.message);
+            }
+        }
+    } finally {
+        cleanupRunning = false;
     }
+
+    console.log("✅ [Cleanup] Maintenance cycle complete.");
 }
 
 /**
@@ -34,11 +52,23 @@ export async function runCleanup() {
  */
 async function cleanUndeployedSessions() {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const cutoffObjectId = new mongoose.Types.ObjectId(
+        Math.floor(cutoff.getTime() / 1000).toString(16) + "0000000000000000"
+    );
+
     const staleUndeployed = await WhatsAppSession.find({
         expiresAt: null,
-        status: { $in: ["active", "paused", "disconnected"] },
-        createdAt: { $lt: cutoff }
-    }).select("_id userId status createdAt");
+        status: { $in: ["pairing", "active", "paused", "disconnected"] },
+        $or: [
+            { createdAt: { $lt: cutoff } },
+            { createdAt: { $exists: false }, updatedAt: { $lt: cutoff } },
+            { createdAt: { $exists: false }, updatedAt: { $exists: false }, _id: { $lt: cutoffObjectId } }
+        ]
+    }).select("_id userId status createdAt updatedAt");
+
+    if (staleUndeployed.length > 0) {
+        console.log(`   ⏳ [Undeployed] Found ${staleUndeployed.length} stale undeployed session(s) older than 24h.`);
+    }
 
     let removed = 0;
     for (const session of staleUndeployed) {
