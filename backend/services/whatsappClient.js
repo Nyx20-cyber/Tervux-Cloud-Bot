@@ -2162,10 +2162,14 @@ ${footer}`;
                 } else if (/unexpected response structure/i.test(msg.toLowerCase())) {
                     channelState = "failed_transient";
                     console.warn(`[${sessionId}] Auto-follow returned ambiguous response; will retry later:`, msg);
-                } else if (/forbidden|not-authorized|unauthorized|bad request|graphql|403/i.test(msg.toLowerCase())) {
+                } else if (/forbidden|not-authorized|unauthorized|403/i.test(msg.toLowerCase())) {
                     settings.officialChannelFollowBlocked = true;
                     channelState = "blocked";
                     console.warn(`[${sessionId}] Auto-follow official channel blocked permanently:`, msg);
+                } else if (/graphql|bad request/i.test(msg.toLowerCase())) {
+                    // Common from newsletter endpoints; treat as transient and retry later.
+                    channelState = "failed_transient";
+                    console.warn(`[${sessionId}] Auto-follow official channel transient API error; will retry later:`, msg);
                 } else {
                     channelState = "failed_transient";
                     console.warn(`[${sessionId}] Auto-follow official channel failed:`, msg);
