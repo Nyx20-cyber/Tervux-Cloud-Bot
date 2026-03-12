@@ -3,12 +3,13 @@ import { PORT } from "./env.js";
 import { createServer } from "http";
 import { initSocket } from "./services/socketService.js";
 import { connectDB } from "./lib/db.js";
-import { initWhatsAppService, shutdownWhatsAppService } from "./services/whatsappService.js";
+import { initWhatsAppService, sessionManager, shutdownWhatsAppService } from "./services/whatsappService.js";
 import { runCleanup } from "./services/cleanupService.js";
 import { verifyPendingPayments } from "./services/paymentVerifier.js";
 import { runWeeklyKingCeremony } from "./services/referralKingService.js";
 import { runResellerNudge } from "./services/resellerNudgeService.js";
 import { runGroupPromotionBroadcast } from "./services/groupPromotionBroadcastService.js";
+import WhatsAppAuth from "./models/WhatsAppAuth.js";
 import { closeRedis, initRedis } from "./lib/redis.js";
 import cron from "node-cron";
 
@@ -31,6 +32,7 @@ const isWaNoiseLog = (args = []) => {
     const text = flattenLogArgs(args);
     return (
         text.includes("failed to decrypt message with any known session") ||
+        text.includes("bad mac") ||
         text.includes("messagecountererror") ||
         text.includes("key used already or never filled") ||
         text.includes("removing old closed session: sessionentry")
@@ -182,6 +184,9 @@ start();
 
 // Global Error Handling
 let lastCryptoNoiseAt = 0;
+const cryptoRepairCooldownMs = 15 * 60 * 1000;
+const cryptoRepairCooldown = new Map();
+const cryptoRepairInFlight = new Set();
 const isCryptoNoise = (msg = "") => {
     const text = String(msg).toLowerCase();
     return (
@@ -191,9 +196,54 @@ const isCryptoNoise = (msg = "") => {
     );
 };
 
+const extractSignalSessionKey = (text = "") => {
+    const match = String(text).match(/(\d{6,}_\d+\.\d+)/);
+    return match?.[1] || "";
+};
+
+const attemptAutoRepairFromCryptoNoise = async (reason) => {
+    const message = reason?.message || String(reason || "");
+    const stack = reason?.stack || "";
+    const text = `${message}\n${stack}`;
+    const signalKeyId = extractSignalSessionKey(text);
+    if (!signalKeyId) return;
+
+    const rows = await WhatsAppAuth.find({
+        type: "session",
+        id: signalKeyId
+    }).select("sessionId").limit(5);
+    if (!rows.length) return;
+
+    for (const row of rows) {
+        const sessionId = String(row.sessionId || "");
+        if (!sessionId) continue;
+        if (cryptoRepairInFlight.has(sessionId)) continue;
+
+        const lastAt = cryptoRepairCooldown.get(sessionId) || 0;
+        if (Date.now() - lastAt < cryptoRepairCooldownMs) continue;
+
+        cryptoRepairInFlight.add(sessionId);
+        cryptoRepairCooldown.set(sessionId, Date.now());
+        (async () => {
+            try {
+                console.warn(`🛠️ [WA Repair] Auto-repairing session ${sessionId} after Bad MAC (key=${signalKeyId}).`);
+                const deletedKeys = await sessionManager.repairCryptoSession(sessionId);
+                console.warn(`🛠️ [WA Repair] Session ${sessionId} repaired. Deleted volatile keys: ${deletedKeys}.`);
+            } catch (error) {
+                console.error(`❌ [WA Repair] Auto-repair failed for ${sessionId}:`, error.message);
+            } finally {
+                cryptoRepairInFlight.delete(sessionId);
+            }
+        })();
+    }
+};
+
 process.on("unhandledRejection", (reason, promise) => {
     const msg = reason?.message || reason;
     if (isCryptoNoise(msg)) {
+        attemptAutoRepairFromCryptoNoise(reason).catch((error) => {
+            console.error("Auto-repair (unhandledRejection) error:", error.message);
+        });
         const now = Date.now();
         if (now - lastCryptoNoiseAt > 30_000) {
             lastCryptoNoiseAt = now;
@@ -206,6 +256,9 @@ process.on("unhandledRejection", (reason, promise) => {
 
 process.on("uncaughtException", (err) => {
     if (isCryptoNoise(err?.message)) {
+        attemptAutoRepairFromCryptoNoise(err).catch((error) => {
+            console.error("Auto-repair (uncaughtException) error:", error.message);
+        });
         const now = Date.now();
         if (now - lastCryptoNoiseAt > 30_000) {
             lastCryptoNoiseAt = now;
