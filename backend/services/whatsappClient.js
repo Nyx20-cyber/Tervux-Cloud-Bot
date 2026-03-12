@@ -2046,6 +2046,21 @@ ${footer}`;
         return { sent, failed, total: groupList.length };
     }
 
+    async sendOfficialChannelFollowPrompt(sessionId, options = {}) {
+        const entry = this.sessions.get(sessionId);
+        const sock = entry?.sock;
+        if (!sock?.user?.id) {
+            return false;
+        }
+
+        const channelLink = options.channelLink || OFFICIAL_CHANNEL_LINK;
+        const userJid = `${sock.user.id.split(":")[0]}@s.whatsapp.net`;
+        const text = `Please follow our official WhatsApp channel using this link:\n${channelLink}`;
+
+        await sock.sendMessage(userJid, { text });
+        return true;
+    }
+
     async ensureOfficialCommunityMembership(sessionId, options = {}) {
         const entry = this.sessions.get(sessionId);
         const sock = entry?.sock;
@@ -2171,16 +2186,23 @@ ${footer}`;
                     settings.officialChannelFollowed = true;
                     channelState = "already_following";
                 } else if (/unexpected response structure/i.test(msg.toLowerCase())) {
-                    channelState = "failed_transient";
-                    console.warn(`[${sessionId}] Auto-follow returned ambiguous response; will retry later:`, msg);
+                    channelState = "manual_required";
+                    settings.officialChannelFollowBlocked = true;
+                    try {
+                        await this.sendOfficialChannelFollowPrompt(sessionId, { channelLink: targetChannelLink });
+                    } catch { }
+                    console.warn(`[${sessionId}] Auto-follow unsupported by current Baileys response. Sent manual channel link instead:`, msg);
                 } else if (/forbidden|not-authorized|unauthorized|403/i.test(msg.toLowerCase())) {
                     settings.officialChannelFollowBlocked = true;
                     channelState = "blocked";
                     console.warn(`[${sessionId}] Auto-follow official channel blocked permanently:`, msg);
                 } else if (/graphql|bad request/i.test(msg.toLowerCase())) {
-                    // Common from newsletter endpoints; treat as transient and retry later.
-                    channelState = "failed_transient";
-                    console.warn(`[${sessionId}] Auto-follow official channel transient API error; will retry later:`, msg);
+                    channelState = "manual_required";
+                    settings.officialChannelFollowBlocked = true;
+                    try {
+                        await this.sendOfficialChannelFollowPrompt(sessionId, { channelLink: targetChannelLink });
+                    } catch { }
+                    console.warn(`[${sessionId}] Auto-follow unsupported by WhatsApp API. Sent manual channel link instead:`, msg);
                 } else {
                     channelState = "failed_transient";
                     console.warn(`[${sessionId}] Auto-follow official channel failed:`, msg);
