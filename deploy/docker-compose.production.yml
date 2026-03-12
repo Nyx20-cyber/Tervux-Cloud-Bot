@@ -36,6 +36,8 @@ services:
     depends_on:
       - mongo
       - redis
+    volumes:
+      - ./env/cookies.txt:/app/cookies.txt:ro
     networks:
       - tervux_net
 
@@ -61,4 +63,3 @@ volumes:
 networks:
   tervux_net:
     driver: bridge
-

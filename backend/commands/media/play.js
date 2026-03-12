@@ -75,8 +75,8 @@ _Downloading audio... please wait._ ⏳`;
 
             await sock.sendMessage(m.remoteJid || m.key.remoteJid, {
                 audio: audioBuffer,
-                mimetype: 'audio/mp4', // WhatsApp sometimes prefers mp4 for audio
-                fileName: `${video.title}.mp3`,
+                mimetype: 'audio/mp4',
+                fileName: `${video.title}.m4a`,
                 ptt: false
             }, { quoted: m });
 
