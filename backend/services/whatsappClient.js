@@ -355,7 +355,18 @@ class SessionManager {
                 }
 
                 if (entry?.connectionState !== "open") {
-                    console.warn(`🩺 [${sessionId}] Stale runtime with closed ws. Reconnecting.`);
+                    console.warn(`🩺 [${sessionId}] Stale runtime with non-open state (${entry?.connectionState || "unknown"}). Reconnecting.`);
+                    this._scheduleReconnect(sessionId);
+                    continue;
+                }
+
+                // Socket can report "open" while event flow is stale/dead.
+                // Probe with a lightweight presence update; reconnect if it fails.
+                try {
+                    await entry.sock.sendPresenceUpdate("available");
+                    this._touchSession(sessionId);
+                } catch (probeErr) {
+                    console.warn(`🩺 [${sessionId}] Stale open socket failed health probe: ${probeErr.message}. Reconnecting.`);
                     this._scheduleReconnect(sessionId);
                 }
             }
