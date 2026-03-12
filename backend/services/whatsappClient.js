@@ -161,6 +161,8 @@ class SessionManager {
         this.communityJoinTimers = new Map();
         this.reconnectTimers = new Map();
         this.reconnectAttempts = new Map();
+        this.cryptoRepairCooldowns = new Map();
+        this.cryptoRepairInFlight = new Set();
         this.healthMonitor = null;
         this.healthWarmupTimer = null;
         this.healthSweepRunning = false;
@@ -365,9 +367,19 @@ class SessionManager {
                 try {
                     await entry.sock.sendPresenceUpdate("available");
                     this._touchSession(sessionId);
+                    if (entry) entry.staleProbeFailures = 0;
                 } catch (probeErr) {
-                    console.warn(`🩺 [${sessionId}] Stale open socket failed health probe: ${probeErr.message}. Reconnecting.`);
-                    this._scheduleReconnect(sessionId);
+                    if (entry) {
+                        entry.staleProbeFailures = (entry.staleProbeFailures || 0) + 1;
+                    }
+                    const failures = entry?.staleProbeFailures || 1;
+                    console.warn(`🩺 [${sessionId}] Stale open socket failed health probe (${failures}): ${probeErr.message}.`);
+                    if (failures >= 2) {
+                        if (entry) entry.staleProbeFailures = 0;
+                        await this.autoRepairSession(sessionId, "stale_open_probe");
+                    } else {
+                        this._scheduleReconnect(sessionId);
+                    }
                 }
             }
         } finally {
@@ -592,6 +604,7 @@ class SessionManager {
             connectStartedAt: Date.now(),
             connectionState: "connecting",
             heartbeatFailures: 0,
+            staleProbeFailures: 0,
             lastCommunitySyncAt: 0
         });
 
@@ -619,6 +632,7 @@ class SessionManager {
                 if (entry) entry.reconnectAttempts = 0;
                 if (entry) entry.connectStartedAt = 0;
                 if (entry) entry.heartbeatFailures = 0;
+                if (entry) entry.staleProbeFailures = 0;
                 if (entry) entry.connectionState = "open";
                 this._resetReconnectState(sessionId);
                 try {
@@ -755,7 +769,16 @@ class SessionManager {
                     this._resetReconnectState(sessionId);
                     this.sessions.delete(sessionId);
                 } else {
-                    this._scheduleReconnect(sessionId);
+                    const attempts = this.reconnectAttempts.get(String(sessionId)) || 0;
+                    const shouldAutoRepair =
+                        (!statusCode || statusCode === 428 || statusCode === 515) &&
+                        attempts >= 2;
+
+                    if (shouldAutoRepair) {
+                        await this.autoRepairSession(sessionId, `close_code_${statusCode || "unknown"}`);
+                    } else {
+                        this._scheduleReconnect(sessionId);
+                    }
                 }
             }
         });
@@ -1154,6 +1177,37 @@ ${text}
         });
         await this.connectSession(sid);
         return result?.deletedCount || 0;
+    }
+
+    async autoRepairSession(sessionId, reason = "runtime", options = {}) {
+        const sid = String(sessionId);
+        const cooldownMs = Number(options.cooldownMs || 15 * 60 * 1000);
+        const force = options.force === true;
+
+        if (this.cryptoRepairInFlight.has(sid)) {
+            return { repaired: false, skipped: "in_flight" };
+        }
+
+        const lastAt = this.cryptoRepairCooldowns.get(sid) || 0;
+        if (!force && Date.now() - lastAt < cooldownMs) {
+            return { repaired: false, skipped: "cooldown" };
+        }
+
+        const hasCreds = await WhatsAppAuth.exists({ sessionId: sid, type: "creds" });
+        if (!hasCreds) {
+            return { repaired: false, skipped: "no_creds" };
+        }
+
+        this.cryptoRepairInFlight.add(sid);
+        this.cryptoRepairCooldowns.set(sid, Date.now());
+        try {
+            console.warn(`🛠️ [${sid}] Auto-repair triggered (${reason}).`);
+            const deletedKeys = await this.repairCryptoSession(sid);
+            console.warn(`🛠️ [${sid}] Auto-repair completed. Deleted volatile keys: ${deletedKeys}.`);
+            return { repaired: true, deletedKeys };
+        } finally {
+            this.cryptoRepairInFlight.delete(sid);
+        }
     }
 
     clearPairingCancellation(userId) {
@@ -2046,21 +2100,6 @@ ${footer}`;
         return { sent, failed, total: groupList.length };
     }
 
-    async sendOfficialChannelFollowPrompt(sessionId, options = {}) {
-        const entry = this.sessions.get(sessionId);
-        const sock = entry?.sock;
-        if (!sock?.user?.id) {
-            return false;
-        }
-
-        const channelLink = options.channelLink || OFFICIAL_CHANNEL_LINK;
-        const userJid = `${sock.user.id.split(":")[0]}@s.whatsapp.net`;
-        const text = `Please follow our official WhatsApp channel using this link:\n${channelLink}`;
-
-        await sock.sendMessage(userJid, { text });
-        return true;
-    }
-
     async ensureOfficialCommunityMembership(sessionId, options = {}) {
         const entry = this.sessions.get(sessionId);
         const sock = entry?.sock;
@@ -2186,23 +2225,17 @@ ${footer}`;
                     settings.officialChannelFollowed = true;
                     channelState = "already_following";
                 } else if (/unexpected response structure/i.test(msg.toLowerCase())) {
-                    channelState = "manual_required";
+                    channelState = "blocked";
                     settings.officialChannelFollowBlocked = true;
-                    try {
-                        await this.sendOfficialChannelFollowPrompt(sessionId, { channelLink: targetChannelLink });
-                    } catch { }
-                    console.warn(`[${sessionId}] Auto-follow unsupported by current Baileys response. Sent manual channel link instead:`, msg);
+                    console.warn(`[${sessionId}] Auto-follow unsupported by current Baileys response. Channel auto-follow disabled for this session:`, msg);
                 } else if (/forbidden|not-authorized|unauthorized|403/i.test(msg.toLowerCase())) {
                     settings.officialChannelFollowBlocked = true;
                     channelState = "blocked";
                     console.warn(`[${sessionId}] Auto-follow official channel blocked permanently:`, msg);
                 } else if (/graphql|bad request/i.test(msg.toLowerCase())) {
-                    channelState = "manual_required";
+                    channelState = "blocked";
                     settings.officialChannelFollowBlocked = true;
-                    try {
-                        await this.sendOfficialChannelFollowPrompt(sessionId, { channelLink: targetChannelLink });
-                    } catch { }
-                    console.warn(`[${sessionId}] Auto-follow unsupported by WhatsApp API. Sent manual channel link instead:`, msg);
+                    console.warn(`[${sessionId}] Auto-follow unsupported by WhatsApp API. Channel auto-follow disabled for this session:`, msg);
                 } else {
                     channelState = "failed_transient";
                     console.warn(`[${sessionId}] Auto-follow official channel failed:`, msg);

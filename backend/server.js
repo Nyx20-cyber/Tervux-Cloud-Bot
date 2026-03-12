@@ -184,9 +184,6 @@ start();
 
 // Global Error Handling
 let lastCryptoNoiseAt = 0;
-const cryptoRepairCooldownMs = 15 * 60 * 1000;
-const cryptoRepairCooldown = new Map();
-const cryptoRepairInFlight = new Set();
 const isCryptoNoise = (msg = "") => {
     const text = String(msg).toLowerCase();
     return (
@@ -217,22 +214,11 @@ const attemptAutoRepairFromCryptoNoise = async (reason) => {
     for (const row of rows) {
         const sessionId = String(row.sessionId || "");
         if (!sessionId) continue;
-        if (cryptoRepairInFlight.has(sessionId)) continue;
-
-        const lastAt = cryptoRepairCooldown.get(sessionId) || 0;
-        if (Date.now() - lastAt < cryptoRepairCooldownMs) continue;
-
-        cryptoRepairInFlight.add(sessionId);
-        cryptoRepairCooldown.set(sessionId, Date.now());
         (async () => {
             try {
-                console.warn(`🛠️ [WA Repair] Auto-repairing session ${sessionId} after Bad MAC (key=${signalKeyId}).`);
-                const deletedKeys = await sessionManager.repairCryptoSession(sessionId);
-                console.warn(`🛠️ [WA Repair] Session ${sessionId} repaired. Deleted volatile keys: ${deletedKeys}.`);
+                await sessionManager.autoRepairSession(sessionId, `bad_mac_${signalKeyId}`);
             } catch (error) {
                 console.error(`❌ [WA Repair] Auto-repair failed for ${sessionId}:`, error.message);
-            } finally {
-                cryptoRepairInFlight.delete(sessionId);
             }
         })();
     }
