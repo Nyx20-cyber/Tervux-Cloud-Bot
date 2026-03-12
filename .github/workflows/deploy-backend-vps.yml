@@ -36,6 +36,7 @@ jobs:
             # Preserve server-local runtime config before repo reset
             mkdir -p /tmp/tervux-deploy-backup
             [ -f deploy/env/backend.env ] && cp deploy/env/backend.env /tmp/tervux-deploy-backup/backend.env || true
+            [ -f deploy/env/cookies.txt ] && cp deploy/env/cookies.txt /tmp/tervux-deploy-backup/cookies.txt || true
             [ -f deploy/nginx/nginx.conf ] && cp deploy/nginx/nginx.conf /tmp/tervux-deploy-backup/nginx.conf || true
 
             git fetch origin main
@@ -44,6 +45,9 @@ jobs:
 
             # Restore server-local runtime config
             [ -f /tmp/tervux-deploy-backup/backend.env ] && cp /tmp/tervux-deploy-backup/backend.env deploy/env/backend.env || true
+            mkdir -p deploy/env
+            [ -f /tmp/tervux-deploy-backup/cookies.txt ] && cp /tmp/tervux-deploy-backup/cookies.txt deploy/env/cookies.txt || true
+            [ -f deploy/env/cookies.txt ] || touch deploy/env/cookies.txt
             [ -f /tmp/tervux-deploy-backup/nginx.conf ] && cp /tmp/tervux-deploy-backup/nginx.conf deploy/nginx/nginx.conf || true
 
             cd deploy

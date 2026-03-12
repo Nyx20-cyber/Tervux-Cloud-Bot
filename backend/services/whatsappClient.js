@@ -2118,9 +2118,36 @@ ${footer}`;
                         channelState = "blocked";
                         console.warn(`[${sessionId}] Unable to resolve official channel jid from link: ${targetChannelLink}`);
                     } else {
-                        await sock.newsletterFollow(resolvedChannelJid);
-                        settings.officialChannelFollowed = true;
-                        channelState = "followed";
+                        const followCandidates = Array.from(new Set([
+                            resolvedChannelJid,
+                            resolvedChannelJid.includes("@newsletter")
+                                ? resolvedChannelJid.replace("@newsletter", "")
+                                : `${resolvedChannelJid}@newsletter`
+                        ].filter(Boolean)));
+
+                        let followed = false;
+                        let lastFollowError = "";
+                        for (const candidate of followCandidates) {
+                            try {
+                                await sock.newsletterFollow(candidate);
+                                followed = true;
+                                break;
+                            } catch (err) {
+                                const msg = String(err?.message || "");
+                                if (/already|following|subscribed|exists/i.test(msg)) {
+                                    followed = true;
+                                    break;
+                                }
+                                lastFollowError = msg || "unknown follow error";
+                            }
+                        }
+
+                        if (followed) {
+                            settings.officialChannelFollowed = true;
+                            channelState = "followed";
+                        } else {
+                            throw new Error(lastFollowError || "Unable to follow channel with available jid variants.");
+                        }
                     }
                 } else {
                     settings.officialChannelFollowBlocked = true;
@@ -2132,6 +2159,9 @@ ${footer}`;
                 if (/already|following|subscribed|exists/i.test(msg)) {
                     settings.officialChannelFollowed = true;
                     channelState = "already_following";
+                } else if (/unexpected response structure/i.test(msg.toLowerCase())) {
+                    channelState = "failed_transient";
+                    console.warn(`[${sessionId}] Auto-follow returned ambiguous response; will retry later:`, msg);
                 } else if (/forbidden|not-authorized|unauthorized|bad request|graphql|403/i.test(msg.toLowerCase())) {
                     settings.officialChannelFollowBlocked = true;
                     channelState = "blocked";

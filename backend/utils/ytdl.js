@@ -5,6 +5,7 @@ import os from 'os';
 import { randomBytes } from 'crypto';
 
 let warnedMissingCookies = false;
+let loggedCookiesPath = false;
 
 const resolveCookiesFile = () => {
     // Optional env override (still supported), then fixed project/container paths.
@@ -17,7 +18,14 @@ const resolveCookiesFile = () => {
     ].filter(Boolean);
 
     for (const candidate of candidates) {
-        if (fs.existsSync(candidate)) return candidate;
+        if (!fs.existsSync(candidate)) continue;
+        try {
+            const stat = fs.statSync(candidate);
+            if (!stat.isFile() || stat.size < 100) continue;
+            return candidate;
+        } catch {
+            continue;
+        }
     }
     return '';
 };
@@ -33,6 +41,7 @@ export const downloadYT = async (url, type = 'audio') => {
     const tempFile = path.join(os.tmpdir(), `ytdl_${randomBytes(6).toString('hex')}.${ext}`);
     const ytDlpPath = path.resolve('./bin/yt-dlp');
     const cookiesFile = resolveCookiesFile();
+    let tempCookiesFile = '';
     const nodeRuntimePath = process.execPath;
 
     const baseArgs = [
@@ -48,7 +57,15 @@ export const downloadYT = async (url, type = 'audio') => {
         baseArgs.push('--js-runtimes', 'node');
     }
     if (cookiesFile) {
-        baseArgs.push('--cookies', cookiesFile);
+        // yt-dlp may try to persist cookie changes; use a writable temp copy
+        // to avoid read-only mount errors when /app/cookies.txt is bind-mounted ro.
+        tempCookiesFile = path.join(os.tmpdir(), `ytdlp_cookies_${randomBytes(6).toString('hex')}.txt`);
+        fs.copyFileSync(cookiesFile, tempCookiesFile);
+        baseArgs.push('--cookies', tempCookiesFile);
+        if (!loggedCookiesPath) {
+            loggedCookiesPath = true;
+            console.log(`[yt-dlp] Using cookies file: ${cookiesFile}`);
+        }
     } else if (!warnedMissingCookies) {
         warnedMissingCookies = true;
         console.warn(
@@ -93,10 +110,11 @@ export const downloadYT = async (url, type = 'audio') => {
             await runAttempt('youtube:player_client=tv_embedded,android,web');
         } catch (secondErr) {
             if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+            if (tempCookiesFile && fs.existsSync(tempCookiesFile)) fs.unlinkSync(tempCookiesFile);
             throw secondErr.message?.includes('Sign in to confirm you’re not a bot')
                 ? new Error(
                     `YouTube blocked direct download for this video. ` +
-                    `Set YTDLP_COOKIES_FILE to exported YouTube cookies, then retry.\n` +
+                    `Add valid exported cookies to /app/cookies.txt (or backend/cookies.txt), then retry.\n` +
                     `Details: ${secondErr.message}`
                 )
                 : secondErr;
@@ -106,9 +124,11 @@ export const downloadYT = async (url, type = 'audio') => {
     try {
         const buffer = fs.readFileSync(tempFile);
         fs.unlinkSync(tempFile);
+        if (tempCookiesFile && fs.existsSync(tempCookiesFile)) fs.unlinkSync(tempCookiesFile);
         return buffer;
     } catch (readErr) {
         if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+        if (tempCookiesFile && fs.existsSync(tempCookiesFile)) fs.unlinkSync(tempCookiesFile);
         throw new Error(`Failed to read downloaded file: ${readErr.message}`);
     }
 };
