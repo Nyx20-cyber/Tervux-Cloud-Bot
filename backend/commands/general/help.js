@@ -77,6 +77,7 @@ export const help = async (sock, m, args) => {
 │ ℹ️ ➾ *${p}help*
 │ 💎 ➾ *${p}creator*
 │ 💫 ➾ *${p}quote*
+│ 🔄 ➾ *${p}update*
 ╰──────────────────────────────╯
 
 ╭───『 🎬 *𝕄𝔼𝔻𝕀𝔸* 』───╮
@@ -90,6 +91,7 @@ export const help = async (sock, m, args) => {
 │ 🔮 ➾ *${p}zodiac* <sign>
 │ 🖼️ ➾ *${p}wallpaper* <theme>
 │ 🌸 ➾ *${p}waifu* <category>
+│ 👁️ ➾ *${p}vv* (reply to view once)
 ╰──────────────────────────────╯
 
 ╭───『 👤 *𝕊𝕋𝔸𝕋𝕌𝕊* 』───╮

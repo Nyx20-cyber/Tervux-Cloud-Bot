@@ -40,6 +40,7 @@ import { block } from "./general/block.js";
 import { unblock } from "./general/unblock.js";
 import { creator } from "./general/creator.js";
 import { quote } from "./general/quote.js";
+import { update } from "./general/update.js";
 
 // Media Commands
 import { movie } from "./media/movie.js";
@@ -52,6 +53,7 @@ import { lyrics } from "./media/lyrics.js";
 import { zodiac } from "./media/zodiac.js";
 import { wallpaper } from "./media/wallpaper.js";
 import { waifu } from "./media/waifu.js";
+import { vv } from "./media/vv.js";
 
 // Status Commands
 import { status } from "./status/profile.js";
@@ -160,6 +162,7 @@ export const commands = {
     unblock,
     creator,
     quote,
+    update,
 
     // Media Commands
     movie,
@@ -172,6 +175,7 @@ export const commands = {
     zodiac,
     wallpaper,
     waifu,
+    vv,
 
     // Status Commands
     status,
