@@ -121,7 +121,6 @@ export const help = async (sock, m, args) => {
 │ ✏️ ➾ *${p}prefix* <new>
 │ 🌐 ➾ *${p}alwaysonline*
 │ ❤️ ➾ *${p}autolikestatus*
-│ 👀 ➾ *${p}autoviewstatus*
 │ 🛡️ ➾ *${p}antidelete* _(DMs only)_
 │ 📵 ➾ *${p}anticall*
 │ ✔️ ➾ *${p}autoread*

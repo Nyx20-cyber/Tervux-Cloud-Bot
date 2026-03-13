@@ -74,8 +74,8 @@ export const downloadYT = async (url, type = 'audio') => {
     }
 
     const formatArgs = type === 'audio'
-        ? ['-f', 'bestaudio[ext=m4a]/bestaudio[acodec!=none]/bestaudio']
-        : ['-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'];
+        ? ['-f', 'bestaudio[ext=m4a]/bestaudio[acodec!=none]/bestaudio/best']
+        : ['-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best'];
 
     const runAttempt = (extractorArgs) => new Promise((resolve, reject) => {
         const args = [
