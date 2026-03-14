@@ -153,6 +153,133 @@ router.post("/login", authLimiter, async (req, res) => {
 });
 
 /**
+ * PUT /api/auth/account/profile
+ * Update account name after confirming current name and password
+ */
+router.put("/account/profile", authenticate, async (req, res) => {
+    try {
+        const { currentName, newName, currentPassword } = req.body;
+        const user = await User.findById(req.user._id);
+
+        if (!user) return res.status(404).json({ error: "User not found" });
+        if (!currentName || !newName || !currentPassword) {
+            return res.status(400).json({ error: "Current name, new name, and current password are required" });
+        }
+
+        if (sanitize(currentName) !== user.name) {
+            return res.status(400).json({ error: "Current name does not match your account" });
+        }
+
+        const sanitizedNewName = sanitize(newName);
+        if (!sanitizedNewName) {
+            return res.status(400).json({ error: "Please provide a valid new name" });
+        }
+
+        const isValid = await user.comparePassword(currentPassword);
+        if (!isValid) {
+            return res.status(401).json({ error: "Current password is incorrect" });
+        }
+
+        user.name = sanitizedNewName;
+        await user.save();
+
+        const serializedUser = user.toJSON();
+        emitToUser(user._id, "account_profile_updated", { user: serializedUser });
+
+        res.json({ success: true, user: serializedUser });
+    } catch (error) {
+        console.error("Update profile name error:", error);
+        res.status(500).json({ error: "Failed to update profile" });
+    }
+});
+
+/**
+ * PUT /api/auth/account/email
+ * Update account email after confirming current email and password
+ */
+router.put("/account/email", authenticate, async (req, res) => {
+    try {
+        const { currentEmail, newEmail, currentPassword } = req.body;
+        const user = await User.findById(req.user._id);
+
+        if (!user) return res.status(404).json({ error: "User not found" });
+        if (!currentEmail || !newEmail || !currentPassword) {
+            return res.status(400).json({ error: "Current email, new email, and current password are required" });
+        }
+
+        const normalizedCurrentEmail = String(currentEmail).trim().toLowerCase();
+        const normalizedNewEmail = String(newEmail).trim().toLowerCase();
+
+        if (normalizedCurrentEmail !== user.email) {
+            return res.status(400).json({ error: "Current email does not match your account" });
+        }
+
+        if (!validator.isEmail(normalizedNewEmail)) {
+            return res.status(400).json({ error: "Please provide a valid new email address" });
+        }
+
+        const existingUser = await User.findOne({ email: normalizedNewEmail, _id: { $ne: user._id } }).lean();
+        if (existingUser) {
+            return res.status(409).json({ error: "That email is already in use" });
+        }
+
+        const isValid = await user.comparePassword(currentPassword);
+        if (!isValid) {
+            return res.status(401).json({ error: "Current password is incorrect" });
+        }
+
+        user.email = normalizedNewEmail;
+        await user.save();
+
+        const serializedUser = user.toJSON();
+        emitToUser(user._id, "account_profile_updated", { user: serializedUser });
+
+        res.json({ success: true, user: serializedUser });
+    } catch (error) {
+        console.error("Update account email error:", error);
+        res.status(500).json({ error: "Failed to update email" });
+    }
+});
+
+/**
+ * PUT /api/auth/account/password
+ * Update password after confirming current password
+ */
+router.put("/account/password", authenticate, async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const user = await User.findById(req.user._id);
+
+        if (!user) return res.status(404).json({ error: "User not found" });
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: "Current password and new password are required" });
+        }
+
+        if (String(newPassword).length < 6) {
+            return res.status(400).json({ error: "New password must be at least 6 characters" });
+        }
+
+        const isValid = await user.comparePassword(currentPassword);
+        if (!isValid) {
+            return res.status(401).json({ error: "Current password is incorrect" });
+        }
+
+        const samePassword = await user.comparePassword(newPassword);
+        if (samePassword) {
+            return res.status(400).json({ error: "New password must be different from the current password" });
+        }
+
+        user.password = String(newPassword);
+        await user.save();
+
+        res.json({ success: true, message: "Password updated successfully" });
+    } catch (error) {
+        console.error("Update account password error:", error);
+        res.status(500).json({ error: "Failed to update password" });
+    }
+});
+
+/**
  * GET /api/auth/me
  * Get current user profile
  */

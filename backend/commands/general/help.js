@@ -77,12 +77,11 @@ export const help = async (sock, m, args) => {
 │ ℹ️ ➾ *${p}help*
 │ 💎 ➾ *${p}creator*
 │ 💫 ➾ *${p}quote*
-│ 🔄 ➾ *${p}update*
 ╰──────────────────────────────╯
 
 ╭───『 🎬 *𝕄𝔼𝔻𝕀𝔸* 』───╮
-│ 🎵 ➾ *${p}play* <song name>
-│ 📹 ➾ *${p}video* <video name>
+│ 🎵 ➾ *${p}play* <YouTube link / ID>
+│ 📹 ➾ *${p}video* <YouTube link / ID>
 │ 🎬 ➾ *${p}movie* <movie name>
 │ ⚽ ➾ *${p}sport* <team name>
 │ 📰 ➾ *${p}news*
@@ -120,10 +119,11 @@ export const help = async (sock, m, args) => {
 │ 🔧 ➾ *${p}settings*
 │ ✏️ ➾ *${p}prefix* <new>
 │ 🌐 ➾ *${p}alwaysonline*
-│ ❤️ ➾ *${p}autolikestatus*
+│ ❤️ ➾ *${p}autolikestatus* _(react to status)_
+│ 👁️ ➾ *${p}autoviewstatus* _(view status only)_
 │ 🛡️ ➾ *${p}antidelete* _(DMs only)_
 │ 📵 ➾ *${p}anticall*
-│ ✔️ ➾ *${p}autoread*
+│ ✔️ ➾ *${p}autoread* _(mark messages as read)_
 │ ⌨️ ➾ *${p}alwaystyping*
 │ 🎙️ ➾ *${p}alwaysrecording*
 ╰──────────────────────────────╯

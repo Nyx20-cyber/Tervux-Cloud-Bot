@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ShieldCheck, CircleDollarSign, AlertTriangle, Users, LayoutDashboard, Activity, Settings2, Network } from "lucide-react";
+import { ShieldCheck, CircleDollarSign, AlertTriangle, Users, LayoutDashboard, Activity, Settings2, Network, GraduationCap, SlidersHorizontal, CircleHelp, HandCoins, ReceiptText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLocaleStore } from "@/store/useLocaleStore";
@@ -20,9 +20,14 @@ export function Sidebar({ isMobile }: { isMobile?: boolean }) {
         { href: '/dashboard/pair', label: t.pair, icon: Network },
         { href: '/dashboard/configurations', label: t.configurations, icon: Settings2 },
         { href: '/dashboard/deployments', label: t.deployments, icon: ShieldCheck },
+        { href: '/dashboard/tutorials', label: t.tutorials, icon: GraduationCap },
+        { href: '/dashboard/help-center', label: t.help_center, icon: CircleHelp },
+        { href: '/dashboard/earn-money', label: t.earn_money, icon: HandCoins },
         { href: '/dashboard/referrals', label: t.referrals, icon: Users },
         { href: '/dashboard/notifications', label: t.notifications, icon: Activity },
         { href: '/dashboard/billing', label: t.billing, icon: CircleDollarSign },
+        { href: '/dashboard/transactions', label: t.transactions, icon: ReceiptText },
+        { href: '/dashboard/settings', label: t.settings, icon: SlidersHorizontal },
         ...(user?.role === 'admin' ? [{ href: '/admin', label: t.admin_panel, icon: AlertTriangle }] : []),
     ];
 

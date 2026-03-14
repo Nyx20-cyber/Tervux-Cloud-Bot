@@ -91,6 +91,16 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             });
         });
 
+        socket.on("account_profile_updated", (payload: { user?: typeof user }) => {
+            const incomingUser = payload?.user;
+            const currentUser = useAuthStore.getState().user;
+            if (!incomingUser || !currentUser) return;
+            setUser({
+                ...currentUser,
+                ...incomingUser
+            });
+        });
+
         socket.on("balance_update", (payload: { coins?: number; delta?: number; reason?: string }) => {
             const nextCoins = Number(payload?.coins);
             if (!Number.isFinite(nextCoins)) return;

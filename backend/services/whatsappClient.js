@@ -1,4 +1,4 @@
-import { default as makeWASocket, DisconnectReason, Browsers, delay as baileysDelay, fetchLatestWaWebVersion } from "@whiskeysockets/baileys";
+import { default as makeWASocket, DisconnectReason, Browsers, delay as baileysDelay, fetchLatestWaWebVersion, jidNormalizedUser } from "@whiskeysockets/baileys";
 import pino from "pino";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -433,6 +433,25 @@ class SessionManager {
         }
     }
 
+    async markMessageAsRead(sock, message) {
+        if (!message?.key || message.key.fromMe) return false;
+
+        const remoteJid = message.key.remoteJid;
+        if (!remoteJid || remoteJid === "status@broadcast") return false;
+
+        const participantRaw = message.key.participant || message.participant;
+        const participant = participantRaw ? jidNormalizedUser(participantRaw) : undefined;
+        const readKey = {
+            remoteJid,
+            id: message.key.id,
+            fromMe: false,
+            ...(participant ? { participant } : {})
+        };
+
+        await sock.readMessages([readKey]);
+        return true;
+    }
+
     scheduleOfficialCommunityMembership(sessionId, options = {}) {
         const key = String(sessionId);
         const initialDelayMs = Number(options.initialDelayMs || 15_000);
@@ -792,9 +811,18 @@ class SessionManager {
                 for (const call of node) {
                     if (call.status === "offer") {
                         try {
+                            const footer = await getCommandFooterText();
                             await sock.rejectCall(call.id, call.from);
                             await sock.sendMessage(call.from, {
-                                text: "📵 *Tervux Bot*\n\nCalls are automatically rejected. Please send a text message instead."
+                                text: `╔══════════════════════════════════╗
+║       *📵 TAARIFA YA CALL*      ║
+╚══════════════════════════════════╝
+
+Namba hii haipokei calls za WhatsApp.
+
+Tafadhali tuma ujumbe wa kawaida wa maandishi badala yake, na utapata majibu humo.
+
+${footer}`
                             });
                         } catch (err) { console.error(`[${sessionId}] Anti-Call error:`, err.message); }
                     }
@@ -824,25 +852,42 @@ class SessionManager {
                         const isDeployed = dbSession?.expiresAt && new Date(dbSession.expiresAt) > new Date();
                         if (dbSession?.status === "paused" || !isDeployed) continue;
 
-                        const participant = m.key.participant || m.participant;
-                        try {
-                            if (config?.autoViewStatus) {
-                                // Mark as available so WhatsApp accepts the read receipt
-                                await sock.sendPresenceUpdate("available");
-                                // Explicitly construct the key with participant for robustness
-                                await sock.readMessages([{
-                                    ...m.key,
-                                    participant: participant
-                                }]);
+                        const participantRaw = m.key.participant || m.participant;
+                        const participant = participantRaw ? jidNormalizedUser(participantRaw) : "";
+                        if (config?.autoViewStatus) {
+                            try {
+                                if (!participant || !m.key?.id) {
+                                    console.warn(`[${sessionId}] Auto-view skipped: missing participant or status message ID.`);
+                                } else {
+                                    // Presence targeted to the status owner improves receipt reliability.
+                                    await sock.sendPresenceUpdate("available", participant);
+                                    await sock.readMessages([{
+                                        remoteJid: "status@broadcast",
+                                        id: m.key.id,
+                                        fromMe: false,
+                                        participant
+                                    }]);
+                                    console.log(`[${sessionId}] ✅ Auto-viewed status from ${participant} (${m.key.id})`);
+                                }
+                            } catch (err) {
+                                console.error(`[${sessionId}] Auto View Status failed:`, err.message);
                             }
-                            if (config?.autoLikeStatus) {
-                                const emoji = getRandomEmoji();
-                                await sock.sendMessage(m.key.remoteJid, {
-                                    react: { text: emoji, key: m.key }
-                                }, { statusJidList: [participant] });
+                        }
+
+                        if (config?.autoLikeStatus) {
+                            try {
+                                if (!participant) {
+                                    console.warn(`[${sessionId}] Auto-like skipped: missing participant for status message ${m.key?.id || "unknown"}.`);
+                                } else {
+                                    const emoji = getRandomEmoji();
+                                    await sock.sendMessage(m.key.remoteJid, {
+                                        react: { text: emoji, key: m.key }
+                                    }, { statusJidList: [participant] });
+                                    console.log(`[${sessionId}] ❤️ Auto-reacted to status from ${participant} with ${emoji}`);
+                                }
+                            } catch (err) {
+                                console.error(`[${sessionId}] Auto Like Status failed:`, err.message);
                             }
-                        } catch (err) {
-                            console.error(`[${sessionId}] Auto View/Like Status failed:`, err.message);
                         }
                     }
                 }
@@ -949,7 +994,9 @@ class SessionManager {
                     if (!messageText.startsWith(prefix)) {
                         // Still handle auto-read and presence
                         if (config?.autoReadMessages && !m.key.fromMe) {
-                            sock.readMessages([m.key]).catch(() => { });
+                            this.markMessageAsRead(sock, m).catch((err) => {
+                                console.warn(`[${sessionId}] Auto-read skipped for ${m.key?.remoteJid || "unknown"}: ${err.message}`);
+                            });
                         }
                         if (config?.alwaysTyping && !m.key.fromMe) {
                             sock.sendPresenceUpdate("composing", m.key.remoteJid).catch(() => { });
@@ -1072,7 +1119,9 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
 
                     // Auto-read and presence
                     if (config?.autoReadMessages && !m.key.fromMe) {
-                        sock.readMessages([m.key]).catch(() => { });
+                        this.markMessageAsRead(sock, m).catch((err) => {
+                            console.warn(`[${sessionId}] Auto-read skipped for ${m.key?.remoteJid || "unknown"}: ${err.message}`);
+                        });
                     }
                     if (config?.alwaysTyping && !m.key.fromMe) {
                         sock.sendPresenceUpdate("composing", m.key.remoteJid).catch(() => { });
@@ -1536,32 +1585,32 @@ ${text}
                     const footerText = await getCommandFooterText();
                     const welcomeMsg = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *🤖 TERVUX CLOUD BOT*
-*✅ DEVICE CONNECTED SUCCESSFULLY*
+*✅ NAMBA YAKO IMEUNGANISHWA KIKAMILIFU*
 *🌐 bot.tervux.com*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-*🚀 NEXT STEPS*
+*🚀 HATUA ZA KUANZA*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-*1) 💳 BILLING*
+*1) 💳 NUNUA SARAFU*
 https://bot.tervux.com/dashboard/billing
-Buy coins for your account.
+Nunua sarafu za kutumia kwenye akaunti yako.
 
 
-*2) 🛡️ DEPLOYMENTS*
-Deploy your bot for *50 coins 🪙*
-Deployment duration: *30 days*.
+*2) 🛡️ DEPLOY BOT*
+Deploy bot lako kwa *sarafu 50 🪙*
+Muda wa deployment ni *siku 30*.
 
 
-*3) ⚙️ CONFIGURATIONS*
-Open bot settings and configure.
+*3) ⚙️ MIPANGILIO YA BOT*
+Fungua mipangilio ya bot na uweke unavyotaka.
 
 
-*📞 HELP*
+*📞 USAIDIZI*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Use the floating support button
-to chat with support on WhatsApp.
+Tumia kitufe cha support kinachoelea
+ili kuzungumza na support kupitia WhatsApp.
 
 
 ${footerText}`;
@@ -1759,32 +1808,32 @@ ${footerText}`;
         const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
         const footer = await getCommandFooterText();
         const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*🚀 DEPLOYMENT SUCCESS*
-*✅ YOUR BOT IS NOW ACTIVE*
-*🪙 Coins deducted:* *${cost}*
+*🚀 DEPLOYMENT IMEKAMILIKA*
+*✅ BOT LAKO SASA LINAFANYA KAZI*
+*🪙 Sarafu zilizokatwa:* *${cost}*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-*⏳ VALIDITY*
+*⏳ MUDA WA MATUMIZI*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*Uptime:* 24 hours/day
-*Duration:* 30 days
-*Start:* ${fmt(startAt)}
-*End:* ${fmt(endAt)}
+*Utaendelea kufanya kazi:* masaa 24 kwa siku
+*Muda wa deployment:* siku 30
+*Mwanzo:* ${fmt(startAt)}
+*Mwisho:* ${fmt(endAt)}
 
 
-*📘 QUICK USE*
+*📘 JINSI YA KUTUMIA HARAKA*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Open any chat and send: *${prefix}help*
+• Fungua chat yoyote kisha tuma: *${prefix}help*
 
-• Basic checks: *${prefix}ping* and *${prefix}botstats*
+• Kuangalia hali ya bot tumia: *${prefix}ping* na *${prefix}botstats*
 
-• Settings panel: *${prefix}settings*
+• Mipangilio ya bot tumia: *${prefix}settings*
 
-• Group tools work where bot has admin rights.
+• Commands za groups zitafanya kazi pale bot likiwa admin.
 
 
-*Need more commands?* Start with *${prefix}help*.
+*Unahitaji commands zaidi?* Anza na *${prefix}help*.
 
 
 ${footer}`;
@@ -1830,34 +1879,34 @@ ${footer}`;
         const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
         const footer = await getCommandFooterText();
         const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*⛔ DEPLOYMENT EXPIRED*
+*⛔ MUDA WA DEPLOYMENT UMEISHA*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-Your 30-day deployment period has ended.
+Muda wako wa deployment wa siku 30 umefika mwisho.
 
-The bot session has now been stopped and removed automatically.
-
-
-*Expiry time:* ${fmt(expiredAt)}
+Session ya bot sasa imesimamishwa na kufutwa kiotomatiki.
 
 
-To continue using your bot, please follow these steps again:
+*Muda ilipoisha:* ${fmt(expiredAt)}
 
-1) Connect your device
+
+Ili uendelee kutumia bot lako, tafadhali fuata hatua hizi tena:
+
+1) Unganisha namba yako
 https://bot.tervux.com/dashboard/pair
 
-2) Buy coins
+2) Nunua sarafu
 https://bot.tervux.com/dashboard/billing
 
-3) Deploy your bot
+3) Deploy bot lako
 https://bot.tervux.com/dashboard/deployments
 
-4) Configure your bot
+4) Fanya mipangilio ya bot
 https://bot.tervux.com/dashboard/configurations
 
 
-Thank you for using TERVUX CLOUD BOT.
+Asante kwa kutumia TERVUX CLOUD BOT.
 
 
 ${footer}`;
@@ -1892,36 +1941,36 @@ ${footer}`;
         const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
         const footer = await getCommandFooterText();
         const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*⚠️ SESSION REMOVED*
+*⚠️ SESSION IMEFUTWA*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-Your linked session was removed automatically because it was not deployed within 24 hours.
+Session yako iliyokuwa imeunganishwa imefutwa kiotomatiki kwa sababu haiku-deployiwa ndani ya masaa 24.
 
 
-*Why this happens:*
-To keep the platform stable and protect database/server resources, undeployed sessions are cleaned automatically.
+*Kwa nini hii hutokea?*
+Ili mfumo ubaki imara na kulinda rasilimali za database na server, sessions ambazo hazijadeployiwa husafishwa kiotomatiki.
 
 
-*Removed at:* ${fmt(removedAt)}
+*Imefutwa saa:* ${fmt(removedAt)}
 
 
-To continue, please complete all required steps:
+Ili kuendelea, tafadhali kamilisha hatua zote muhimu:
 
-1) Connect your device
+1) Unganisha namba yako
 https://bot.tervux.com/dashboard/pair
 
-2) Buy coins
+2) Nunua sarafu
 https://bot.tervux.com/dashboard/billing
 
-3) Deploy your bot
+3) Deploy bot lako
 https://bot.tervux.com/dashboard/deployments
 
-4) Configure your bot
+4) Fanya mipangilio ya bot
 https://bot.tervux.com/dashboard/configurations
 
 
-Thank you for understanding.
+Asante kwa kuelewa.
 
 
 ${footer}`;
@@ -1959,53 +2008,53 @@ ${footer}`;
         const profitB = grossB - packPrice;
 
         const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*💼 RESELLER OPPORTUNITY*
-Turn your bot account into consistent daily income.
+*💼 FURSA YA KUPATA PESA*
+Badilisha akaunti yako ya bot kuwa chanzo cha kipato cha kila siku.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-You can work as a reseller / middleman using your TERVUX account.
+Unaweza kufanya kazi kama reseller au wakala kwa kutumia akaunti yako ya TERVUX.
 
 
-*📦 STARTER PLAN*
+*📦 MPANGO WA KUANZIA*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Buy *${coinsPack} coins* for *TZS ${packPrice.toLocaleString()}*
+Nunua *sarafu ${coinsPack}* kwa *TZS ${packPrice.toLocaleString()}*
 
-Deploy up to *${deployCount} bots* (${deployCost} coins each)
+Unaweza ku-deploy hadi *bots ${deployCount}* (kila bot sarafu ${deployCost})
 
 
-*💰 PROFIT EXAMPLES*
+*💰 MIFANO YA FAIDA*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*Example A*
-Charge *TZS ${samplePerBotA.toLocaleString()}* per bot × ${deployCount}
-Revenue: *TZS ${grossA.toLocaleString()}*
-Estimated profit: *TZS ${profitA.toLocaleString()}*
+*Mfano A*
+Ukiwatoza *TZS ${samplePerBotA.toLocaleString()}* kwa kila bot × ${deployCount}
+Makusanyo: *TZS ${grossA.toLocaleString()}*
+Makadirio ya faida: *TZS ${profitA.toLocaleString()}*
 
 
-*Example B*
-Charge *TZS ${samplePerBotB.toLocaleString()}* per bot × ${deployCount}
-Revenue: *TZS ${grossB.toLocaleString()}*
-Estimated profit: *TZS ${profitB.toLocaleString()}*
+*Mfano B*
+Ukiwatoza *TZS ${samplePerBotB.toLocaleString()}* kwa kila bot × ${deployCount}
+Makusanyo: *TZS ${grossB.toLocaleString()}*
+Makadirio ya faida: *TZS ${profitB.toLocaleString()}*
 
 
-*🧭 HOW TO WORK*
+*🧭 JINSI YA KUFANYA KAZI*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1) Connect customer device
+1) Unganisha namba ya mteja
 https://bot.tervux.com/dashboard/pair
 
-2) Buy coins
+2) Nunua sarafu
 https://bot.tervux.com/dashboard/billing
 
-3) Deploy customer bots
+3) Deploy bots za wateja
 https://bot.tervux.com/dashboard/deployments
 
-4) Configure each bot
+4) Fanya mipangilio ya kila bot
 https://bot.tervux.com/dashboard/configurations
 
-5) Use *${prefix}help* for setup/testing
+5) Tumia *${prefix}help* kwa setup na test
 
 
-Need support? Use the floating WhatsApp support button on the dashboard.
+Unahitaji msaada? Tumia kitufe cha support kinachoelea kwenye dashboard.
 
 
 ${footer}`;
@@ -2028,53 +2077,87 @@ ${footer}`;
         const groupDelayMs = Number(options.groupDelayMs || 60_000);
         const footer = await getCommandFooterText();
         const config = await this.getSessionConfig(sessionId);
-        if (config?.groupPromotionBroadcast === false) {
+        if (!options.ignoreScheduleSetting && config?.groupPromotionBroadcast === false) {
             return { sent: 0, failed: 0, total: 0, skipped: true };
         }
         const prefix = config?.prefix || "!";
 
         const caption = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *🤖 TERVUX CLOUD BOT*
-*PERSONAL WHATSAPP POWER-UP*
+*NGUVU ZA ZIADA KWA WHATSAPP YAKO*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-Not for business selling.
+Hii siyo bot ya biashara ya kutuma matangazo ya kuuza.
 
-This bot is for personal use to boost your WhatsApp with powerful features.
+Hii ni bot ya matumizi binafsi ya kuongeza uwezo wa WhatsApp yako kwa features nyingi zenye nguvu.
 
 
-*✨ BEST FEATURES*
+*✨ FEATURES ZA KUVUTIA ZAIDI*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎮 *Fun:* ship, joke, fact, truth/dare, 8ball
+👁️ *${prefix}vv*  
+Fungua picha, video au voice note iliyotumwa kama *view once* na uiione kawaida.
 
-🎬 *Media:* play, video, movie, meme, lyrics
+📵 *${prefix}anticall on*  
+Bot linakataa calls kiotomatiki ili namba yako isisumbuliwe na wapigaji wa ovyo.
 
-🛠️ *Utility:* calc, translate, weather, define, wiki, ai
+🛡️ *${prefix}antidelete on*  
+Ujumbe ukifutwa kwenye DM, bot linaweza kuurudisha ili usikose kilichotumwa.
 
-👥 *Group:* tagall, hidetag, admins, grouplink, mute/unmute
+👀 *${prefix}autoviewstatus on*  
+Linaangalia status za watu kiotomatiki bila wewe kufungua moja moja.
 
-🤖 *Automation:* welcome/goodbye, antilink, anti-delete, anti-call
+✔️ *${prefix}autoread on*  
+Chats na messages kwenye DM na groups zinawekwa read kiotomatiki.
 
-⚙️ *Live settings:* prefix, alwaysonline, autoread, alwaystyping
+👥 *${prefix}tagall* / *${prefix}hidetag*  
+Taja member wote wa group au tuma tangazo la siri bila kutaja hadharani.
+
+🔗 *${prefix}grouplink*  
+Pata group link kwa haraka kama wewe ni admin wa group husika.
+
+🎵 *${prefix}play* na *${prefix}video*  
+Pakua audio au video kutoka YouTube link moja kwa moja ndani ya WhatsApp.
+
+🤖 *${prefix}ai*  
+Uliza swali lolote kwa AI na upate jibu la haraka moja kwa moja kwenye chat.
+
+🎭 *${prefix}ship*, *${prefix}joke*, *${prefix}truth*, *${prefix}dare*  
+Ongeza burudani kwenye chats zako binafsi na makundi.
 
 
-*🧭 HOW TO START*
+*💡 KWA NINI WATU WANAPENDA BOT HILI*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1) Connect device
+Limekusanya commands za kufurahisha, kulinda privacy, kurahisisha groups, na kuongeza power ya kawaida ya WhatsApp yako sehemu moja.
+
+Hutahitaji tena kubadilisha apps nyingi ili kupata features hizi.
+
+
+*🧭 JINSI YA KUANZA*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*🌐 WEBSITE*
+https://bot.tervux.com
+
+1) Tengeneza account
+https://bot.tervux.com/register
+
+2) Login kwenye account yako
+https://bot.tervux.com/login
+
+3) Unganisha namba yako
 https://bot.tervux.com/dashboard/pair
 
-2) Buy coins
+4) Nunua sarafu (Bei sawa na Bure!!)
 https://bot.tervux.com/dashboard/billing
 
-3) Deploy bot (50 coins 🪙)
+5) Deploy bot (sarafu 50 🪙)
 https://bot.tervux.com/dashboard/deployments
 
-4) Configure your bot
+6) Fanya mipangilio ya bot
 https://bot.tervux.com/dashboard/configurations
 
 
-Start with: *${prefix}help*
+Anza na: *${prefix}help*
 
 
 ${footer}`;

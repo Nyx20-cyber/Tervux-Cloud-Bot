@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, useCallback } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { api } from "@/store/useAuthStore";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 interface Session {
     _id: string;
     phone?: string;
-    settings?: Record<string, any>;
+    settings?: Record<string, string | number | boolean | null>;
     status: string;
     expiresAt?: string | null;
     isLive?: boolean;
@@ -53,22 +53,44 @@ function ConfigurationsContent() {
     const restrictedSettingKeys = new Set([
         "groupPromotionBroadcast",
         "officialGroupJoined",
-        "officialChannelFollowed"
+        "officialChannelFollowed",
+        "officialChannelFollowBlocked",
+        "officialGroupJoinBlocked"
     ]);
 
     const [sessions, setSessions] = useState<Session[]>([]);
     const [selectedSession, setSelectedSession] = useState<Session | null>(null);
-    const [config, setConfig] = useState<Record<string, any>>({});
+    const [config, setConfig] = useState<Record<string, string | number | boolean | null>>({});
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
-    const cloneSettings = (value?: Record<string, any>) => JSON.parse(JSON.stringify(value || {}));
+    const cloneSettings = (value?: Record<string, string | number | boolean | null>) => JSON.parse(JSON.stringify(value || {})) as Record<string, string | number | boolean | null>;
+
+    const fetchSessions = useCallback(async () => {
+        try {
+            const res = await api.get("/sessions");
+            // Show only deployed + non-expired bots for configuration.
+            const now = Date.now();
+            const deployedBots = res.data.sessions
+                ? (res.data.sessions as Session[]).filter((s) =>
+                    s.expiresAt &&
+                    new Date(s.expiresAt).getTime() > now &&
+                    s.status !== "pairing"
+                )
+                : [];
+            setSessions(deployedBots);
+            setIsLoading(false);
+        } catch {
+            toast.error(t.failed_fetch_sessions);
+            setIsLoading(false);
+        }
+    }, [t.failed_fetch_sessions]);
 
     useEffect(() => {
         fetchSessions();
-    }, []);
+    }, [fetchSessions]);
 
     useEffect(() => {
         if (sessionIdParam && sessions.length > 0) {
@@ -79,26 +101,6 @@ function ConfigurationsContent() {
             }
         }
     }, [sessionIdParam, sessions]);
-
-    const fetchSessions = async () => {
-        try {
-            const res = await api.get("/sessions");
-            // Show only deployed + non-expired bots for configuration.
-            const now = Date.now();
-            const deployedBots = res.data.sessions
-                ? res.data.sessions.filter((s: any) =>
-                    s.expiresAt &&
-                    new Date(s.expiresAt).getTime() > now &&
-                    s.status !== "pairing"
-                )
-                : [];
-            setSessions(deployedBots);
-            setIsLoading(false);
-        } catch (error) {
-            toast.error(t.failed_fetch_sessions);
-            setIsLoading(false);
-        }
-    };
 
     const handleSave = async () => {
         if (!selectedSession) return;
@@ -122,7 +124,7 @@ function ConfigurationsContent() {
             toast.success(t.configurations_saved);
             setIsConfirmOpen(false);
             fetchSessions();
-        } catch (error) {
+        } catch {
             toast.error(t.failed_save_configurations);
         } finally {
             setIsSaving(false);
@@ -229,13 +231,16 @@ function ConfigurationsContent() {
                                                     (() => {
                                                         const isRestricted = !isAdmin && restrictedSettingKeys.has(key);
                                                         return (
-                                                    <div className="flex items-center gap-2 bg-black/20 border border-white/10 p-1.5 rounded-xl h-11">
+                                                    <div className={cn(
+                                                        "flex items-center gap-2 bg-black/20 border border-white/10 p-1.5 rounded-xl h-11 transition-opacity",
+                                                        isRestricted && "opacity-45 saturate-50"
+                                                    )}>
                                                         <button
                                                             onClick={() => setConfig({ ...config, [key]: true })}
                                                             disabled={isRestricted}
                                                             className={cn(
                                                             "flex-1 h-full rounded-lg transition-all font-bold text-[8px] sm:text-[9px] uppercase tracking-widest",
-                                                                isRestricted && "opacity-60 cursor-not-allowed pointer-events-none",
+                                                                isRestricted && "opacity-50 cursor-not-allowed pointer-events-none",
                                                                 config[key] ? "bg-primary text-black" : "text-gray-500 hover:text-white"
                                                             )}
                                                         >
@@ -246,7 +251,7 @@ function ConfigurationsContent() {
                                                             disabled={isRestricted}
                                                             className={cn(
                                                             "flex-1 h-full rounded-lg transition-all font-bold text-[8px] sm:text-[9px] uppercase tracking-widest",
-                                                                isRestricted && "opacity-60 cursor-not-allowed pointer-events-none",
+                                                                isRestricted && "opacity-50 cursor-not-allowed pointer-events-none",
                                                                 !config[key] ? "bg-destructive text-white" : "text-gray-500 hover:text-white"
                                                             )}
                                                         >

@@ -11,6 +11,7 @@ import notificationRoutes from "./routes/notifications.js";
 import referralRoutes from "./routes/referral.js";
 import dashboardRoutes from "./routes/dashboard.js";
 import webhookRoutes from "./routes/webhooks.js";
+import tutorialRoutes from "./routes/tutorials.js";
 import { authenticate } from "./middleware/auth.js";
 import Plan from "./models/Plan.js";
 import Announcement from "./models/Announcement.js";
@@ -155,6 +156,7 @@ app.use("/api/subscription", subscriptionRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/referral", referralRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/tutorials", tutorialRoutes);
 app.use("/api/admin", adminRoutes);
 
 export default app;

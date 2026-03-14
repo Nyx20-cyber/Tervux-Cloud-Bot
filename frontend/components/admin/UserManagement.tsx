@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/store/useAuthStore";
-import { Search, Ban, ShieldCheck, ChevronLeft, ChevronRight, Loader2, UserCircle } from "lucide-react";
+import { Search, Ban, ShieldCheck, ChevronLeft, ChevronRight, Loader2, UserCircle, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -36,9 +36,10 @@ export function UserManagement() {
     const [isLoading, setIsLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [pendingAction, setPendingAction] = useState<{
-        type: "ban" | "role";
+        type: "ban" | "role" | "delete";
         userId: string;
         userName: string;
+        userRole?: "user" | "admin";
         currentRole?: "user" | "admin";
         isBanned?: boolean;
     } | null>(null);
@@ -89,6 +90,14 @@ export function UserManagement() {
             });
         });
 
+        socket.on("admin_user_deleted", (payload: { userId?: string }) => {
+            const deletedUserId = payload?.userId;
+            if (!deletedUserId) return;
+
+            setUsers(prev => prev.filter(user => user._id !== deletedUserId));
+            setTotal(prev => Math.max(0, prev - 1));
+        });
+
         return () => {
             socket.disconnect();
         };
@@ -127,12 +136,29 @@ export function UserManagement() {
         }
     };
 
+    const handleDeleteUser = async (userId: string) => {
+        setActionLoading(userId);
+        try {
+            await api.delete(`/admin/users/${userId}`);
+            toast.success(t.admin_user_deleted);
+
+            const targetPage = users.length === 1 && page > 1 ? page - 1 : page;
+            await fetchUsers(targetPage);
+        } catch (err: any) {
+            toast.error(err?.response?.data?.error || t.admin_failed_delete_user);
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
     const runPendingAction = async () => {
         if (!pendingAction) return;
         if (pendingAction.type === "ban") {
             await handleBan(pendingAction.userId, !!pendingAction.isBanned);
         } else if (pendingAction.type === "role") {
             await handleToggleRole(pendingAction.userId, pendingAction.currentRole || "user");
+        } else if (pendingAction.type === "delete") {
+            await handleDeleteUser(pendingAction.userId);
         }
         setPendingAction(null);
     };
@@ -256,6 +282,18 @@ export function UserManagement() {
                                                             >
                                                                 <ShieldCheck className="w-3.5 h-3.5" />
                                                             </button>
+                                                            <button
+                                                                onClick={() => setPendingAction({
+                                                                    type: "delete",
+                                                                    userId: user._id,
+                                                                    userName: user.name || user.email || "User",
+                                                                    userRole: user.role
+                                                                })}
+                                                                title={t.admin_delete_user_title}
+                                                                className="p-2 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-300 transition-all"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            </button>
                                                         </>
                                                     )}
                                                 </div>
@@ -307,14 +345,18 @@ export function UserManagement() {
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {pendingAction?.type === "ban"
                                 ? (pendingAction?.isBanned ? t.admin_confirm_unban_title : t.admin_confirm_ban_title)
-                                : t.admin_confirm_role_title}
+                                : pendingAction?.type === "role"
+                                    ? t.admin_confirm_role_title
+                                    : t.admin_delete_user_title}
                         </DialogTitle>
                         <DialogDescription className="text-xs font-semibold text-gray-400 leading-relaxed">
                             {pendingAction?.type === "ban"
                                 ? (pendingAction?.isBanned
                                     ? `${t.admin_confirm_unban_desc} ${pendingAction.userName}?`
                                     : `${t.admin_confirm_ban_desc} ${pendingAction.userName}?`)
-                                : `${t.admin_confirm_role_desc} ${pendingAction?.userName}?`}
+                                : pendingAction?.type === "role"
+                                    ? `${t.admin_confirm_role_desc} ${pendingAction?.userName}?`
+                                    : `${t.admin_confirm_delete_user_desc} ${pendingAction?.userName}? ${t.admin_confirm_delete_user_warning}${pendingAction?.userRole === "admin" ? ` ${t.admin_confirm_delete_admin_warning}` : ""}`}
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter className="gap-2 sm:gap-2">
@@ -331,9 +373,11 @@ export function UserManagement() {
                             type="button"
                             disabled={!!actionLoading || !pendingAction}
                             onClick={runPendingAction}
-                            className="bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 hover:text-white"
+                            className={pendingAction?.type === "delete"
+                                ? "bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 hover:text-white"
+                                : "bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 hover:text-white"}
                         >
-                            {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t.confirm}
+                            {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (pendingAction?.type === "delete" ? t.delete : t.confirm)}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import {
     AlertTriangle, Loader2, RefreshCw, LayoutDashboard,
-    Users, Network, History, Settings as SettingsIcon, Coins, Megaphone, Crown
+    Users, Network, History, Settings as SettingsIcon, Coins, Megaphone, Crown, GraduationCap, Send
 } from "lucide-react";
 import { api, useAuthStore } from "@/store/useAuthStore";
 import { useRouter } from "next/navigation";
@@ -23,6 +23,8 @@ import { UserManagement } from "@/components/admin/UserManagement";
 import { AdminReferral } from "@/components/admin/AdminReferral";
 import { GlobalSettings } from "@/components/admin/GlobalSettings";
 import { AdminGamification } from "@/components/admin/AdminGamification";
+import { TutorialManagement } from "@/components/admin/TutorialManagement";
+import { BroadcastControl } from "@/components/admin/BroadcastControl";
 
 const ADMIN_ACTIVE_TAB_KEY = "admin.activeTab";
 const ADMIN_TAB_IDS = [
@@ -34,6 +36,8 @@ const ADMIN_TAB_IDS = [
     "coins",
     "referral",
     "announcements",
+    "broadcasts",
+    "tutorials",
     "gamification",
     "settings"
 ] as const;
@@ -59,9 +63,11 @@ export default function AdminDashboard() {
         { id: "sessions", label: t.sessions, icon: Network },
         { id: "payments", label: t.payments, icon: History },
         { id: "plans", label: t.plans, icon: SettingsIcon },
-        { id: "coins", label: t.billing, icon: Coins },
+        { id: "coins", label: t.coins_mgmt, icon: Coins },
         { id: "referral", label: t.referral, icon: Crown },
         { id: "announcements", label: t.announcements, icon: Megaphone },
+        { id: "broadcasts", label: t.broadcasts, icon: Send },
+        { id: "tutorials", label: t.tutorials, icon: GraduationCap },
         { id: "gamification", label: t.badges_vip, icon: Crown },
         { id: "settings", label: t.site_settings, icon: SettingsIcon },
     ], [t]);
@@ -202,6 +208,8 @@ export default function AdminDashboard() {
                             {activeTab === "coins" && <CoinManagement />}
                             {activeTab === "referral" && <AdminReferral />}
                             {activeTab === "announcements" && <AnnouncementSystem />}
+                            {activeTab === "broadcasts" && <BroadcastControl />}
+                            {activeTab === "tutorials" && <TutorialManagement />}
                             {activeTab === "settings" && <GlobalSettings />}
                             {activeTab === "gamification" && <AdminGamification />}
                         </motion.div>

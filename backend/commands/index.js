@@ -40,7 +40,6 @@ import { block } from "./general/block.js";
 import { unblock } from "./general/unblock.js";
 import { creator } from "./general/creator.js";
 import { quote } from "./general/quote.js";
-import { update } from "./general/update.js";
 
 // Media Commands
 import { movie } from "./media/movie.js";
@@ -162,7 +161,6 @@ export const commands = {
     unblock,
     creator,
     quote,
-    update,
 
     // Media Commands
     movie,

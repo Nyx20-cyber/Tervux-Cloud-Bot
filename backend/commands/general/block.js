@@ -1,29 +1,64 @@
 import { getCachedConfig } from "../../services/configService.js";
 
-export const block = async (sock, m, args) => {
-    let target = m.key.remoteJid;
+const getContextInfo = (m) => {
+    const message = m?.message || {};
+    for (const value of Object.values(message)) {
+        if (value && typeof value === "object" && "contextInfo" in value) {
+            return value.contextInfo || {};
+        }
+    }
+    return {};
+};
 
+const normalizeJid = (value) => {
+    if (!value) return null;
+    if (value.endsWith("@g.us")) return null;
+    if (value.includes("@")) {
+        const user = value.split("@")[0].split(":")[0];
+        return `${user}@s.whatsapp.net`;
+    }
+
+    const digits = value.replace(/[^0-9]/g, "");
+    return digits ? `${digits}@s.whatsapp.net` : null;
+};
+
+const resolveTarget = (m, args) => {
+    const contextInfo = getContextInfo(m);
+    const mentioned = contextInfo?.mentionedJid?.[0];
+    const quoted = contextInfo?.participant;
+    const fromArgs = args?.[0];
+    const directChatTarget = m?.key?.remoteJid?.endsWith("@g.us") ? null : m?.key?.remoteJid;
+
+    return normalizeJid(mentioned || quoted || fromArgs || directChatTarget);
+};
+
+export const block = async (sock, m, args) => {
     const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
+    const target = resolveTarget(m, args);
+    const ownJid = normalizeJid(sock.user?.id || "");
 
-    if (m.key.remoteJid.endsWith("@g.us")) {
-        if (m.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length > 0) {
-            target = m.message.extendedTextMessage.contextInfo.mentionedJid[0];
-        } else if (args[0]) {
-            target = args[0].replace(/[^0-9]/g, "") + "@s.whatsapp.net";
-        } else {
-            return `╔══════════════════════════════════╗
+    if (!target) {
+        return `╔══════════════════════════════════╗
 ║         ❓ *ℍ𝔼𝕃ℙ* ❓             ║
 ╚══════════════════════════════════╝
 
-📝 *𝕌𝕤𝕒𝕘𝕖 𝕚𝕟 𝔾𝕣𝕠𝕦𝕡𝕤:*
+📝 *𝕌𝕤𝕒𝕘𝕖:*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 • Mention: *${p}block @user*
+• Reply: Reply to a message with *${p}block*
 • Number: *${p}block 1234567890*
 
-Please mention or provide a number!`;
-        }
+Please mention, reply to a user, or provide a number!`;
+    }
+
+    if (target === ownJid) {
+        return `╔══════════════════════════════════╗
+║         ⚠️ *ℕ𝕆𝕋 𝔸𝕃𝕃𝕆𝕎𝔼𝔻* ⚠️      ║
+╚══════════════════════════════════╝
+
+You cannot block your own number.`;
     }
 
     try {
@@ -32,7 +67,7 @@ Please mention or provide a number!`;
 ║     🚫 *𝕌𝕊𝔼ℝ 𝔹𝕃𝕆ℂ𝕂𝔼𝔻* 🚫        ║
 ╚══════════════════════════════════╝
 
-✅ *𝕊𝕦𝕔𝕔𝕖𝕤𝕤𝕗𝕦𝕝𝕝𝕪 𝕓𝕃𝕠𝕔𝕜𝕖𝕕!*
+✅ *𝕊𝕦𝕔𝕔𝕖𝕤𝕤𝕗𝕦𝕝𝕝𝕪 𝕓𝕝𝕠𝕔𝕜𝕖𝕕!*
 
 👤 *𝕌𝕤𝕖𝕣:* @${target.split("@")[0]}
 🔒 *𝕊𝕥𝕒𝕥𝕦𝕤:* Blocked
@@ -45,6 +80,6 @@ _Use ${p}unblock to undo this action_`;
 ╚══════════════════════════════════╝
 
 Failed to block user.
-Please try again later.`;
+${error?.message || "Please try again later."}`;
     }
 };

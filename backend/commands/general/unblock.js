@@ -1,10 +1,41 @@
 import { getCachedConfig } from "../../services/configService.js";
 
-export const unblock = async (sock, m, args) => {
-    let target = args[0] ? args[0].replace(/[^0-9]/g, "") + "@s.whatsapp.net" : null;
+const getContextInfo = (m) => {
+    const message = m?.message || {};
+    for (const value of Object.values(message)) {
+        if (value && typeof value === "object" && "contextInfo" in value) {
+            return value.contextInfo || {};
+        }
+    }
+    return {};
+};
 
+const normalizeJid = (value) => {
+    if (!value) return null;
+    if (value.endsWith("@g.us")) return null;
+    if (value.includes("@")) {
+        const user = value.split("@")[0].split(":")[0];
+        return `${user}@s.whatsapp.net`;
+    }
+
+    const digits = value.replace(/[^0-9]/g, "");
+    return digits ? `${digits}@s.whatsapp.net` : null;
+};
+
+const resolveTarget = (m, args) => {
+    const contextInfo = getContextInfo(m);
+    const mentioned = contextInfo?.mentionedJid?.[0];
+    const quoted = contextInfo?.participant;
+    const fromArgs = args?.[0];
+    const directChatTarget = m?.key?.remoteJid?.endsWith("@g.us") ? null : m?.key?.remoteJid;
+
+    return normalizeJid(mentioned || quoted || fromArgs || directChatTarget);
+};
+
+export const unblock = async (sock, m, args) => {
     const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
+    const target = resolveTarget(m, args);
 
     if (!target) {
         return `╔══════════════════════════════════╗
@@ -14,9 +45,10 @@ export const unblock = async (sock, m, args) => {
 📝 *𝕌𝕤𝕒𝕘𝕖:*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-*${p}unblock 1234567890*
+• Reply: Reply to a message with *${p}unblock*
+• Number: *${p}unblock 1234567890*
 
-Please provide a phone number!`;
+Please reply to a user or provide a phone number!`;
     }
 
     try {
@@ -38,6 +70,6 @@ _They can now message you again_`;
 ╚══════════════════════════════════╝
 
 Failed to unblock user.
-Please try again later.`;
+${error?.message || "Please try again later."}`;
     }
 };

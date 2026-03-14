@@ -5,13 +5,16 @@ import WhatsAppSession from "../models/WhatsAppSession.js";
 import Payment from "../models/Payment.js";
 import Plan from "../models/Plan.js";
 import Announcement from "../models/Announcement.js";
+import TutorialVideo from "../models/TutorialVideo.js";
 import Notification from "../models/Notification.js";
 import SystemSettings, { getCachedPublicSettings, getSettings, invalidateSettingsCache } from "../models/SystemSettings.js";
 import FastLipaWebhookLog from "../models/FastLipaWebhookLog.js";
+import WhatsAppAuth from "../models/WhatsAppAuth.js";
 import { sessionManager } from "../services/whatsappService.js";
 import { emitToUser, emitUpdate } from "../services/socketService.js";
 import { checkTransactionStatus } from "../services/paymentService.js";
 import { extractFastLipaFields, settleCompletedPayment, settleFailedPayment } from "../services/paymentSettlement.js";
+import { extractYoutubeVideoId, sanitize } from "./tutorials.js";
 
 const router = Router();
 
@@ -157,6 +160,69 @@ router.put("/users/:id", authenticate, requireAdmin, async (req, res) => {
     } catch (error) {
         console.error("Admin update user error:", error);
         res.status(500).json({ error: "Failed to update user" });
+    }
+});
+
+/**
+ * DELETE /api/admin/users/:id
+ * Permanently delete a user and their related data
+ */
+router.delete("/users/:id", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const targetUserId = String(req.params.id);
+
+        if (String(req.user?._id) === targetUserId) {
+            return res.status(400).json({ error: "You cannot delete your own admin account." });
+        }
+
+        const user = await User.findById(targetUserId);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        if (user.role === "admin") {
+            const adminCount = await User.countDocuments({ role: "admin" });
+            if (adminCount <= 1) {
+                return res.status(400).json({ error: "You cannot delete the last remaining admin account." });
+            }
+        }
+
+        emitToUser(targetUserId, "force_logout", {
+            reason: "deleted",
+            message: "Your account has been deleted by an administrator."
+        });
+
+        await sessionManager.cancelPairingForUser(targetUserId);
+
+        const sessions = await WhatsAppSession.find({ userId: targetUserId }).select("_id");
+        for (const session of sessions) {
+            await sessionManager.destroySession(session._id.toString());
+        }
+
+        const paymentIds = await Payment.find({ userId: targetUserId }).distinct("_id");
+
+        await Promise.all([
+            WhatsAppSession.deleteMany({ userId: targetUserId }),
+            WhatsAppAuth.deleteMany({ sessionId: { $in: sessions.map((session) => session._id.toString()) } }),
+            Notification.deleteMany({ userId: targetUserId }),
+            Payment.deleteMany({ userId: targetUserId }),
+            FastLipaWebhookLog.deleteMany({ matchedPaymentId: { $in: paymentIds } }),
+            User.updateMany({ referredBy: targetUserId }, { $set: { referredBy: null, referredByPaid: false } }),
+            User.deleteOne({ _id: targetUserId })
+        ]);
+
+        emitUpdate("admin_user_deleted", {
+            userId: targetUserId
+        });
+
+        res.json({
+            success: true,
+            message: "User deleted permanently",
+            userId: targetUserId
+        });
+    } catch (error) {
+        console.error("Admin delete user error:", error);
+        res.status(500).json({ error: "Failed to delete user" });
     }
 });
 
@@ -485,7 +551,8 @@ router.put("/sessions/:id", authenticate, requireAdmin, async (req, res) => {
         const allowedSettings = [
             "prefix", "alwaysOnline", "autoLikeStatus", "autoViewStatus",
             "antiDelete", "antiCall", "antiViewOnce", "antiRemove",
-            "autoReadMessages", "alwaysTyping", "alwaysRecording"
+            "autoReadMessages", "alwaysTyping", "alwaysRecording",
+            "groupPromotionBroadcast"
         ];
 
         if (phone !== undefined) {
@@ -549,6 +616,109 @@ router.put("/sessions/:id", authenticate, requireAdmin, async (req, res) => {
     } catch (error) {
         console.error("Admin edit session error:", error);
         res.status(500).json({ error: "Failed to update session" });
+    }
+});
+
+/**
+ * POST /api/admin/group-broadcast/manual
+ * Trigger manual group broadcast for one, many, or all eligible sessions
+ */
+router.post("/group-broadcast/manual", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const sessionIds = Array.isArray(req.body.sessionIds)
+            ? req.body.sessionIds.filter(Boolean)
+            : [];
+        const targetAll = !!req.body.targetAll || sessionIds.length === 0;
+        const now = new Date();
+
+        const filter = {
+            status: { $in: ["active", "paused"] },
+            expiresAt: { $gt: now },
+            ...(targetAll ? {} : { _id: { $in: sessionIds } })
+        };
+
+        const sessions = await WhatsAppSession.find(filter).select("_id status phone expiresAt");
+
+        let triggered = 0;
+        let totalSent = 0;
+        let totalFailed = 0;
+        let totalGroups = 0;
+        let totalSkipped = 0;
+        const perSession = [];
+
+        for (const session of sessions) {
+            const sid = session._id.toString();
+            try {
+                if (!sessionManager.isConnected(sid)) {
+                    await sessionManager.connectSession(sid);
+                }
+
+                const result = await sessionManager.sendGroupPromotionBroadcast(sid, {
+                    groupDelayMs: Number(req.body.groupDelayMs || 60_000)
+                });
+
+                if (result?.skipped) {
+                    totalSkipped += 1;
+                    perSession.push({
+                        sessionId: sid,
+                        phone: session.phone || "",
+                        sent: 0,
+                        failed: 0,
+                        total: 0,
+                        skipped: true
+                    });
+                    continue;
+                }
+
+                triggered += 1;
+                totalSent += Number(result?.sent || 0);
+                totalFailed += Number(result?.failed || 0);
+                totalGroups += Number(result?.total || 0);
+                perSession.push({
+                    sessionId: sid,
+                    phone: session.phone || "",
+                    sent: Number(result?.sent || 0),
+                    failed: Number(result?.failed || 0),
+                    total: Number(result?.total || 0)
+                });
+            } catch (error) {
+                totalFailed += 1;
+                perSession.push({
+                    sessionId: sid,
+                    phone: session.phone || "",
+                    sent: 0,
+                    failed: 1,
+                    total: 0,
+                    error: error.message
+                });
+                console.warn(`[AdminGroupBroadcast] Manual trigger failed for ${sid}:`, error.message);
+            }
+        }
+
+        emitUpdate("admin_group_broadcast_triggered", {
+            targetAll,
+            sessionIds: sessions.map(s => s._id.toString()),
+            triggered,
+            totalGroups,
+            totalSent,
+            totalFailed,
+            totalSkipped
+        });
+
+        res.json({
+            success: true,
+            targetAll,
+            selectedCount: targetAll ? sessions.length : sessionIds.length,
+            triggered,
+            totalGroups,
+            totalSent,
+            totalFailed,
+            totalSkipped,
+            perSession
+        });
+    } catch (error) {
+        console.error("Admin manual group broadcast error:", error);
+        res.status(500).json({ error: "Failed to trigger manual group broadcast" });
     }
 });
 
@@ -772,6 +942,121 @@ router.delete("/announcements/:id", authenticate, requireAdmin, async (req, res)
 });
 
 /**
+ * GET /api/admin/tutorials
+ * List all tutorials for admin CRUD
+ */
+router.get("/tutorials", authenticate, requireAdmin, async (_req, res) => {
+    try {
+        const tutorials = await TutorialVideo.find()
+            .populate("createdBy", "name email")
+            .sort({ createdAt: -1 });
+
+        res.json({ tutorials });
+    } catch (error) {
+        console.error("Admin tutorials error:", error);
+        res.status(500).json({ error: "Failed to fetch tutorials" });
+    }
+});
+
+/**
+ * POST /api/admin/tutorials
+ * Create a tutorial video
+ */
+router.post("/tutorials", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const title = sanitize(req.body.title);
+        const description = sanitize(req.body.description);
+        const youtubeUrl = String(req.body.youtubeUrl || "").trim();
+        const youtubeVideoId = extractYoutubeVideoId(youtubeUrl);
+
+        if (!title || !youtubeUrl) {
+            return res.status(400).json({ error: "Title and YouTube link are required" });
+        }
+
+        if (!youtubeVideoId) {
+            return res.status(400).json({ error: "Please provide a valid YouTube or Shorts link" });
+        }
+
+        const tutorial = await TutorialVideo.create({
+            title,
+            description,
+            youtubeUrl,
+            youtubeVideoId,
+            isActive: req.body.isActive !== undefined ? !!req.body.isActive : true,
+            createdBy: req.user._id
+        });
+
+        const populated = await tutorial.populate("createdBy", "name email");
+
+        emitUpdate("admin_tutorial_created", { tutorial: populated });
+        emitUpdate("tutorials_updated", { action: "created", tutorial: populated });
+
+        res.status(201).json({ success: true, tutorial: populated });
+    } catch (error) {
+        console.error("Admin create tutorial error:", error);
+        res.status(500).json({ error: "Failed to create tutorial" });
+    }
+});
+
+/**
+ * PUT /api/admin/tutorials/:id
+ * Update tutorial video
+ */
+router.put("/tutorials/:id", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const tutorial = await TutorialVideo.findById(req.params.id);
+        if (!tutorial) return res.status(404).json({ error: "Tutorial not found" });
+
+        if (req.body.title !== undefined) tutorial.title = sanitize(req.body.title);
+        if (req.body.description !== undefined) tutorial.description = sanitize(req.body.description);
+        if (req.body.isActive !== undefined) tutorial.isActive = !!req.body.isActive;
+        if (req.body.youtubeUrl !== undefined) {
+            const youtubeUrl = String(req.body.youtubeUrl || "").trim();
+            const youtubeVideoId = extractYoutubeVideoId(youtubeUrl);
+            if (!youtubeVideoId) {
+                return res.status(400).json({ error: "Please provide a valid YouTube or Shorts link" });
+            }
+            tutorial.youtubeUrl = youtubeUrl;
+            tutorial.youtubeVideoId = youtubeVideoId;
+        }
+
+        if (!tutorial.title) {
+            return res.status(400).json({ error: "Title is required" });
+        }
+
+        await tutorial.save();
+        const populated = await tutorial.populate("createdBy", "name email");
+
+        emitUpdate("admin_tutorial_updated", { tutorial: populated });
+        emitUpdate("tutorials_updated", { action: "updated", tutorial: populated });
+
+        res.json({ success: true, tutorial: populated });
+    } catch (error) {
+        console.error("Admin update tutorial error:", error);
+        res.status(500).json({ error: "Failed to update tutorial" });
+    }
+});
+
+/**
+ * DELETE /api/admin/tutorials/:id
+ * Delete tutorial video
+ */
+router.delete("/tutorials/:id", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const tutorial = await TutorialVideo.findByIdAndDelete(req.params.id);
+        if (!tutorial) return res.status(404).json({ error: "Tutorial not found" });
+
+        emitUpdate("admin_tutorial_deleted", { tutorialId: tutorial._id.toString() });
+        emitUpdate("tutorials_updated", { action: "deleted", tutorialId: tutorial._id.toString() });
+
+        res.json({ success: true, tutorialId: tutorial._id.toString() });
+    } catch (error) {
+        console.error("Admin delete tutorial error:", error);
+        res.status(500).json({ error: "Failed to delete tutorial" });
+    }
+});
+
+/**
  * GET /api/admin/settings
  * Fetch current platform configurations
  */
@@ -984,5 +1269,3 @@ router.post("/users/:id/gamification", authenticate, requireAdmin, async (req, r
 });
 
 export default router;
-
-

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { api } from "@/store/useAuthStore";
 import {
     Wifi, Search, Loader2, Filter, Radio,
-    Power, Smartphone, Pencil, Trash2
+    Power, Smartphone, Pencil, Trash2, Megaphone
 } from "lucide-react";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
@@ -46,13 +46,16 @@ export function SessionMonitor() {
     const [isLoading, setIsLoading] = useState(true);
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
+    const [broadcastFilter, setBroadcastFilter] = useState<"all" | "on" | "off">("all");
     const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
     const [confirmDisconnectSessionId, setConfirmDisconnectSessionId] = useState<string | null>(null);
+    const [confirmBroadcastToggle, setConfirmBroadcastToggle] = useState<{ sessionId: string; nextValue: boolean } | null>(null);
     const [editSession, setEditSession] = useState<SessionRecord | null>(null);
     const [editPhone, setEditPhone] = useState("");
     const [editStatus, setEditStatus] = useState<SessionRecord["status"]>("disconnected");
     const [editExpiresAt, setEditExpiresAt] = useState("");
+    const [editGroupPromotionBroadcast, setEditGroupPromotionBroadcast] = useState(true);
 
     const fetchSessions = useCallback(async (status?: string) => {
         setIsLoading(true);
@@ -136,6 +139,41 @@ export function SessionMonitor() {
         }
     };
 
+    const handleToggleGroupBroadcast = async (sessionId: string, nextValue: boolean) => {
+        setActionLoading(sessionId);
+        try {
+            const res = await api.put(`/admin/sessions/${sessionId}`, {
+                settings: {
+                    groupPromotionBroadcast: nextValue
+                }
+            });
+            const updated = res.data.session;
+            setSessions(prev => prev.map(s =>
+                s._id === sessionId
+                    ? {
+                        ...s,
+                        ...updated,
+                        _id: sessionId,
+                        settings: {
+                            ...(s.settings || {}),
+                            ...(updated?.settings || {}),
+                            groupPromotionBroadcast: nextValue
+                        }
+                    }
+                    : s
+            ));
+            if (editSession?._id === sessionId) {
+                setEditGroupPromotionBroadcast(nextValue);
+            }
+            toast.success(nextValue ? t.admin_group_broadcast_enabled : t.admin_group_broadcast_disabled);
+        } catch (err: any) {
+            toast.error(err.response?.data?.error || t.admin_failed_update_session);
+        } finally {
+            setActionLoading(null);
+            setConfirmBroadcastToggle(null);
+        }
+    };
+
     const openEditModal = (session: SessionRecord) => {
         setEditSession(session);
         setEditPhone(session.phone || "");
@@ -145,6 +183,7 @@ export function SessionMonitor() {
                 ? new Date(session.expiresAt).toISOString().slice(0, 16)
                 : ""
         );
+        setEditGroupPromotionBroadcast(session.settings?.groupPromotionBroadcast !== false);
     };
 
     const handleSaveEdit = async () => {
@@ -153,7 +192,10 @@ export function SessionMonitor() {
         try {
             const payload: Record<string, any> = {
                 phone: editPhone,
-                status: editStatus
+                status: editStatus,
+                settings: {
+                    groupPromotionBroadcast: editGroupPromotionBroadcast
+                }
             };
             payload.expiresAt = editExpiresAt ? new Date(editExpiresAt).toISOString() : null;
 
@@ -174,16 +216,27 @@ export function SessionMonitor() {
         }
     };
 
-    const filteredSessions = sessions.filter(s =>
-        s.phone.includes(search) ||
-        s.userId?.email?.toLowerCase().includes(search.toLowerCase()) ||
-        s.userId?.name?.toLowerCase().includes(search.toLowerCase())
-    );
+    const filteredSessions = sessions.filter((s) => {
+        const matchesSearch =
+            s.phone.includes(search) ||
+            s.userId?.email?.toLowerCase().includes(search.toLowerCase()) ||
+            s.userId?.name?.toLowerCase().includes(search.toLowerCase());
+
+        const broadcastEnabled = s.settings?.groupPromotionBroadcast !== false;
+        const matchesBroadcast =
+            broadcastFilter === "all" ||
+            (broadcastFilter === "on" && broadcastEnabled) ||
+            (broadcastFilter === "off" && !broadcastEnabled);
+
+        return matchesSearch && matchesBroadcast;
+    });
 
     const statuses = ["all", "active", "pairing", "paused", "disconnected", "expired"];
 
     const liveCount = sessions.filter(s => s.isLive).length;
     const activeCount = sessions.filter(s => s.status === "active").length;
+    const broadcastOnCount = sessions.filter(s => s.settings?.groupPromotionBroadcast !== false).length;
+    const broadcastOffCount = Math.max(0, sessions.length - broadcastOnCount);
 
     return (
         <motion.div
@@ -215,6 +268,14 @@ export function SessionMonitor() {
                         <Wifi className="h-3 w-3 text-sky-400" />
                         <span className="text-[10px] font-black uppercase tracking-widest text-sky-400">{activeCount} {t.admin_active}</span>
                     </div>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
+                        <Megaphone className="h-3 w-3 text-emerald-300" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-300">{broadcastOnCount} {t.admin_broadcast_on}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-red-500/20 bg-red-500/5">
+                        <Megaphone className="h-3 w-3 text-red-300" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-red-300">{broadcastOffCount} {t.admin_broadcast_off}</span>
+                    </div>
                 </div>
             </div>
 
@@ -244,6 +305,18 @@ export function SessionMonitor() {
                             {t[`admin_status_${s}` as keyof typeof t] || s}
                         </button>
                     ))}
+                    {(["all", "on", "off"] as const).map((s) => (
+                        <button
+                            key={`broadcast-${s}`}
+                            onClick={() => setBroadcastFilter(s)}
+                            className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[8px] sm:text-[9px] font-black uppercase tracking-widest transition-all ${broadcastFilter === s
+                                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                    : "bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10 hover:text-gray-300"
+                                }`}
+                        >
+                            {t[`admin_broadcast_${s}` as keyof typeof t] || s}
+                        </button>
+                    ))}
                 </div>
             </div>
 
@@ -263,6 +336,7 @@ export function SessionMonitor() {
                     <AnimatePresence>
                         {filteredSessions.map(session => {
                             const st = statusStyles[session.status] || statusStyles.disconnected;
+                            const broadcastEnabled = session.settings?.groupPromotionBroadcast !== false;
                             return (
                                 <motion.div
                                     key={session._id}
@@ -277,15 +351,24 @@ export function SessionMonitor() {
                                             <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
                                             {t[`admin_status_${session.status}` as keyof typeof t] || session.status}
                                         </span>
-                                        {session.isLive && (
-                                            <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-emerald-400">
-                                                <span className="relative flex h-2 w-2">
-                                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-                                                </span>
-                                                {t.live_now}
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg border flex items-center gap-1.5 ${broadcastEnabled
+                                                    ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                                                    : "bg-red-500/10 text-red-300 border-red-500/20"
+                                                }`}>
+                                                <Megaphone className="h-3 w-3" />
+                                                {broadcastEnabled ? t.admin_broadcast_on : t.admin_broadcast_off}
                                             </span>
-                                        )}
+                                            {session.isLive && (
+                                                <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-emerald-400">
+                                                    <span className="relative flex h-2 w-2">
+                                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                                                    </span>
+                                                    {t.live_now}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
 
                                     {/* Phone + User */}
@@ -341,6 +424,16 @@ export function SessionMonitor() {
                                             <Loader2 className="w-4 h-4 text-primary animate-spin" />
                                         ) : (
                                             <div className="flex flex-wrap gap-2">
+                                                <button
+                                                    onClick={() => setConfirmBroadcastToggle({ sessionId: session._id, nextValue: !broadcastEnabled })}
+                                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${broadcastEnabled
+                                                            ? "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300"
+                                                            : "bg-red-500/10 hover:bg-red-500/20 text-red-300"
+                                                        }`}
+                                                >
+                                                    <Megaphone className="w-3 h-3" />
+                                                    {broadcastEnabled ? t.admin_disable_broadcast : t.admin_enable_broadcast}
+                                                </button>
                                                 <button
                                                     onClick={() => openEditModal(session)}
                                                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-[9px] font-black uppercase tracking-widest transition-all"
@@ -438,6 +531,43 @@ export function SessionMonitor() {
                 </DialogContent>
             </Dialog>
 
+            <Dialog open={!!confirmBroadcastToggle} onOpenChange={(open) => !open && setConfirmBroadcastToggle(null)}>
+                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
+                            {confirmBroadcastToggle?.nextValue ? t.admin_enable_broadcast_title : t.admin_disable_broadcast_title}
+                        </DialogTitle>
+                        <DialogDescription className="text-xs font-semibold text-gray-400 leading-relaxed">
+                            {confirmBroadcastToggle?.nextValue ? t.admin_confirm_enable_broadcast_desc : t.admin_confirm_disable_broadcast_desc}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!!actionLoading}
+                            onClick={() => setConfirmBroadcastToggle(null)}
+                            className="border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
+                        >
+                            {t.cancel}
+                        </Button>
+                        <Button
+                            type="button"
+                            disabled={!!actionLoading || !confirmBroadcastToggle}
+                            onClick={() =>
+                                confirmBroadcastToggle &&
+                                handleToggleGroupBroadcast(confirmBroadcastToggle.sessionId, confirmBroadcastToggle.nextValue)
+                            }
+                            className={confirmBroadcastToggle?.nextValue
+                                ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 hover:text-white"
+                                : "bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 hover:text-white"}
+                        >
+                            {actionLoading && confirmBroadcastToggle ? <Loader2 className="w-4 h-4 animate-spin" /> : t.confirm_action}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Dialog open={!!editSession} onOpenChange={(open) => !open && setEditSession(null)}>
                 <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
                     <DialogHeader>
@@ -479,6 +609,38 @@ export function SessionMonitor() {
                                 onChange={(e) => setEditExpiresAt(e.target.value)}
                                 className="bg-white/5 border-white/10 text-white"
                             />
+                        </div>
+                        <div>
+                            <label className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-2 block">
+                                {t.admin_group_broadcast_control}
+                            </label>
+                            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl p-1.5">
+                                <button
+                                    type="button"
+                                    onClick={() => setEditGroupPromotionBroadcast(true)}
+                                    className={`flex-1 h-10 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                                        editGroupPromotionBroadcast
+                                            ? "bg-primary text-black"
+                                            : "text-gray-500 hover:text-white"
+                                    }`}
+                                >
+                                    ON
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setEditGroupPromotionBroadcast(false)}
+                                    className={`flex-1 h-10 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                                        !editGroupPromotionBroadcast
+                                            ? "bg-red-500 text-white"
+                                            : "text-gray-500 hover:text-white"
+                                    }`}
+                                >
+                                    OFF
+                                </button>
+                            </div>
+                            <p className="mt-2 text-[10px] font-semibold text-gray-500 leading-relaxed">
+                                {t.admin_group_broadcast_control_desc}
+                            </p>
                         </div>
                     </div>
                     <DialogFooter className="gap-2 sm:gap-2">
