@@ -262,7 +262,7 @@ function ConfigurationsContent() {
                                                     })()
                                                 ) : (
                                                     <Input
-                                                        value={config[key] || ""}
+                                                        value={typeof value === "number" ? value : typeof value === "string" ? value : ""}
                                                         onChange={e => setConfig({ ...config, [key]: e.target.value })}
                                                         className="h-11 bg-black/20 border-white/10 text-white text-[10px] font-bold uppercase tracking-widest rounded-xl focus-visible:ring-primary"
                                                     />
