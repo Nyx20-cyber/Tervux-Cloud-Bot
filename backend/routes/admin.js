@@ -620,6 +620,39 @@ router.put("/sessions/:id", authenticate, requireAdmin, async (req, res) => {
 });
 
 /**
+ * POST /api/admin/group-broadcast/toggle-all
+ * Enable or disable group promotion broadcast for all sessions
+ */
+router.post("/group-broadcast/toggle-all", authenticate, requireAdmin, async (req, res) => {
+    try {
+        const enabled = req.body?.enabled;
+        if (typeof enabled !== "boolean") {
+            return res.status(400).json({ error: "enabled must be a boolean" });
+        }
+
+        const result = await WhatsAppSession.updateMany(
+            {},
+            { $set: { "settings.groupPromotionBroadcast": enabled } }
+        );
+
+        emitUpdate("admin_group_broadcast_toggle_all", {
+            enabled,
+            modifiedCount: result.modifiedCount || 0
+        });
+
+        res.json({
+            success: true,
+            enabled,
+            modifiedCount: result.modifiedCount || 0,
+            matchedCount: result.matchedCount || 0
+        });
+    } catch (error) {
+        console.error("Admin toggle all group broadcasts error:", error);
+        res.status(500).json({ error: "Failed to update group broadcast setting for all sessions" });
+    }
+});
+
+/**
  * POST /api/admin/group-broadcast/manual
  * Trigger manual group broadcast for one, many, or all eligible sessions
  */

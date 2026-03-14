@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
-import { Megaphone, Loader2, Search, Send } from "lucide-react";
+import { Megaphone, Loader2, Search, Send, Power } from "lucide-react";
 import { motion } from "framer-motion";
 import {
     Dialog,
@@ -37,7 +37,10 @@ export function BroadcastControl() {
     const [scope, setScope] = useState<"all" | "selected">("all");
     const [isLoading, setIsLoading] = useState(true);
     const [isSending, setIsSending] = useState(false);
+    const [isBulkUpdating, setIsBulkUpdating] = useState(false);
     const [confirmOpen, setConfirmOpen] = useState(false);
+    const [confirmToggleAllOpen, setConfirmToggleAllOpen] = useState(false);
+    const [pendingToggleAllValue, setPendingToggleAllValue] = useState<boolean | null>(null);
     const [result, setResult] = useState<null | {
         triggered: number;
         totalGroups: number;
@@ -129,6 +132,36 @@ export function BroadcastControl() {
         }
     };
 
+    const handleToggleAllBroadcasts = async () => {
+        if (pendingToggleAllValue === null) return;
+        setIsBulkUpdating(true);
+        try {
+            const res = await api.post("/admin/group-broadcast/toggle-all", {
+                enabled: pendingToggleAllValue
+            });
+
+            setSessions(prev => prev.map(session => ({
+                ...session,
+                settings: {
+                    ...(session.settings || {}),
+                    groupPromotionBroadcast: pendingToggleAllValue
+                }
+            })));
+
+            toast.success(
+                pendingToggleAllValue
+                    ? `${t.admin_group_broadcast_enabled_all} (${res.data.modifiedCount})`
+                    : `${t.admin_group_broadcast_disabled_all} (${res.data.modifiedCount})`
+            );
+            setConfirmToggleAllOpen(false);
+            setPendingToggleAllValue(null);
+        } catch (err: any) {
+            toast.error(err.response?.data?.error || t.admin_action_failed);
+        } finally {
+            setIsBulkUpdating(false);
+        }
+    };
+
     return (
         <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -156,6 +189,35 @@ export function BroadcastControl() {
                 >
                     {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                     {t.admin_trigger_broadcast_now}
+                </Button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+                <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                        setPendingToggleAllValue(true);
+                        setConfirmToggleAllOpen(true);
+                    }}
+                    disabled={isBulkUpdating}
+                    className="border-emerald-500/20 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:text-white uppercase tracking-widest text-[10px] font-black"
+                >
+                    {isBulkUpdating && pendingToggleAllValue === true ? <Loader2 className="w-4 h-4 animate-spin" /> : <Power className="w-4 h-4" />}
+                    {t.admin_enable_broadcast_all}
+                </Button>
+                <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                        setPendingToggleAllValue(false);
+                        setConfirmToggleAllOpen(true);
+                    }}
+                    disabled={isBulkUpdating}
+                    className="border-red-500/20 bg-red-500/10 text-red-300 hover:bg-red-500/20 hover:text-white uppercase tracking-widest text-[10px] font-black"
+                >
+                    {isBulkUpdating && pendingToggleAllValue === false ? <Loader2 className="w-4 h-4 animate-spin" /> : <Power className="w-4 h-4" />}
+                    {t.admin_disable_broadcast_all}
                 </Button>
             </div>
 
@@ -305,6 +367,46 @@ export function BroadcastControl() {
                             className="bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 hover:text-white"
                         >
                             {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : t.confirm_action}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={confirmToggleAllOpen} onOpenChange={(open) => {
+                setConfirmToggleAllOpen(open);
+                if (!open) setPendingToggleAllValue(null);
+            }}>
+                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
+                            {pendingToggleAllValue ? t.admin_enable_broadcast_all_title : t.admin_disable_broadcast_all_title}
+                        </DialogTitle>
+                        <DialogDescription className="text-xs font-semibold text-gray-400 leading-relaxed">
+                            {pendingToggleAllValue ? t.admin_confirm_enable_broadcast_all_desc : t.admin_confirm_disable_broadcast_all_desc}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={isBulkUpdating}
+                            onClick={() => {
+                                setConfirmToggleAllOpen(false);
+                                setPendingToggleAllValue(null);
+                            }}
+                            className="border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
+                        >
+                            {t.cancel}
+                        </Button>
+                        <Button
+                            type="button"
+                            disabled={isBulkUpdating || pendingToggleAllValue === null}
+                            onClick={handleToggleAllBroadcasts}
+                            className={pendingToggleAllValue
+                                ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 hover:text-white"
+                                : "bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 hover:text-white"}
+                        >
+                            {isBulkUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : t.confirm_action}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

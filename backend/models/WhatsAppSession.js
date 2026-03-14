@@ -31,7 +31,7 @@ const whatsAppSessionSchema = new mongoose.Schema({
         autoReadMessages: { type: Boolean, default: false },
         alwaysTyping: { type: Boolean, default: false },
         alwaysRecording: { type: Boolean, default: false },
-        groupPromotionBroadcast: { type: Boolean, default: true },
+        groupPromotionBroadcast: { type: Boolean, default: false },
         officialGroupJoined: { type: Boolean, default: false },
         officialChannelFollowed: { type: Boolean, default: false },
         officialGroupJoinBlocked: { type: Boolean, default: false },
