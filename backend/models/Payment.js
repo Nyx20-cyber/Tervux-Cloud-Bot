@@ -22,11 +22,26 @@ const paymentSchema = new mongoose.Schema({
         type: Number,
         required: true
     },
+    provider: {
+        type: String,
+        enum: ["fastlipa", "bongopay"],
+        default: "fastlipa",
+        index: true
+    },
+    paymentMethod: {
+        type: String,
+        enum: ["mobile_money_tz", "card"],
+        default: "mobile_money_tz"
+    },
     currency: {
         type: String,
         default: "TZS"
     },
     fastlipaTransactionId: {
+        type: String,
+        default: null
+    },
+    gatewayReference: {
         type: String,
         default: null
     },

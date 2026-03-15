@@ -14,7 +14,9 @@ import { sessionManager } from "../services/whatsappService.js";
 import { emitToUser, emitUpdate } from "../services/socketService.js";
 import { checkTransactionStatus } from "../services/paymentService.js";
 import { extractFastLipaFields, settleCompletedPayment, settleFailedPayment } from "../services/paymentSettlement.js";
+import { checkOrderStatus, extractBongoPayOrderStatus } from "../services/bongopayService.js";
 import { extractYoutubeVideoId, sanitize } from "./tutorials.js";
+import mongoose from "mongoose";
 
 const router = Router();
 
@@ -235,20 +237,74 @@ router.get("/payments", authenticate, requireAdmin, async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
-        const { status, search } = req.query;
+        const { status, search, from, to } = req.query;
 
         const filter = {};
         if (status && ["pending", "completed", "failed", "cancelled"].includes(status)) {
             filter.status = status;
         }
         if (search) {
-            filter.$or = [
+            const conditions = [
                 { payerPhone: { $regex: search, $options: "i" } },
-                { fastlipaTransactionId: { $regex: search, $options: "i" } }
+                { fastlipaTransactionId: { $regex: search, $options: "i" } },
+                { gatewayReference: { $regex: search, $options: "i" } },
+                { provider: { $regex: search, $options: "i" } },
+                { paymentMethod: { $regex: search, $options: "i" } }
             ];
+            if (mongoose.Types.ObjectId.isValid(String(search))) {
+                conditions.push({ _id: new mongoose.Types.ObjectId(String(search)) });
+            }
+            filter.$or = conditions;
+        }
+        if (from || to) {
+            filter.createdAt = {};
+            if (from) {
+                const fromDate = new Date(String(from));
+                if (!Number.isNaN(fromDate.getTime())) {
+                    filter.createdAt.$gte = fromDate;
+                }
+            }
+            if (to) {
+                const toDate = new Date(String(to));
+                if (!Number.isNaN(toDate.getTime())) {
+                    toDate.setHours(23, 59, 59, 999);
+                    filter.createdAt.$lte = toDate;
+                }
+            }
+            if (Object.keys(filter.createdAt).length === 0) {
+                delete filter.createdAt;
+            }
         }
 
-        const [payments, total, totalAmount] = await Promise.all([
+        const providerBucketsPipeline = [
+            { $match: { ...filter, status: "completed" } },
+            {
+                $addFields: {
+                    normalizedProvider: {
+                        $switch: {
+                            branches: [
+                                { case: { $eq: ["$provider", "fastlipa"] }, then: "fastlipa" },
+                                { case: { $eq: ["$provider", "bongopay"] }, then: "bongopay" },
+                                { case: { $eq: ["$provider", "zenopay"] }, then: "bongopay" },
+                                { case: { $eq: ["$paymentMethod", "mobile_money_tz"] }, then: "fastlipa" },
+                                { case: { $eq: ["$paymentMethod", "card"] }, then: "bongopay" },
+                                { case: { $ne: ["$fastlipaTransactionId", null] }, then: "fastlipa" },
+                                { case: { $ne: ["$gatewayReference", null] }, then: "bongopay" }
+                            ],
+                            default: "unknown"
+                        }
+                    }
+                }
+            },
+            {
+                $group: {
+                    _id: "$normalizedProvider",
+                    total: { $sum: "$amount" }
+                }
+            }
+        ];
+
+        const [payments, total, totalsByProvider] = await Promise.all([
             Payment.find(filter)
                 .populate("userId", "email name phone")
                 .populate("planId", "name price coinsAmount")
@@ -256,18 +312,30 @@ router.get("/payments", authenticate, requireAdmin, async (req, res) => {
                 .skip(skip)
                 .limit(limit),
             Payment.countDocuments(filter),
-            Payment.aggregate([
-                { $match: { ...filter, status: "completed" } },
-                { $group: { _id: null, total: { $sum: "$amount" } } }
-            ])
+            Payment.aggregate(providerBucketsPipeline)
         ]);
+
+        const summary = totalsByProvider.reduce((acc, entry) => {
+            const provider = entry._id || "unknown";
+            const totalValue = entry.total || 0;
+            acc.totalAmount += totalValue;
+            if (provider === "fastlipa") acc.fastlipaAmount += totalValue;
+            if (provider === "bongopay") acc.cardAmount += totalValue;
+            return acc;
+        }, {
+            totalAmount: 0,
+            fastlipaAmount: 0,
+            cardAmount: 0
+        });
 
         res.json({
             payments,
             total,
             page,
             pages: Math.ceil(total / limit),
-            totalAmount: totalAmount[0]?.total || 0
+            totalAmount: summary.totalAmount,
+            fastlipaAmount: summary.fastlipaAmount,
+            cardAmount: summary.cardAmount
         });
     } catch (error) {
         console.error("Admin payments error:", error);
@@ -309,6 +377,67 @@ router.post("/payments/:id/reconcile", authenticate, requireAdmin, async (req, r
     try {
         const payment = await Payment.findById(req.params.id);
         if (!payment) return res.status(404).json({ error: "Payment not found" });
+
+        if (payment.provider === "bongopay") {
+            const statusResult = await checkOrderStatus(payment._id.toString());
+            const { paymentStatus, reference, data } = extractBongoPayOrderStatus(statusResult);
+            const normalizedStatus = String(paymentStatus || "").toUpperCase();
+
+            if (reference) {
+                payment.gatewayReference = reference;
+            }
+            payment.gatewayResponse = {
+                ...(payment.gatewayResponse || {}),
+                lastManualReconcile: statusResult
+            };
+            await payment.save();
+
+            if (normalizedStatus === "COMPLETED" || normalizedStatus === "SUCCESSFUL") {
+                const result = await settleCompletedPayment(payment._id, { provider: "bongopay", reference, data }, "admin_reconcile_bongopay");
+                return res.json({
+                    ok: true,
+                    action: "completed",
+                    state: result.state,
+                    paymentId: payment._id,
+                    transactionId: reference || payment._id.toString()
+                });
+            }
+
+            if (normalizedStatus === "FAILED" || normalizedStatus === "REJECTED") {
+                const result = await settleFailedPayment(payment._id, "failed", "Card payment failed.", { provider: "bongopay", reference, data });
+                return res.json({
+                    ok: true,
+                    action: "failed",
+                    state: result.state,
+                    paymentId: payment._id,
+                    transactionId: reference || payment._id.toString()
+                });
+            }
+
+            if (normalizedStatus === "CANCELLED" || normalizedStatus === "USERCANCELLED") {
+                const result = await settleFailedPayment(payment._id, "cancelled", "Card payment was cancelled.", { provider: "bongopay", reference, data });
+                return res.json({
+                    ok: true,
+                    action: "failed",
+                    state: result.state,
+                    paymentId: payment._id,
+                    transactionId: reference || payment._id.toString()
+                });
+            }
+
+            emitUpdate("admin_payment_updated", {
+                paymentId: payment._id.toString(),
+                status: normalizedStatus || "PENDING"
+            });
+
+            return res.json({
+                ok: true,
+                action: "pending",
+                paymentId: payment._id,
+                transactionId: reference || payment._id.toString(),
+                status: normalizedStatus || "PENDING"
+            });
+        }
 
         if (!payment.fastlipaTransactionId) {
             return res.status(400).json({ error: "Payment has no FastLipa transaction ID" });

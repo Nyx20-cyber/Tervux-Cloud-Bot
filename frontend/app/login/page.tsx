@@ -78,7 +78,7 @@ export default function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-3 sm:p-4 animate-fade-in relative z-20 overflow-hidden bg-black">
+        <div className="min-h-screen flex items-center justify-center p-3 pt-16 sm:p-4 sm:pt-4 animate-fade-in relative z-20 overflow-hidden bg-black">
             {/* Background elements */}
             <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-primary/10 blur-[120px] rounded-full -z-10 animate-pulse transition-all duration-1000"></div>
             <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-primary/5 blur-[120px] rounded-full -z-10"></div>
@@ -96,11 +96,11 @@ export default function LoginPage() {
                 </Button>
             </div>
 
-            <div className="w-full max-w-sm sm:max-w-md p-5 sm:p-10 rounded-[1.6rem] sm:rounded-[2.5rem] border border-white/[0.08] bg-white/[0.02] backdrop-blur-3xl shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] relative overflow-hidden group">
-                <div className="absolute -inset-0.5 bg-gradient-to-tr from-primary/10 to-transparent rounded-[1.6rem] sm:rounded-[2.5rem] blur opacity-20 z-0 transition-opacity duration-500"></div>
+            <div className="w-full max-w-sm sm:max-w-md p-4 sm:p-10 rounded-[1.35rem] sm:rounded-[2.5rem] border border-white/[0.08] bg-white/[0.02] backdrop-blur-3xl shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] relative overflow-hidden group">
+                <div className="absolute -inset-0.5 bg-gradient-to-tr from-primary/10 to-transparent rounded-[1.35rem] sm:rounded-[2.5rem] blur opacity-20 z-0 transition-opacity duration-500"></div>
 
-                <div className="relative z-10 space-y-6 sm:space-y-8">
-                    <div className="text-center space-y-4 sm:space-y-6">
+                <div className="relative z-10 space-y-5 sm:space-y-8">
+                    <div className="text-center space-y-3 sm:space-y-6">
                         <div className="flex justify-center">
                             <motion.div
                                 animate={{
@@ -112,19 +112,19 @@ export default function LoginPage() {
                                     repeat: Infinity,
                                     ease: "easeInOut"
                                 }}
-                                className="p-3.5 sm:p-5 rounded-2xl sm:rounded-[1.75rem] bg-primary/5 border border-primary/10 shadow-inner"
+                                className="p-3 sm:p-5 rounded-2xl sm:rounded-[1.75rem] bg-primary/5 border border-primary/10 shadow-inner"
                             >
-                                <ShieldCheck className="h-7 w-7 sm:h-10 sm:w-10 text-primary/80" />
+                                <ShieldCheck className="h-6 w-6 sm:h-10 sm:w-10 text-primary/80" />
                             </motion.div>
                         </div>
                         <div className="space-y-1.5">
-                            <h1 className="text-xl sm:text-2xl font-bold text-white uppercase tracking-[0.18em] sm:tracking-[0.25em] font-mono">{t.app_name}</h1>
+                            <h1 className="text-lg sm:text-2xl font-bold text-white uppercase tracking-[0.16em] sm:tracking-[0.25em] font-mono">{t.app_name}</h1>
                             <p className="text-[10px] font-medium text-gray-500 uppercase tracking-[0.3em] opacity-80">{t.sign_in_account}</p>
                         </div>
                     </div>
 
-                    <form onSubmit={handleLogin} className="space-y-5 sm:space-y-6">
-                        <div className="space-y-3.5 sm:space-y-4">
+                    <form onSubmit={handleLogin} className="space-y-4 sm:space-y-6">
+                        <div className="space-y-3 sm:space-y-4">
                             <div className="space-y-2">
                                 <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-widest ml-2 opacity-60">{t.email_address}</label>
                                 <Input

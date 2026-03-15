@@ -2,6 +2,16 @@ import Payment from "../models/Payment.js";
 import { checkTransactionStatus } from "./paymentService.js";
 import { emitToUser } from "./socketService.js";
 import { settleCompletedPayment, settleFailedPayment } from "./paymentSettlement.js";
+import { checkOrderStatus, extractBongoPayOrderStatus } from "./bongopayService.js";
+
+function normalizeGatewayStatus(statusValue) {
+    const status = String(statusValue || "").trim().toLowerCase();
+    if (status === "completed" || status === "successful" || status === "success") return "COMPLETED";
+    if (status === "failed" || status === "failure" || status === "expired") return "FAILED";
+    if (status === "cancelled" || status === "canceled" || status === "usercancelled" || status === "rejected") return "CANCELLED";
+    if (status === "pending" || status === "processing" || status === "in_progress" || status === "inprogress") return "PENDING";
+    return "";
+}
 
 /**
  * Background Payment Verifier
@@ -15,11 +25,9 @@ export async function verifyPendingPayments() {
         const FAST_POLL_INTERVAL_MS = 45_000;
         const SLOW_POLL_INTERVAL_MS = 5 * 60 * 1000;
         const FAST_POLL_WINDOW_MS = 15 * 60 * 1000;
-        const CANCEL_TIMEOUT_MS = 24 * 60 * 60 * 1000;
-        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const CANCEL_TIMEOUT_MS = 30 * 60 * 1000;
         const pendingPayments = await Payment.find({
-            status: "pending",
-            createdAt: { $gt: cutoff }
+            status: "pending"
         }).populate("planId");
 
         if (pendingPayments.length === 0) return;
@@ -27,31 +35,31 @@ export async function verifyPendingPayments() {
         console.log(`💳 [PaymentVerifier] Checking ${pendingPayments.length} pending payment(s)...`);
 
         for (const payment of pendingPayments) {
-            if (!payment.fastlipaTransactionId) continue;
-
             const paymentAge = Date.now() - new Date(payment.createdAt).getTime();
             const lastPolledAt = payment.gatewayResponse?.lastPolledAt
                 ? new Date(payment.gatewayResponse.lastPolledAt).getTime()
                 : 0;
             const sinceLastPoll = Date.now() - lastPolledAt;
+            const referenceLabel = payment.fastlipaTransactionId || payment.gatewayReference || payment._id.toString();
 
             try {
                 if (paymentAge < MIN_WAIT_MS) {
-                    console.log(`   ⏳ [${payment.fastlipaTransactionId}] Waiting... (${Math.round(paymentAge / 1000)}s old)`);
+                    console.log(`   ⏳ [${referenceLabel}] Waiting... (${Math.round(paymentAge / 1000)}s old)`);
                     continue;
                 }
 
                 if (paymentAge > CANCEL_TIMEOUT_MS) {
-                    payment.status = "cancelled";
-                    payment.failureReason = "Payment timed out after extended verification window.";
-                    await payment.save();
-                    console.log(`   ⏰ [${payment.fastlipaTransactionId}] Auto-cancelled after ${Math.round(paymentAge / 1000)}s.`);
-
-                    emitToUser(payment.userId.toString(), "payment_update", {
-                        paymentId: payment._id,
-                        status: "cancelled",
-                        message: "Payment timed out after verification window. If you were charged, contact support with your transaction ID."
-                    });
+                    await settleFailedPayment(
+                        payment._id,
+                        "cancelled",
+                        "Payment timed out after 30 minutes.",
+                        {
+                            provider: payment.provider,
+                            autoCancelledAt: new Date().toISOString(),
+                            timeoutMs: CANCEL_TIMEOUT_MS
+                        }
+                    );
+                    console.log(`   ⏰ [${referenceLabel}] Auto-cancelled after ${Math.round(paymentAge / 1000)}s.`);
                     continue;
                 }
 
@@ -60,6 +68,52 @@ export async function verifyPendingPayments() {
                     : SLOW_POLL_INTERVAL_MS;
 
                 if (sinceLastPoll < pollInterval) {
+                    continue;
+                }
+
+                if (payment.provider === "bongopay") {
+                    const statusResult = await checkOrderStatus(payment._id.toString());
+                    const { paymentStatus, reference, data } = extractBongoPayOrderStatus(statusResult);
+                    const txStatus = normalizeGatewayStatus(paymentStatus);
+
+                    payment.gatewayResponse = {
+                        ...(payment.gatewayResponse || {}),
+                        lastPolledAt: new Date().toISOString(),
+                        consecutivePollFailures: 0,
+                        lastStatusPayload: statusResult
+                    };
+
+                    if (reference && payment.gatewayReference !== reference) {
+                        payment.gatewayReference = reference;
+                    }
+
+                    console.log(`   💳 [${referenceLabel}] POLL check — Provider: "BongoPay", Transaction: "${txStatus || paymentStatus || "UNKNOWN"}"`);
+
+                    if (txStatus === "COMPLETED") {
+                        const result = await settleCompletedPayment(payment._id, { provider: "bongopay", reference, data }, "polling_bongopay");
+                        if (result.state === "completed") {
+                            console.log(`   ✅ [${referenceLabel}] Payment completed and coins credited.`);
+                        } else {
+                            console.log(`   ℹ️ [${referenceLabel}] Completion state: ${result.state}`);
+                        }
+                        continue;
+                    }
+
+                    if (txStatus === "FAILED" || txStatus === "CANCELLED") {
+                        const failureStatus = txStatus === "CANCELLED" ? "cancelled" : "failed";
+                        const failureReason = failureStatus === "cancelled"
+                            ? "Card payment was cancelled."
+                            : "Card payment failed.";
+                        await settleFailedPayment(payment._id, failureStatus, failureReason, { provider: "bongopay", reference, data });
+                        console.log(`   ❌ [${referenceLabel}] ${failureStatus}: ${txStatus}`);
+                        continue;
+                    }
+
+                    await payment.save();
+                    continue;
+                }
+
+                if (!payment.fastlipaTransactionId) {
                     continue;
                 }
 
@@ -112,21 +166,12 @@ export async function verifyPendingPayments() {
                 if (!isTransient || failCount === 1 || failCount % 5 === 0) {
                     const levelTag = isTransient ? "⚠️" : "❌";
                     console[isTransient ? "warn" : "error"](
-                        `   ${levelTag} [${payment.fastlipaTransactionId}] Check failed (x${failCount}): ${err.message}`
+                        `   ${levelTag} [${referenceLabel}] Check failed (x${failCount}): ${err.message}`
                     );
                 }
             }
 
             await new Promise(r => setTimeout(r, 1000));
-        }
-
-        // Mark very old pending payments (>24h) as failed
-        const expiredPayments = await Payment.updateMany(
-            { status: "pending", createdAt: { $lt: cutoff } },
-            { $set: { status: "failed" } }
-        );
-        if (expiredPayments.modifiedCount > 0) {
-            console.log(`   🧹 Marked ${expiredPayments.modifiedCount} expired pending payment(s) as failed.`);
         }
 
     } catch (error) {

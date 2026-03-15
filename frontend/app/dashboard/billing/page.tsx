@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState, Suspense, useCallback } from "react";
+import { useEffect, useState, Suspense, useCallback, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { CircleDollarSign, CheckCircle2, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, useAuthStore } from "@/store/useAuthStore";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { io } from "socket.io-client";
@@ -23,16 +23,56 @@ function BillingContent() {
     };
     const [plans, setPlans] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const { checkAuth } = useAuthStore();
+    const searchParams = useSearchParams();
+    const { checkAuth, user } = useAuthStore();
     const router = useRouter();
 
     const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
     const [selectedPlan, setSelectedPlan] = useState<any>(null);
     const [phoneNumber, setPhoneNumber] = useState("");
     const [isProcessing, setIsProcessing] = useState(false);
+    const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
+    const [paymentMarket, setPaymentMarket] = useState<"tanzania" | "international">("tanzania");
+    const resumePollRef = useRef<string | null>(null);
+    const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const socketRef = useRef<ReturnType<typeof io> | null>(null);
+    const EXCHANGE_RATES = {
+        USD_TO_TZS: 2605,
+        KES_TO_TZS: 20.01,
+        UGX_TO_TZS: 0.7334
+    } as const;
     const bestValuePlanId = plans.length
         ? [...plans].sort((a, b) => (b.coinsAmount / Math.max(b.price, 1)) - (a.coinsAmount / Math.max(a.price, 1)))[0]?._id
         : null;
+
+    const isValidInternationalPhone = (value: string) => /^\+[1-9]\d{7,14}$/.test(value.trim());
+    const formatInternationalPhoneInput = (value: string) => {
+        const digits = value.replace(/\D/g, "");
+        return digits ? `+${digits}` : "";
+    };
+    const normalizeTanzaniaPhoneInput = (value: string) => {
+        const digits = value.replace(/\D/g, "");
+        if (!digits) return "";
+        if (digits.startsWith("255") && digits.length <= 12) {
+            return `0${digits.slice(3, 12)}`;
+        }
+        if (digits.startsWith("0")) {
+            return digits.slice(0, 10);
+        }
+        if (/^[67]\d{0,8}$/.test(digits)) {
+            return `0${digits}`.slice(0, 10);
+        }
+        return digits.slice(0, 10);
+    };
+    const getApproxPlanCurrencies = (tzsAmount: number) => {
+        const amount = Number(tzsAmount) || 0;
+        return {
+            kes: Math.round(amount / EXCHANGE_RATES.KES_TO_TZS),
+            ugx: Math.round(amount / EXCHANGE_RATES.UGX_TO_TZS),
+            usd: (amount / EXCHANGE_RATES.USD_TO_TZS).toFixed(2)
+        };
+    };
 
     useEffect(() => {
         api.get("/plans").then(res => {
@@ -44,15 +84,30 @@ function BillingContent() {
         });
     }, []);
 
+    const stopPaymentTracking = useCallback(() => {
+        if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+        }
+        if (pollTimeoutRef.current) {
+            clearTimeout(pollTimeoutRef.current);
+            pollTimeoutRef.current = null;
+        }
+        if (socketRef.current) {
+            socketRef.current.disconnect();
+            socketRef.current = null;
+        }
+    }, []);
+
     const pollPaymentStatus = useCallback((paymentId: string) => {
+        stopPaymentTracking();
         let resolved = false;
 
         const handleResolved = (status: string, data: any) => {
             if (resolved) return;
             resolved = true;
-            clearInterval(interval);
-            clearTimeout(timeout);
-            socket?.disconnect();
+            stopPaymentTracking();
+            setActivePaymentId(null);
 
             if (status === "completed") {
                 toast.success(t.payment_success_coins_added);
@@ -60,7 +115,7 @@ function BillingContent() {
                 setIsProcessing(false);
                 setIsCheckoutOpen(false);
                 checkAuth();
-                router.push("/dashboard");
+                router.push("/dashboard/billing");
             } else if (status === "cancelled") {
                 toast.warning(t.payment_cancelled, { duration: 6000 });
                 setIsProcessing(false);
@@ -77,6 +132,7 @@ function BillingContent() {
             path: "/socket.io",
             auth: { token }
         });
+        socketRef.current = socket;
 
         socket.on("payment_update", (data: { paymentId: string; status: string; message: string; coins?: number }) => {
             if (data.paymentId === paymentId) {
@@ -84,54 +140,118 @@ function BillingContent() {
             }
         });
 
-        const interval = setInterval(async () => {
+        pollIntervalRef.current = setInterval(async () => {
             if (resolved) return;
             try {
                 const res = await api.get(`/subscription/payment-status/${paymentId}`);
                 if (res.data.status !== "pending") {
                     handleResolved(res.data.status, res.data);
                 }
-            } catch (error) {
+            } catch (error: any) {
+                if (error?.response?.status === 404) {
+                    handleResolved("cancelled", { message: "Payment was cancelled." });
+                    return;
+                }
                 console.error("Polling error", error);
             }
         }, 10000);
 
-        const timeout = setTimeout(() => {
+        pollTimeoutRef.current = setTimeout(() => {
             if (!resolved) {
                 resolved = true;
-                clearInterval(interval);
-                socket?.disconnect();
+                stopPaymentTracking();
                 setIsProcessing(false);
+                setActivePaymentId(null);
                 toast.warning(t.payment_verification_timeout, { duration: 8000 });
             }
         }, 150000);
-    }, [checkAuth, router, t]);
+    }, [checkAuth, router, stopPaymentTracking, t]);
+
+    useEffect(() => () => {
+        stopPaymentTracking();
+    }, [stopPaymentTracking]);
+
+    useEffect(() => {
+        const paymentId = searchParams.get("paymentId");
+        const provider = searchParams.get("provider");
+        if (!paymentId || (provider !== "bongopay" && provider !== "zenopay") || resumePollRef.current === paymentId) return;
+
+        resumePollRef.current = paymentId;
+        setIsProcessing(true);
+        setActivePaymentId(paymentId);
+        pollPaymentStatus(paymentId);
+    }, [pollPaymentStatus, searchParams]);
 
     const handleCheckout = async () => {
-        const normalizedPhone = phoneNumber.replace(/\D/g, "");
+        const rawPhone = phoneNumber.trim();
+        const normalizedPhone = rawPhone.replace(/\D/g, "");
 
-        if (!normalizedPhone || normalizedPhone.length < 10) {
+        if (paymentMarket === "international") {
+            if (!isValidInternationalPhone(rawPhone)) {
+                toast.error(t.billing_card_phone_invalid);
+                return;
+            }
+        } else if (!normalizedPhone || normalizedPhone.length < 10) {
             toast.error(t.enter_valid_phone);
             return;
         }
 
         setIsProcessing(true);
         try {
-            const res = await api.post("/subscription/checkout", {
-                planSlug: selectedPlan.slug,
-                payerPhone: normalizedPhone
-            });
+            if (paymentMarket === "international") {
+                const res = await api.post("/subscription/checkout/card", {
+                    planSlug: selectedPlan.slug,
+                    buyerPhone: rawPhone
+                });
 
-            toast.success(t.payment_request_sent);
-            pollPaymentStatus(res.data.paymentId);
+                if (res.data?.paymentUrl) {
+                    if (res.data?.paymentId) setActivePaymentId(res.data.paymentId);
+                    toast.success(t.billing_card_redirecting_to_checkout);
+                    window.location.href = res.data.paymentUrl;
+                    return;
+                }
+                throw new Error(t.billing_card_start_failed);
+            } else {
+                const res = await api.post("/subscription/checkout", {
+                    planSlug: selectedPlan.slug,
+                    payerPhone: normalizedPhone
+                });
+
+                setActivePaymentId(res.data.paymentId);
+                toast.success(t.payment_request_sent);
+                pollPaymentStatus(res.data.paymentId);
+            }
         } catch (error: any) {
             if (error.response?.status === 409 && error.response?.data?.paymentId) {
-                toast.warning(error.response?.data?.error || t.payment_request_sent);
+                setActivePaymentId(error.response.data.paymentId);
+                toast.warning(error.response?.data?.error || (paymentMarket === "international" ? t.billing_card_redirecting_to_checkout : t.payment_request_sent));
+                if (paymentMarket === "international" && error.response?.data?.paymentUrl) {
+                    window.location.href = error.response.data.paymentUrl;
+                    return;
+                }
                 pollPaymentStatus(error.response.data.paymentId);
                 return;
             }
-            toast.error(error.response?.data?.error || t.failed_initiate_payment);
+            toast.error(error.response?.data?.error || (paymentMarket === "international" ? t.billing_card_start_failed : t.failed_initiate_payment));
             setIsProcessing(false);
+        }
+    };
+
+    const handleCancelPayment = async () => {
+        if (!isProcessing || !activePaymentId) {
+            setIsCheckoutOpen(false);
+            return;
+        }
+
+        try {
+            await api.delete(`/subscription/payment/${activePaymentId}`);
+            stopPaymentTracking();
+            setIsProcessing(false);
+            setActivePaymentId(null);
+            setIsCheckoutOpen(false);
+            toast.success(t.payment_cancelled_removed);
+        } catch (error: any) {
+            toast.error(error.response?.data?.error || t.payment_cancel_failed);
         }
     };
 
@@ -156,7 +276,9 @@ function BillingContent() {
                     <div className="col-span-3 flex justify-center py-12">
                         <Loader2 className="w-8 h-8 text-primary animate-spin" />
                     </div>
-                ) : plans.map((plan: any) => (
+                ) : plans.map((plan: any) => {
+                    const approx = getApproxPlanCurrencies(plan.price);
+                    return (
                     <div key={plan._id} className="relative group">
                         {plan._id === bestValuePlanId && (
                             <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 px-3 py-1 rounded-full bg-primary text-black text-[9px] font-black uppercase tracking-widest shadow-lg shadow-primary/30">
@@ -179,7 +301,18 @@ function BillingContent() {
                                 <div className="text-3xl sm:text-4xl font-black text-white tabular-nums leading-none">
                                     {plan.price.toLocaleString()}
                                 </div>
-                                <span className="pb-1 text-xs font-bold text-gray-500 uppercase tracking-widest">TZS</span>
+                                <span className="pb-1 text-xs font-bold text-gray-500 uppercase tracking-widest">🇹🇿 TZS</span>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-gray-300">
+                                    🇰🇪 KES {approx.kes.toLocaleString()}
+                                </span>
+                                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-gray-300">
+                                    🇺🇬 UGX {approx.ugx.toLocaleString()}
+                                </span>
+                                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-gray-300">
+                                    🇺🇸 USD {approx.usd}
+                                </span>
                             </div>
 
                             <div className="mt-4 p-3 rounded-2xl border border-white/10 bg-white/[0.03]">
@@ -228,12 +361,13 @@ function BillingContent() {
                             </Button>
                         </div>
                     </div>
-                ))}
+                    );
+                })}
             </div>
 
             {/* Checkout Dialog */}
             <Dialog open={isCheckoutOpen} onOpenChange={setIsCheckoutOpen}>
-                <DialogContent className="sm:max-w-lg bg-zinc-950 border-white/10 backdrop-blur-2xl rounded-2xl sm:rounded-3xl p-0 overflow-hidden">
+                <DialogContent className="w-[calc(100vw-1rem)] max-w-lg max-h-[90vh] overflow-y-auto bg-zinc-950 border-white/10 backdrop-blur-2xl rounded-2xl sm:rounded-3xl p-0">
                     <div className="p-6 sm:p-8 bg-gradient-to-b from-white/[0.03] to-transparent">
                     <DialogHeader>
                         <DialogTitle className="text-lg sm:text-xl font-black text-white uppercase tracking-widest">{t.confirm_payment}</DialogTitle>
@@ -249,9 +383,26 @@ function BillingContent() {
                     <div className="space-y-6 py-5">
                         <div className="rounded-2xl border border-primary/20 bg-primary/10 p-4">
                             <p className="text-[9px] font-black uppercase tracking-widest text-primary/80">{t.billing_plan_summary}</p>
-                            <div className="mt-2 flex items-center justify-between">
+                            <div className="mt-2 flex items-center justify-between gap-3">
                                 <p className="text-sm font-black uppercase tracking-wide text-white">{selectedPlan?.name || "-"}</p>
-                                <p className="text-sm font-black text-primary">{selectedPlan?.price?.toLocaleString?.() || "0"} TZS</p>
+                                {paymentMarket === "international" && selectedPlan ? (() => {
+                                    const approx = getApproxPlanCurrencies(selectedPlan.price);
+                                    return (
+                                        <div className="flex flex-wrap justify-end gap-2">
+                                            <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-gray-200">
+                                                🇰🇪 KES {approx.kes.toLocaleString()}
+                                            </span>
+                                            <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-gray-200">
+                                                🇺🇬 UGX {approx.ugx.toLocaleString()}
+                                            </span>
+                                            <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-gray-200">
+                                                🇺🇸 USD {approx.usd}
+                                            </span>
+                                        </div>
+                                    );
+                                })() : (
+                                    <p className="text-sm font-black text-primary">{selectedPlan?.price?.toLocaleString?.() || "0"} 🇹🇿 TZS</p>
+                                )}
                             </div>
                             <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">
                                 {selectedPlan?.coinsAmount || 0} {t.coins_included_short}
@@ -260,32 +411,79 @@ function BillingContent() {
 
                         <div className="space-y-3">
                             <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] block">
-                                {t.enter_mobile_number}
+                                {t.billing_market_title}
                             </label>
-                            <div className="flex flex-wrap gap-2 mb-2">
-                                <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-[#E60000]/10 text-[#FF4D4D] border border-[#E60000]/30 uppercase tracking-[0.1em]">M-Pesa</span>
-                                <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-[#0055A5]/10 text-[#66A3FF] border border-[#0055A5]/30 uppercase tracking-[0.1em]">Tigo Pesa</span>
-                                <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-[#FF0000]/10 text-[#FF4D4D] border border-[#FF0000]/30 uppercase tracking-[0.1em]">Airtel</span>
-                                <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-[#FF6600]/10 text-[#FF9933] border border-[#FF6600]/30 uppercase tracking-[0.1em]">HaloPesa</span>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setPaymentMarket("tanzania")}
+                                    className={`rounded-2xl border p-4 text-left transition-all ${paymentMarket === "tanzania"
+                                        ? "border-primary/40 bg-primary/10"
+                                        : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"}`}
+                                >
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-primary">{t.billing_market_tanzania_short}</p>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPaymentMarket("international")}
+                                    className={`rounded-2xl border p-4 text-left transition-all ${paymentMarket === "international"
+                                        ? "border-sky-500/40 bg-sky-500/10"
+                                        : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"}`}
+                                >
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-sky-300">{t.billing_market_international_short}</p>
+                                </button>
                             </div>
+                        </div>
+
+                        <div className="space-y-3">
+                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] block">
+                                {paymentMarket === "international" ? t.billing_card_phone_label : t.enter_mobile_number}
+                            </label>
+                            {paymentMarket === "tanzania" ? (
+                                <div className="flex flex-wrap gap-2 mb-2">
+                                    <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-[#E60000]/10 text-[#FF4D4D] border border-[#E60000]/30 uppercase tracking-[0.1em]">M-Pesa</span>
+                                    <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-[#0055A5]/10 text-[#66A3FF] border border-[#0055A5]/30 uppercase tracking-[0.1em]">Tigo Pesa</span>
+                                    <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-[#FF0000]/10 text-[#FF4D4D] border border-[#FF0000]/30 uppercase tracking-[0.1em]">Airtel</span>
+                                    <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-[#FF6600]/10 text-[#FF9933] border border-[#FF6600]/30 uppercase tracking-[0.1em]">HaloPesa</span>
+                                </div>
+                            ) : (
+                                <div className="flex flex-wrap gap-2 mb-2">
+                                    <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-sky-500/10 text-sky-300 border border-sky-500/30 uppercase tracking-[0.1em]">Visa</span>
+                                    <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-sky-500/10 text-sky-300 border border-sky-500/30 uppercase tracking-[0.1em]">Mastercard</span>
+                                </div>
+                            )}
                             <Input
-                                placeholder={t.billing_phone_placeholder}
+                                placeholder={paymentMarket === "international" ? t.billing_card_phone_placeholder : t.billing_phone_placeholder}
                                 value={phoneNumber}
-                                onChange={(e) => setPhoneNumber(e.target.value)}
+                                onChange={(e) => {
+                                    const nextValue = e.target.value;
+                                    if (paymentMarket === "international") {
+                                        setPhoneNumber(formatInternationalPhoneInput(nextValue));
+                                        return;
+                                    }
+                                    setPhoneNumber(normalizeTanzaniaPhoneInput(nextValue));
+                                }}
                                 className="bg-black/50 border-white/10 text-white placeholder:text-gray-700 focus-visible:ring-primary h-12 sm:h-14 rounded-xl sm:rounded-2xl font-mono text-base sm:text-lg tracking-widest"
                             />
                             <p className="text-[9px] font-bold uppercase tracking-widest text-gray-600">
-                                {t.billing_secure_checkout}
+                                {paymentMarket === "international" ? t.billing_card_secure_checkout : t.billing_secure_checkout}
                             </p>
+                            {paymentMarket === "international" && (
+                                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-3">
+                                    <p className="text-[10px] font-bold tracking-wider text-amber-100">
+                                        {t.billing_card_tax_notice}
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     </div>
 
-                    <div className="flex flex-col gap-3">
+                    <div className="sticky bottom-0 z-10 flex flex-col gap-3 border-t border-white/10 bg-zinc-950/95 px-1 pt-4 pb-1 backdrop-blur">
                         <Button onClick={handleCheckout} disabled={isProcessing} className="w-full h-12 sm:h-14 bg-primary text-black hover:bg-primary/90 font-black uppercase tracking-[0.16em] sm:tracking-[0.2em] text-[10px] sm:text-[11px] rounded-xl sm:rounded-2xl shadow-xl shadow-primary/20">
-                            {isProcessing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {t.processing}</> : t.pay_now}
+                            {isProcessing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {t.processing}</> : (paymentMarket === "international" ? t.billing_continue_to_card : t.pay_now)}
                         </Button>
-                        <Button variant="ghost" onClick={() => !isProcessing && setIsCheckoutOpen(false)} disabled={isProcessing} className="w-full h-12 text-[10px] text-gray-500 font-bold uppercase tracking-widest hover:text-white hover:bg-white/5 rounded-xl">
-                            {t.cancel}
+                        <Button variant="ghost" onClick={handleCancelPayment} className="w-full h-12 text-[10px] text-gray-500 font-bold uppercase tracking-widest hover:text-white hover:bg-white/5 rounded-xl">
+                            {isProcessing && activePaymentId ? t.cancel_payment : t.cancel}
                         </Button>
                     </div>
                     </div>

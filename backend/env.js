@@ -1,5 +1,14 @@
 import dotenv from "dotenv";
-dotenv.config();
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 1) Primary local backend env file.
+dotenv.config({ path: path.join(__dirname, ".env") });
+// 2) Fallback for docker/deploy style env location. Existing vars are not overridden.
+dotenv.config({ path: path.join(__dirname, "../deploy/env/backend.env") });
 
 // TLS verification enabled - only disable if you have certificate issues
 // if (process.env.NODE_ENV !== "production") {

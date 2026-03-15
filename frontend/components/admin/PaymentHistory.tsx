@@ -6,6 +6,7 @@ import {
     Search, ChevronLeft, ChevronRight, Loader2, Receipt,
     Filter, Download, CreditCard, Trash2, RefreshCw
 } from "lucide-react";
+import { CalendarDays } from "lucide-react";
 import { format } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocaleStore } from "@/store/useLocaleStore";
@@ -22,9 +23,12 @@ interface PaymentRecord {
     planId?: { _id: string; name?: string; price?: number; coinsAmount?: number };
     amount: number;
     currency: string;
+    provider?: "fastlipa" | "zenopay" | "bongopay";
+    paymentMethod?: "mobile_money_tz" | "card";
     status: "pending" | "completed" | "failed" | "cancelled";
     payerPhone: string;
     fastlipaTransactionId?: string;
+    gatewayReference?: string;
     failureReason?: string;
     createdAt: string;
 }
@@ -43,10 +47,14 @@ export function PaymentHistory() {
     const [payments, setPayments] = useState<PaymentRecord[]>([]);
     const [total, setTotal] = useState(0);
     const [totalAmount, setTotalAmount] = useState(0);
+    const [fastlipaAmount, setFastlipaAmount] = useState(0);
+    const [cardAmount, setCardAmount] = useState(0);
     const [page, setPage] = useState(1);
     const [pages, setPages] = useState(1);
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState<string>("all");
+    const [fromDate, setFromDate] = useState("");
+    const [toDate, setToDate] = useState("");
     const [isLoading, setIsLoading] = useState(true);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [reconcilingId, setReconcilingId] = useState<string | null>(null);
@@ -54,12 +62,14 @@ export function PaymentHistory() {
     const [confirmReconcilePaymentId, setConfirmReconcilePaymentId] = useState<string | null>(null);
     const tr = (key: string, fallback: string) => (t as Record<string, string>)[key] || fallback;
 
-    const fetchPayments = useCallback(async (p: number, status?: string, q?: string) => {
+    const fetchPayments = useCallback(async (p: number, status?: string, q?: string, from?: string, to?: string) => {
         setIsLoading(true);
         try {
             let url = `/admin/payments?page=${p}&limit=15`;
             if (status && status !== "all") url += `&status=${status}`;
             if (q) url += `&search=${encodeURIComponent(q)}`;
+            if (from) url += `&from=${encodeURIComponent(from)}`;
+            if (to) url += `&to=${encodeURIComponent(to)}`;
 
             const res = await api.get(url);
             setPayments(res.data.payments);
@@ -67,6 +77,8 @@ export function PaymentHistory() {
             setPages(res.data.pages);
             setPage(res.data.page);
             setTotalAmount(res.data.totalAmount);
+            setFastlipaAmount(res.data.fastlipaAmount || 0);
+            setCardAmount(res.data.cardAmount || 0);
         } catch (err) {
             console.error(err);
         } finally {
@@ -75,8 +87,8 @@ export function PaymentHistory() {
     }, []);
 
     useEffect(() => {
-        fetchPayments(1, statusFilter, search);
-    }, [fetchPayments, statusFilter, search]);
+        fetchPayments(1, statusFilter, search, fromDate, toDate);
+    }, [fetchPayments, statusFilter, search, fromDate, toDate]);
 
     useEffect(() => {
         const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -89,16 +101,16 @@ export function PaymentHistory() {
         socket.on("admin_payment_deleted", (payload: { paymentId: string }) => {
             setPayments(prev => prev.filter(p => p._id !== payload.paymentId));
             setTotal(prev => Math.max(0, prev - 1));
-            fetchPayments(page, statusFilter, search);
+            fetchPayments(page, statusFilter, search, fromDate, toDate);
         });
         socket.on("admin_payment_updated", () => {
-            fetchPayments(page, statusFilter, search);
+            fetchPayments(page, statusFilter, search, fromDate, toDate);
         });
 
         return () => {
             socket.disconnect();
         };
-    }, [fetchPayments, page, search, statusFilter, token]);
+    }, [fetchPayments, fromDate, page, search, statusFilter, toDate, token]);
 
     const handleDeletePayment = async (paymentId: string) => {
         setDeletingId(paymentId);
@@ -107,7 +119,7 @@ export function PaymentHistory() {
             setPayments(prev => prev.filter(p => p._id !== paymentId));
             setTotal(prev => Math.max(0, prev - 1));
             toast.success(t.admin_payment_deleted);
-            fetchPayments(page, statusFilter, search);
+            fetchPayments(page, statusFilter, search, fromDate, toDate);
         } catch (err: any) {
             toast.error(err.response?.data?.error || t.admin_failed_delete_payment);
         } finally {
@@ -130,7 +142,7 @@ export function PaymentHistory() {
                 toast.message(tr("admin_payment_reconcile_pending", "Payment is still pending at provider. Try again shortly."));
             }
 
-            fetchPayments(page, statusFilter, search);
+            fetchPayments(page, statusFilter, search, fromDate, toDate);
         } catch (err: any) {
             toast.error(err.response?.data?.error || tr("admin_payment_reconcile_error", "Failed to reconcile payment"));
         } finally {
@@ -144,7 +156,7 @@ export function PaymentHistory() {
         const headers = [t.admin_date, t.admin_transaction_id, t.users, t.phone_number, t.plans, t.admin_amount, t.status_label];
         const rows = payments.map(p => [
             format(new Date(p.createdAt), "yyyy-MM-dd HH:mm"),
-            p.fastlipaTransactionId || p._id.slice(-8),
+            p.fastlipaTransactionId || p.gatewayReference || p._id.slice(-8),
             p.userId?.name || p.userId?.email || "—",
             p.payerPhone,
             p.planId?.name || "—",
@@ -188,6 +200,16 @@ export function PaymentHistory() {
                             {totalAmount.toLocaleString()} TZS
                         </span>
                     </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-300">
+                            {tr("admin_fastlipa_total", "FastLipa")}: {fastlipaAmount.toLocaleString()} TZS
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-sky-500/20 bg-sky-500/10">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-sky-300">
+                            {tr("admin_bongopay_total", "BongoPay")}: {cardAmount.toLocaleString()} TZS
+                        </span>
+                    </div>
                     <button
                         onClick={handleExportCSV}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[10px] font-bold uppercase tracking-widest text-gray-400 hover:text-white transition-all"
@@ -199,17 +221,45 @@ export function PaymentHistory() {
             </div>
 
             {/* Filters */}
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col gap-3">
                 {/* Search */}
-                <div className="relative flex-1 sm:max-w-xs">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                    <input
-                        type="text"
-                        placeholder={t.admin_search_phone_or_ref}
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 backdrop-blur-md transition-all uppercase tracking-widest"
-                    />
+                <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+                    <div className="relative flex-1 sm:max-w-xs">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                        <input
+                            type="text"
+                            placeholder={t.admin_search_phone_or_ref}
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 backdrop-blur-md transition-all uppercase tracking-widest"
+                        />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:w-auto">
+                        <div className="flex flex-col gap-1">
+                            <span className="text-[9px] font-black uppercase tracking-widest text-gray-500">{tr("admin_from_date", "From")}</span>
+                            <div className="relative">
+                                <input
+                                    type="date"
+                                    value={fromDate}
+                                    onChange={(e) => { setFromDate(e.target.value); setPage(1); }}
+                                    className="min-w-[160px] w-full cursor-pointer pr-10 px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                />
+                                <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
+                            </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <span className="text-[9px] font-black uppercase tracking-widest text-gray-500">{tr("admin_to_date", "To")}</span>
+                            <div className="relative">
+                                <input
+                                    type="date"
+                                    value={toDate}
+                                    onChange={(e) => { setToDate(e.target.value); setPage(1); }}
+                                    className="min-w-[160px] w-full cursor-pointer pr-10 px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                />
+                                <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Status filter pills */}
@@ -268,7 +318,14 @@ export function PaymentHistory() {
                                                     {format(new Date(p.createdAt), "MMM dd, HH:mm")}
                                                 </td>
                                                 <td className="px-5 py-4 text-white font-mono text-[10px] tracking-wider">
-                                                    {p.fastlipaTransactionId || p._id.slice(-8)}
+                                                    {p.fastlipaTransactionId || p.gatewayReference || p._id.slice(-8)}
+                                                    <p className="mt-1 text-[9px] text-gray-600 font-semibold uppercase tracking-widest">
+                                                        {p.provider === "bongopay"
+                                                            ? "BongoPay"
+                                                            : p.provider === "zenopay"
+                                                                ? "ZenoPay Card"
+                                                                : "FastLipa Mobile Money"}
+                                                    </p>
                                                 </td>
                                                 <td className="px-5 py-4">
                                                     <div>

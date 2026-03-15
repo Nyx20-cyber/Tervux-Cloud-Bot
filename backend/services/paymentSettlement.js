@@ -27,10 +27,32 @@ export function extractFastLipaFields(payload) {
 }
 
 export async function settleCompletedPayment(paymentId, gatewayResponse, source = "unknown") {
+    const existingPayment = await Payment.findById(paymentId).select("gatewayResponse gatewayReference");
+    const mergedGatewayResponse = {
+        ...(existingPayment?.gatewayResponse || {}),
+        finalGatewayResponse: gatewayResponse,
+        lastSettlementSource: source,
+        settledAt: new Date().toISOString()
+    };
+    const derivedReference = String(
+        gatewayResponse?.reference ||
+        gatewayResponse?.tx_ref ||
+        gatewayResponse?.transaction_id ||
+        gatewayResponse?.tranid ||
+        gatewayResponse?.tranID ||
+        ""
+    ).trim() || null;
+
     const completedPayment = await Payment.findOneAndUpdate(
         { _id: paymentId, status: "pending" },
-        { $set: { status: "completed", gatewayResponse } },
-        { new: true }
+        {
+            $set: {
+                status: "completed",
+                gatewayResponse: mergedGatewayResponse,
+                ...(derivedReference ? { gatewayReference: derivedReference } : {})
+            }
+        },
+        { returnDocument: "after" }
     ).populate("planId");
 
     if (!completedPayment) {
@@ -133,16 +155,33 @@ export async function settleCompletedPayment(paymentId, gatewayResponse, source 
 }
 
 export async function settleFailedPayment(paymentId, failureStatus, failureReason, gatewayResponse) {
+    const existingPayment = await Payment.findById(paymentId).select("gatewayResponse gatewayReference");
+    const mergedGatewayResponse = {
+        ...(existingPayment?.gatewayResponse || {}),
+        finalGatewayResponse: gatewayResponse,
+        lastSettlementSource: "failure",
+        settledAt: new Date().toISOString()
+    };
+    const derivedReference = String(
+        gatewayResponse?.reference ||
+        gatewayResponse?.tx_ref ||
+        gatewayResponse?.transaction_id ||
+        gatewayResponse?.tranid ||
+        gatewayResponse?.tranID ||
+        ""
+    ).trim() || null;
+
     const payment = await Payment.findOneAndUpdate(
         { _id: paymentId, status: "pending" },
         {
             $set: {
                 status: failureStatus,
                 failureReason,
-                gatewayResponse
+                gatewayResponse: mergedGatewayResponse,
+                ...(derivedReference ? { gatewayReference: derivedReference } : {})
             }
         },
-        { new: true }
+        { returnDocument: "after" }
     );
 
     if (!payment) {

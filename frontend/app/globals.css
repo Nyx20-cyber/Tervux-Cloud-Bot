@@ -114,6 +114,31 @@
   display: none;
 }
 
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(37, 211, 102, 0.35) rgba(255, 255, 255, 0.04);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(37, 211, 102, 0.45), rgba(37, 211, 102, 0.25));
+  border: 2px solid rgba(10, 10, 10, 0.9);
+  border-radius: 999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(37, 211, 102, 0.65), rgba(37, 211, 102, 0.4));
+}
+
 @keyframes spin-slow {
   from {
     transform: rotate(0deg);

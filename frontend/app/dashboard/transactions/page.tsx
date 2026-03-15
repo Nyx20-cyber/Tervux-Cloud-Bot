@@ -14,9 +14,12 @@ interface PaymentRecord {
     _id: string;
     amount: number;
     currency: string;
+    provider?: "fastlipa" | "zenopay" | "bongopay";
+    paymentMethod?: "mobile_money_tz" | "card";
     status: "pending" | "completed" | "failed" | "cancelled";
     payerPhone: string;
     fastlipaTransactionId?: string | null;
+    gatewayReference?: string | null;
     createdAt: string;
     planId?: {
         name?: string;
@@ -113,6 +116,10 @@ export default function TransactionsPage() {
                 payment.planId?.name || "",
                 payment.payerPhone || "",
                 payment.fastlipaTransactionId || "",
+                payment.gatewayReference || "",
+                payment.provider || "",
+                payment.paymentMethod || "",
+                payment._id || "",
                 payment.amount.toString(),
                 payment.currency || ""
             ].some((value) => value.toLowerCase().includes(query));
@@ -263,7 +270,14 @@ export default function TransactionsPage() {
                                                                         {payment.planId?.name || "-"}
                                                                     </p>
                                                                     <p className="mt-1 truncate text-[11px] text-gray-500">
-                                                                        {payment.fastlipaTransactionId || `${t.transactions_reference}: -`}
+                                                                        {payment.fastlipaTransactionId || payment.gatewayReference || `${t.transactions_reference}: ${payment._id.slice(-8)}`}
+                                                                    </p>
+                                                                    <p className="mt-1 truncate text-[10px] text-gray-600 uppercase tracking-widest">
+                                                                        {payment.provider === "bongopay"
+                                                                            ? "BongoPay Card"
+                                                                            : payment.provider === "zenopay"
+                                                                                ? "ZenoPay Card"
+                                                                                : "FastLipa Mobile Money"}
                                                                     </p>
                                                                 </div>
 

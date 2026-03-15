@@ -32,10 +32,10 @@ export function Sidebar({ isMobile }: { isMobile?: boolean }) {
     ];
 
     const content = (
-        <div className="flex flex-col h-full w-full">
-            <div className={cn(compact ? "p-4" : "p-6")}>
+        <div className="flex flex-col h-full min-h-0 w-full">
+            <div className={cn(compact ? "px-3 py-3" : "p-6")}>
                 <h2 className={cn("font-black tracking-tight text-white flex items-center gap-2.5 uppercase", compact ? "text-base" : "text-xl")}>
-                    <ShieldCheck className={cn("text-primary", compact ? "h-4 w-4" : "h-5 w-5")} />
+                    <ShieldCheck className={cn("text-primary", compact ? "h-3.5 w-3.5" : "h-5 w-5")} />
                     {t.app_name}
                 </h2>
                 <p className={cn("font-bold text-gray-500 uppercase tracking-widest mt-1 italic opacity-70", compact ? "text-[9px]" : "text-[10px]")}>
@@ -43,7 +43,7 @@ export function Sidebar({ isMobile }: { isMobile?: boolean }) {
                 </p>
             </div>
 
-            <nav className={cn("flex-1 space-y-2", compact ? "px-3 mt-2" : "px-4 mt-4")}>
+            <nav className={cn("flex-1 min-h-0 overflow-y-auto", compact ? "px-2.5 mt-1 space-y-1.5 no-scrollbar" : "px-4 mt-4 space-y-2 custom-scrollbar")}>
                 {links.map((link) => {
                     const isActive = pathname === link.href;
                     const Icon = link.icon;
@@ -53,28 +53,28 @@ export function Sidebar({ isMobile }: { isMobile?: boolean }) {
                             href={link.href}
                             className={cn(
                                 "flex items-center gap-3 rounded-2xl transition-all duration-300 group border",
-                                compact ? "px-3 py-2.5" : "px-4 py-3",
+                                compact ? "px-2.5 py-2" : "px-4 py-3",
                                 isActive
                                     ? "bg-primary border-primary text-black shadow-lg shadow-primary/20"
                                     : "bg-white/5 border-transparent text-gray-400 hover:bg-white/10 hover:border-white/10 hover:text-white"
                             )}
                         >
-                            <Icon className={cn("w-4 h-4", isActive ? "text-black" : "text-gray-500 group-hover:text-primary transition-colors")} />
-                            <span className={cn("font-black uppercase tracking-widest", compact ? "text-[9px]" : "text-[10px]")}>{link.label}</span>
+                            <Icon className={cn(compact ? "w-3.5 h-3.5 shrink-0" : "w-4 h-4", isActive ? "text-black" : "text-gray-500 group-hover:text-primary transition-colors")} />
+                            <span className={cn("font-black uppercase tracking-widest leading-tight", compact ? "text-[8px]" : "text-[10px]")}>{link.label}</span>
                         </Link>
                     )
                 })}
             </nav>
 
-            <div className={cn("mt-auto", compact ? "p-3" : "p-4")}>
-                <div className={cn("rounded-[2rem] border border-primary/20 bg-primary/5 flex flex-col items-center text-center space-y-2 backdrop-blur-md", compact ? "p-4" : "p-6")}>
+            <div className={cn("mt-auto shrink-0", compact ? "px-2.5 py-2.5" : "p-4")}>
+                <div className={cn("rounded-[2rem] border border-primary/20 bg-primary/5 flex flex-col items-center text-center space-y-2 backdrop-blur-md", compact ? "p-3" : "p-6")}>
                     <div className="relative">
                         <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full animate-pulse"></div>
-                        <Activity className={cn("text-primary relative z-10", compact ? "h-4 w-4" : "h-5 w-5")} />
+                        <Activity className={cn("text-primary relative z-10", compact ? "h-3.5 w-3.5" : "h-5 w-5")} />
                     </div>
                     <div>
                         <p className="text-[8px] font-black uppercase tracking-widest text-primary/50">{t.service_status}</p>
-                        <p className="text-[10px] font-black text-primary tracking-[0.2em]">{t.online}</p>
+                        <p className={cn("font-black text-primary tracking-[0.2em]", compact ? "text-[9px]" : "text-[10px]")}>{t.online}</p>
                     </div>
                 </div>
             </div>
