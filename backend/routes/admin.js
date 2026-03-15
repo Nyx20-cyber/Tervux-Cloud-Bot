@@ -799,72 +799,90 @@ router.post("/group-broadcast/manual", authenticate, requireAdmin, async (req, r
             ...(targetAll ? {} : { _id: { $in: sessionIds } })
         };
 
-        const sessions = await WhatsAppSession.find(filter).select("_id status phone expiresAt");
+        const sessions = await WhatsAppSession.find(filter).select("_id status phone expiresAt settings");
+        const groupDelayMs = Number(req.body.groupDelayMs || 60_000);
 
         let triggered = 0;
-        let totalSent = 0;
-        let totalFailed = 0;
-        let totalGroups = 0;
         let totalSkipped = 0;
-        const perSession = [];
+        const queuedSessions = [];
 
         for (const session of sessions) {
             const sid = session._id.toString();
-            try {
-                if (!sessionManager.isConnected(sid)) {
-                    await sessionManager.connectSession(sid);
-                }
+            const isSkipped = session.settings?.groupPromotionBroadcast === false;
+            if (isSkipped) {
+                totalSkipped += 1;
+                continue;
+            }
+            triggered += 1;
+            queuedSessions.push({
+                sessionId: sid,
+                phone: session.phone || ""
+            });
+        }
 
-                const result = await sessionManager.sendGroupPromotionBroadcast(sid, {
-                    groupDelayMs: Number(req.body.groupDelayMs || 60_000)
-                });
+        setImmediate(async () => {
+            let totalSent = 0;
+            let totalFailed = 0;
+            let totalGroups = 0;
+            const perSession = [];
 
-                if (result?.skipped) {
-                    totalSkipped += 1;
+            for (const session of sessions) {
+                const sid = session._id.toString();
+                try {
+                    if (!sessionManager.isConnected(sid)) {
+                        await sessionManager.connectSession(sid);
+                    }
+
+                    const result = await sessionManager.sendGroupPromotionBroadcast(sid, {
+                        groupDelayMs
+                    });
+
+                    if (result?.skipped) {
+                        perSession.push({
+                            sessionId: sid,
+                            phone: session.phone || "",
+                            sent: 0,
+                            failed: 0,
+                            total: 0,
+                            skipped: true
+                        });
+                        continue;
+                    }
+
+                    totalSent += Number(result?.sent || 0);
+                    totalFailed += Number(result?.failed || 0);
+                    totalGroups += Number(result?.total || 0);
+                    perSession.push({
+                        sessionId: sid,
+                        phone: session.phone || "",
+                        sent: Number(result?.sent || 0),
+                        failed: Number(result?.failed || 0),
+                        total: Number(result?.total || 0)
+                    });
+                } catch (error) {
+                    totalFailed += 1;
                     perSession.push({
                         sessionId: sid,
                         phone: session.phone || "",
                         sent: 0,
-                        failed: 0,
+                        failed: 1,
                         total: 0,
-                        skipped: true
+                        error: error.message
                     });
-                    continue;
+                    console.warn(`[AdminGroupBroadcast] Manual trigger failed for ${sid}:`, error.message);
                 }
-
-                triggered += 1;
-                totalSent += Number(result?.sent || 0);
-                totalFailed += Number(result?.failed || 0);
-                totalGroups += Number(result?.total || 0);
-                perSession.push({
-                    sessionId: sid,
-                    phone: session.phone || "",
-                    sent: Number(result?.sent || 0),
-                    failed: Number(result?.failed || 0),
-                    total: Number(result?.total || 0)
-                });
-            } catch (error) {
-                totalFailed += 1;
-                perSession.push({
-                    sessionId: sid,
-                    phone: session.phone || "",
-                    sent: 0,
-                    failed: 1,
-                    total: 0,
-                    error: error.message
-                });
-                console.warn(`[AdminGroupBroadcast] Manual trigger failed for ${sid}:`, error.message);
             }
-        }
 
-        emitUpdate("admin_group_broadcast_triggered", {
-            targetAll,
-            sessionIds: sessions.map(s => s._id.toString()),
-            triggered,
-            totalGroups,
-            totalSent,
-            totalFailed,
-            totalSkipped
+            emitUpdate("admin_group_broadcast_triggered", {
+                targetAll,
+                sessionIds: sessions.map(s => s._id.toString()),
+                triggered,
+                totalGroups,
+                totalSent,
+                totalFailed,
+                totalSkipped,
+                perSession
+            });
         });
 
         res.json({
@@ -872,11 +890,12 @@ router.post("/group-broadcast/manual", authenticate, requireAdmin, async (req, r
             targetAll,
             selectedCount: targetAll ? sessions.length : sessionIds.length,
             triggered,
-            totalGroups,
-            totalSent,
-            totalFailed,
+            totalGroups: 0,
+            totalSent: 0,
+            totalFailed: 0,
             totalSkipped,
-            perSession
+            queued: true,
+            perSession: queuedSessions
         });
     } catch (error) {
         console.error("Admin manual group broadcast error:", error);
