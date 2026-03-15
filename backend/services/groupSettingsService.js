@@ -64,10 +64,20 @@ export async function loadGroupSettings(sessionId, groupJid) {
     }
 
     try {
-        let doc = await GroupSettings.findOne({ sessionId, groupJid });
-        if (!doc) {
-            doc = await GroupSettings.create({ sessionId, groupJid, ...DEFAULT_GROUP_SETTINGS });
-        }
+        const doc = await GroupSettings.findOneAndUpdate(
+            { sessionId, groupJid },
+            {
+                $setOnInsert: {
+                    sessionId,
+                    groupJid,
+                    ...DEFAULT_GROUP_SETTINGS
+                }
+            },
+            {
+                upsert: true,
+                returnDocument: "after"
+            }
+        );
         // Deep merge standard defaults over existing objects to prevent partial undefined values if schema changed
         return deepMerge(DEFAULT_GROUP_SETTINGS, doc.toObject());
     } catch (err) {
