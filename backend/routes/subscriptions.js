@@ -19,6 +19,13 @@ import { emitUpdate } from "../services/socketService.js";
 import { settleCompletedPayment, settleFailedPayment } from "../services/paymentSettlement.js";
 
 const router = Router();
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+function debugLog(...args) {
+    if (!IS_PRODUCTION) {
+        console.log(...args);
+    }
+}
 
 function getPublicBaseUrl(req) {
     const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
@@ -38,6 +45,20 @@ function getBongoPayCallbackUrl(req) {
 
 function getFrontendBillingUrl() {
     return process.env.BONGOPAY_REDIRECT_URL || "https://bot.tervux.com/dashboard/billing";
+}
+
+function buildFrontendBillingUrl(paymentId = "", extraParams = {}) {
+    const url = new URL(getFrontendBillingUrl());
+    if (paymentId) {
+        url.searchParams.set("paymentId", paymentId);
+    }
+    url.searchParams.set("provider", "bongopay");
+    for (const [key, value] of Object.entries(extraParams)) {
+        if (value !== undefined && value !== null && String(value).trim() !== "") {
+            url.searchParams.set(key, String(value));
+        }
+    }
+    return url.toString();
 }
 
 function normalizeGenericPhone(value) {
@@ -317,9 +338,15 @@ router.post("/checkout/card", authenticate, async (req, res) => {
             return res.status(400).json({ error: "planSlug and buyerPhone are required" });
         }
 
-        if (!/^\+[1-9]\d{7,14}$/.test(rawBuyerPhone)) {
+        if (!/^\+[1-9]\d{11}$/.test(rawBuyerPhone)) {
             return res.status(400).json({
-                error: "Please use your full international phone number with country code, for example 254712345678."
+                error: "Please enter a valid international phone number with country code. It should be 12 digits long."
+            });
+        }
+
+        if (!/^\d{12}$/.test(normalizedPhone)) {
+            return res.status(400).json({
+                error: "Please enter a valid international phone number with country code. It should be 12 digits long."
             });
         }
 
@@ -369,8 +396,8 @@ router.post("/checkout/card", authenticate, async (req, res) => {
         });
 
         try {
-            const callbackUrl = `${getBongoPayCallbackUrl(req)}?paymentId=${payment._id.toString()}`;
-            console.log("[BongoPay checkout] Creating payment session:", {
+            const frontendReturnUrl = buildFrontendBillingUrl(payment._id.toString());
+            debugLog("[BongoPay checkout] Creating payment session:", {
                 paymentId: payment._id.toString(),
                 userId: req.user._id.toString(),
                 normalizedPhone,
@@ -378,13 +405,11 @@ router.post("/checkout/card", authenticate, async (req, res) => {
             });
             const bongopayResult = await createCardPayment({
                 orderId: payment._id.toString(),
-                buyerName: req.user.name || "Tervux User",
-                buyerEmail: req.user.email,
                 buyerPhone: normalizedPhone,
                 amount: plan.price,
                 callbackUrl: getBongoPayWebhookUrl(req),
-                redirectUrl: callbackUrl,
-                cancelUrl: callbackUrl
+                redirectUrl: frontendReturnUrl,
+                cancelUrl: frontendReturnUrl
             });
 
             const paymentUrl = bongopayResult.payment_link || bongopayResult.payment_url || bongopayResult.paymentUrl;
@@ -393,7 +418,7 @@ router.post("/checkout/card", authenticate, async (req, res) => {
             const resultStatus = String(bongopayResult.result_status || bongopayResult.result || bongopayResult.status || "").toUpperCase();
             const gatewayMessage = String(bongopayResult.gateway_message || bongopayResult.message || "").trim();
 
-            console.log("[BongoPay checkout] Gateway response received:", {
+            debugLog("[BongoPay checkout] Gateway response received:", {
                 paymentId: payment._id.toString(),
                 resultcode: resultCode,
                 result: resultStatus,

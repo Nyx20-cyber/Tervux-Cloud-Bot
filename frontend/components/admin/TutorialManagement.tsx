@@ -323,8 +323,8 @@ export function TutorialManagement() {
             )}
 
             <Dialog open={showForm} onOpenChange={setShowForm}>
-                <DialogContent className="max-w-2xl rounded-[2rem] border-white/10 bg-[#0d1117] text-white p-0 overflow-hidden">
-                    <DialogHeader className="px-6 pt-6 pb-4 border-b border-white/5">
+                <DialogContent className="w-[calc(100vw-1rem)] sm:w-full sm:max-w-2xl max-h-[90vh] rounded-2xl sm:rounded-[2rem] border-white/10 bg-[#0d1117] text-white p-0 overflow-hidden flex flex-col">
+                    <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 sm:pb-4 border-b border-white/5 shrink-0">
                         <DialogTitle className="text-base font-black uppercase tracking-widest">
                             {editingId ? t.admin_edit_tutorial : t.admin_new_tutorial}
                         </DialogTitle>
@@ -332,7 +332,7 @@ export function TutorialManagement() {
                             {t.admin_tutorial_modal_help}
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="px-6 py-5 space-y-4">
+                    <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-4 overflow-y-auto min-h-0 custom-scrollbar">
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div className="sm:col-span-2">
                                 <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t.admin_title}</label>
@@ -381,11 +381,11 @@ export function TutorialManagement() {
                             </button>
                         </div>
                     </div>
-                    <DialogFooter className="px-6 pb-6 pt-2">
+                    <DialogFooter className="px-4 sm:px-6 pb-4 sm:pb-6 pt-2 border-t border-white/5 shrink-0 flex-col-reverse sm:flex-row gap-2">
                         <Button
                             variant="outline"
                             onClick={() => setShowForm(false)}
-                            className="rounded-2xl border-white/10 bg-white/5 text-gray-200"
+                            className="w-full sm:w-auto rounded-2xl border-white/10 bg-white/5 text-gray-200"
                         >
                             {t.cancel}
                         </Button>
@@ -394,7 +394,7 @@ export function TutorialManagement() {
                                 type: "save",
                                 tutorialTitle: form.title || t.admin_tutorial_fallback_title
                             })}
-                            className="rounded-2xl bg-primary text-black hover:bg-primary/90"
+                            className="w-full sm:w-auto rounded-2xl bg-primary text-black hover:bg-primary/90"
                         >
                             {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
                             {editingId ? t.admin_update : t.admin_create}

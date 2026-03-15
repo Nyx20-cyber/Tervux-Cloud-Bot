@@ -234,7 +234,7 @@ export function PaymentHistory() {
                             className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 backdrop-blur-md transition-all uppercase tracking-widest"
                         />
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:w-auto">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 w-full lg:w-auto">
                         <div className="flex flex-col gap-1">
                             <span className="text-[9px] font-black uppercase tracking-widest text-gray-500">{tr("admin_from_date", "From")}</span>
                             <div className="relative">
@@ -242,9 +242,9 @@ export function PaymentHistory() {
                                     type="date"
                                     value={fromDate}
                                     onChange={(e) => { setFromDate(e.target.value); setPage(1); }}
-                                    className="min-w-[160px] w-full cursor-pointer pr-10 px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                    className="min-w-0 sm:min-w-[160px] w-full h-11 cursor-pointer pr-10 px-3 rounded-xl border border-white/10 bg-white/5 text-sm font-bold text-white [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
                                 />
-                                <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
+                                <CalendarDays className="pointer-events-none hidden sm:block absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
                             </div>
                         </div>
                         <div className="flex flex-col gap-1">
@@ -254,9 +254,9 @@ export function PaymentHistory() {
                                     type="date"
                                     value={toDate}
                                     onChange={(e) => { setToDate(e.target.value); setPage(1); }}
-                                    className="min-w-[160px] w-full cursor-pointer pr-10 px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                                    className="min-w-0 sm:min-w-[160px] w-full h-11 cursor-pointer pr-10 px-3 rounded-xl border border-white/10 bg-white/5 text-sm font-bold text-white [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50"
                                 />
-                                <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
+                                <CalendarDays className="pointer-events-none hidden sm:block absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
                             </div>
                         </div>
                     </div>

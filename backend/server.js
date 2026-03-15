@@ -97,10 +97,10 @@ async function runDailySchedulers() {
             await runGroupPromotionBroadcast();
         }
 
-        // 03:00 reseller nudge window (03:00-03:14 EAT), once per date.
+        // 08:00 reseller nudge window (08:00-08:29 EAT), once per date.
         if (
-            now.hour === 3 &&
-            now.minute < 15 &&
+            now.hour === 8 &&
+            now.minute < 30 &&
             lastResellerNudgeDateKey !== now.dateKey
         ) {
             lastResellerNudgeDateKey = now.dateKey;

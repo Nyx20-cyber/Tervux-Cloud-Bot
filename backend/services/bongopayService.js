@@ -1,5 +1,12 @@
 const BONGOPAY_BASE_URL = String(process.env.BONGOPAY_BASE_URL || "https://bongopay.io").replace(/\/+$/, "");
 const BONGOPAY_TIMEOUT_MS = Number.parseInt(process.env.BONGOPAY_TIMEOUT_MS || "20000", 10);
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+function debugLog(...args) {
+    if (!IS_PRODUCTION) {
+        console.log(...args);
+    }
+}
 
 function getHeaders() {
     const apiKey = process.env.BONGOPAY_API_KEY;
@@ -23,6 +30,30 @@ function decodeBase64Url(value = "") {
         // Ignore decoding failure and fallback below.
     }
     return input;
+}
+
+function isValidHttpUrl(value = "") {
+    try {
+        const url = new URL(String(value || "").trim());
+        return url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+        return false;
+    }
+}
+
+function validateCardPaymentPayload(payload = {}) {
+    const missingFields = [];
+
+    if (!String(payload.phone || "").trim()) missingFields.push("phone");
+    if (!Number.isFinite(Number(payload.amount)) || Number(payload.amount) < 1000) missingFields.push("amount");
+    if (!String(payload.order_id || "").trim()) missingFields.push("order_id");
+    if (!String(payload.callback_url || "").trim() || !isValidHttpUrl(payload.callback_url)) missingFields.push("callback_url");
+    if (!String(payload.redirect_url || "").trim() || !isValidHttpUrl(payload.redirect_url)) missingFields.push("redirect_url");
+    if (!String(payload.cancel_url || "").trim() || !isValidHttpUrl(payload.cancel_url)) missingFields.push("cancel_url");
+
+    if (missingFields.length > 0) {
+        throw new Error(`BongoPay card payment payload is missing or invalid required fields: ${missingFields.join(", ")}`);
+    }
 }
 
 async function bongopayFetchJson(url, options = {}) {
@@ -70,8 +101,6 @@ export function normalizeBongoPayPhone(value = "") {
 
 export async function createCardPayment({
     orderId,
-    buyerName,
-    buyerEmail,
     buyerPhone,
     amount,
     callbackUrl,
@@ -84,10 +113,18 @@ export async function createCardPayment({
         order_id: orderId,
         callback_url: callbackUrl,
         redirect_url: redirectUrl,
-        cancel_url: cancelUrl,
-        buyer_name: buyerName,
-        buyer_email: buyerEmail
+        cancel_url: cancelUrl
     };
+
+    validateCardPaymentPayload(payload);
+    debugLog("[BongoPay] Card payment payload validated:", {
+        orderId: payload.order_id,
+        amount: payload.amount,
+        phone: payload.phone,
+        hasCallbackUrl: Boolean(payload.callback_url),
+        hasRedirectUrl: Boolean(payload.redirect_url),
+        hasCancelUrl: Boolean(payload.cancel_url)
+    });
 
     const result = await bongopayFetchJson(`${BONGOPAY_BASE_URL}/api/v1/payment/create/card-payment`, {
         method: "POST",

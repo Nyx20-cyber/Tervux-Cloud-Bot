@@ -46,9 +46,9 @@ function BillingContent() {
         ? [...plans].sort((a, b) => (b.coinsAmount / Math.max(b.price, 1)) - (a.coinsAmount / Math.max(a.price, 1)))[0]?._id
         : null;
 
-    const isValidInternationalPhone = (value: string) => /^\+[1-9]\d{7,14}$/.test(value.trim());
+    const isValidInternationalPhone = (value: string) => /^\+[1-9]\d{11}$/.test(value.trim());
     const formatInternationalPhoneInput = (value: string) => {
-        const digits = value.replace(/\D/g, "");
+        const digits = value.replace(/\D/g, "").slice(0, 12);
         return digits ? `+${digits}` : "";
     };
     const normalizeTanzaniaPhoneInput = (value: string) => {
@@ -455,6 +455,8 @@ function BillingContent() {
                             <Input
                                 placeholder={paymentMarket === "international" ? t.billing_card_phone_placeholder : t.billing_phone_placeholder}
                                 value={phoneNumber}
+                                inputMode={paymentMarket === "international" ? "numeric" : "tel"}
+                                maxLength={paymentMarket === "international" ? 13 : 10}
                                 onChange={(e) => {
                                     const nextValue = e.target.value;
                                     if (paymentMarket === "international") {

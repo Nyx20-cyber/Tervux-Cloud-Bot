@@ -1585,32 +1585,32 @@ ${text}
                     const footerText = await getCommandFooterText();
                     const welcomeMsg = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *🤖 TERVUX CLOUD BOT*
-*✅ NAMBA YAKO IMEUNGANISHWA KIKAMILIFU*
+*✅ YOUR NUMBER HAS BEEN CONNECTED SUCCESSFULLY*
 *🌐 bot.tervux.com*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-*🚀 HATUA ZA KUANZA*
+*🚀 QUICK START STEPS*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-*1) 💳 NUNUA SARAFU*
+*1) 💳 BUY COINS*
 https://bot.tervux.com/dashboard/billing
-Nunua sarafu za kutumia kwenye akaunti yako.
+Buy coins to use on your account.
 
 
 *2) 🛡️ DEPLOY BOT*
-Deploy bot lako kwa *sarafu 50 🪙*
-Muda wa deployment ni *siku 30*.
+Deploy your bot for *50 coins 🪙*
+Deployment duration is *30 days*.
 
 
-*3) ⚙️ MIPANGILIO YA BOT*
-Fungua mipangilio ya bot na uweke unavyotaka.
+*3) ⚙️ BOT SETTINGS*
+Open bot settings and configure it the way you want.
 
 
-*📞 USAIDIZI*
+*📞 SUPPORT*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Tumia kitufe cha support kinachoelea
-ili kuzungumza na support kupitia WhatsApp.
+Use the floating support button
+to chat with support on WhatsApp.
 
 
 ${footerText}`;
@@ -1808,32 +1808,32 @@ ${footerText}`;
         const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
         const footer = await getCommandFooterText();
         const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*🚀 DEPLOYMENT IMEKAMILIKA*
-*✅ BOT LAKO SASA LINAFANYA KAZI*
-*🪙 Sarafu zilizokatwa:* *${cost}*
+*🚀 DEPLOYMENT COMPLETED*
+*✅ YOUR BOT IS NOW ACTIVE*
+*🪙 Coins deducted:* *${cost}*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-*⏳ MUDA WA MATUMIZI*
+*⏳ DEPLOYMENT DURATION*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*Utaendelea kufanya kazi:* masaa 24 kwa siku
-*Muda wa deployment:* siku 30
-*Mwanzo:* ${fmt(startAt)}
-*Mwisho:* ${fmt(endAt)}
+*Runtime:* 24 hours per day
+*Deployment period:* 30 days
+*Start:* ${fmt(startAt)}
+*End:* ${fmt(endAt)}
 
 
-*📘 JINSI YA KUTUMIA HARAKA*
+*📘 QUICK USAGE GUIDE*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Fungua chat yoyote kisha tuma: *${prefix}help*
+• Open any chat and send: *${prefix}help*
 
-• Kuangalia hali ya bot tumia: *${prefix}ping* na *${prefix}botstats*
+• To check bot status use: *${prefix}ping* and *${prefix}botstats*
 
-• Mipangilio ya bot tumia: *${prefix}settings*
+• To manage bot settings use: *${prefix}settings*
 
-• Commands za groups zitafanya kazi pale bot likiwa admin.
+• Group commands work when the bot is an admin in that group.
 
 
-*Unahitaji commands zaidi?* Anza na *${prefix}help*.
+*Need more commands?* Start with *${prefix}help*.
 
 
 ${footer}`;
@@ -2008,53 +2008,53 @@ ${footer}`;
         const profitB = grossB - packPrice;
 
         const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*💼 FURSA YA KUPATA PESA*
-Badilisha akaunti yako ya bot kuwa chanzo cha kipato cha kila siku.
+*💼 EARN WITH TERVUX*
+Turn your bot account into a daily income stream.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-Unaweza kufanya kazi kama reseller au wakala kwa kutumia akaunti yako ya TERVUX.
+You can work as a reseller or middleman using your TERVUX account.
 
 
-*📦 MPANGO WA KUANZIA*
+*📦 STARTER EXAMPLE*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Nunua *sarafu ${coinsPack}* kwa *TZS ${packPrice.toLocaleString()}*
+Buy *${coinsPack} coins* for *TZS ${packPrice.toLocaleString()}*
 
-Unaweza ku-deploy hadi *bots ${deployCount}* (kila bot sarafu ${deployCost})
+You can deploy up to *${deployCount} bots* (each bot uses ${deployCost} coins).
 
 
-*💰 MIFANO YA FAIDA*
+*💰 PROFIT EXAMPLES*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*Mfano A*
-Ukiwatoza *TZS ${samplePerBotA.toLocaleString()}* kwa kila bot × ${deployCount}
-Makusanyo: *TZS ${grossA.toLocaleString()}*
-Makadirio ya faida: *TZS ${profitA.toLocaleString()}*
+*Example A*
+Charge *TZS ${samplePerBotA.toLocaleString()}* per bot × ${deployCount}
+Gross collection: *TZS ${grossA.toLocaleString()}*
+Estimated profit: *TZS ${profitA.toLocaleString()}*
 
 
-*Mfano B*
-Ukiwatoza *TZS ${samplePerBotB.toLocaleString()}* kwa kila bot × ${deployCount}
-Makusanyo: *TZS ${grossB.toLocaleString()}*
-Makadirio ya faida: *TZS ${profitB.toLocaleString()}*
+*Example B*
+Charge *TZS ${samplePerBotB.toLocaleString()}* per bot × ${deployCount}
+Gross collection: *TZS ${grossB.toLocaleString()}*
+Estimated profit: *TZS ${profitB.toLocaleString()}*
 
 
-*🧭 JINSI YA KUFANYA KAZI*
+*🧭 HOW TO DO IT*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1) Unganisha namba ya mteja
+1) Connect your client number
 https://bot.tervux.com/dashboard/pair
 
-2) Nunua sarafu
+2) Buy coins
 https://bot.tervux.com/dashboard/billing
 
-3) Deploy bots za wateja
+3) Deploy client bots
 https://bot.tervux.com/dashboard/deployments
 
-4) Fanya mipangilio ya kila bot
+4) Configure each bot
 https://bot.tervux.com/dashboard/configurations
 
-5) Tumia *${prefix}help* kwa setup na test
+5) Use *${prefix}help* for setup and testing
 
 
-Unahitaji msaada? Tumia kitufe cha support kinachoelea kwenye dashboard.
+Need help? Use the floating support button on the dashboard.
 
 
 ${footer}`;
