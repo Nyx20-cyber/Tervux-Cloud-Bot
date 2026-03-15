@@ -43,10 +43,10 @@ jobs:
             git checkout main
             git reset --hard origin/main
 
-            # Merge server-local runtime config with new repo template keys.
+            # Merge server-local runtime config with repo runtime config.
             mkdir -p deploy/env
             if [ -f /tmp/tervux-deploy-backup/backend.env ]; then
-              cp deploy/env/backend.env.example deploy/env/backend.env.merged
+              cp deploy/env/backend.env deploy/env/backend.env.merged
               while IFS= read -r line || [ -n "$line" ]; do
                 case "$line" in
                   ''|'#'*) continue ;;
