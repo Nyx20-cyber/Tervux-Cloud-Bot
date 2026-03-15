@@ -21,6 +21,14 @@ import User from "./models/User.js";
 
 const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || "dev-only-secret-do-not-use-in-prod";
+const trustProxyRaw = process.env.TRUST_PROXY;
+const trustProxy = trustProxyRaw === undefined
+    ? (process.env.NODE_ENV === "production" ? 1 : false)
+    : (trustProxyRaw === "true" ? true : (trustProxyRaw === "false" ? false : Number.isNaN(Number(trustProxyRaw)) ? trustProxyRaw : Number(trustProxyRaw)));
+
+// Required for correct req.ip handling behind reverse proxies (Nginx/Cloudflare),
+// and prevents express-rate-limit X-Forwarded-For validation warnings.
+app.set("trust proxy", trustProxy);
 
 // Maintenance Mode Middleware
 app.use(async (req, res, next) => {
