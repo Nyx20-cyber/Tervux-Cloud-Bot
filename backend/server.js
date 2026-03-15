@@ -64,6 +64,35 @@ patchConsole("error");
 patchConsole("info");
 patchConsole("debug");
 
+const patchStreamNoise = (streamName) => {
+    const stream = process[streamName];
+    if (!stream?.write) return;
+    const originalWrite = stream.write.bind(stream);
+    process[streamName].write = (chunk, encoding, callback) => {
+        if (!IS_PRODUCTION) {
+            return originalWrite(chunk, encoding, callback);
+        }
+
+        const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk ?? "");
+        const lower = text.toLowerCase();
+        const shouldSuppress =
+            lower.includes("closing open session in favor of incoming prekey bundle") ||
+            lower.includes("closing session: sessionentry") ||
+            lower.includes("removing old closed session: sessionentry") ||
+            lower.includes("decrypted message with closed session");
+
+        if (shouldSuppress) {
+            if (typeof callback === "function") callback();
+            return true;
+        }
+
+        return originalWrite(chunk, encoding, callback);
+    };
+};
+
+patchStreamNoise("stdout");
+patchStreamNoise("stderr");
+
 const getEatClock = () => {
     const parts = new Intl.DateTimeFormat("en-GB", {
         timeZone: EAT_TIMEZONE,

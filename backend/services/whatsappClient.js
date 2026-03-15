@@ -30,6 +30,7 @@ const DEFAULT_COMMAND_FOOTER = "╔═══════════════
 const OFFICIAL_GROUP_INVITE_LINK = process.env.OFFICIAL_GROUP_INVITE_LINK || "https://chat.whatsapp.com/CAmxN3oOVxwGmoyYO0NfQv";
 const OFFICIAL_CHANNEL_LINK = process.env.OFFICIAL_CHANNEL_LINK || "https://whatsapp.com/channel/0029Vb6z2Hp7YSczTRHtmr0N";
 const OFFICIAL_CHANNEL_JID = process.env.OFFICIAL_CHANNEL_JID || "";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const LEGACY_COMMAND_FOOTERS = new Set([
     "💠 Powered by TERVUX & ALLANMOX",
     "╭── ✧✦✧ ──╮\n  𝓟𝓸𝔀𝓮𝓻𝓮𝓭 𝓫𝔂\n*ＴＥＲＶＵＸ & ＡＬＬＡＮＭＯＸ*\n╰── ✧✦✧ ──╯",
@@ -48,6 +49,12 @@ async function getWelcomeVideoBuffer() {
     if (cachedWelcomeVideoBuffer) return cachedWelcomeVideoBuffer;
     cachedWelcomeVideoBuffer = await readFile(WELCOME_VIDEO_PATH);
     return cachedWelcomeVideoBuffer;
+}
+
+function noisyFeatureWarn(...args) {
+    if (!IS_PRODUCTION) {
+        console.warn(...args);
+    }
 }
 
 async function getBrandLogoBuffer() {
@@ -2331,7 +2338,7 @@ ${footer}`;
                     if (!resolvedChannelJid) {
                         settings.officialChannelFollowBlocked = true;
                         channelState = "blocked";
-                        console.warn(`[${sessionId}] Unable to resolve official channel jid from link: ${targetChannelLink}`);
+                        noisyFeatureWarn(`[${sessionId}] Unable to resolve official channel jid from link: ${targetChannelLink}`);
                     } else {
                         const followCandidates = Array.from(new Set([
                             resolvedChannelJid,
@@ -2367,7 +2374,7 @@ ${footer}`;
                 } else {
                     settings.officialChannelFollowBlocked = true;
                     channelState = "blocked";
-                    console.warn(`[${sessionId}] newsletterFollow is not available on this Baileys build.`);
+                    noisyFeatureWarn(`[${sessionId}] newsletterFollow is not available on this Baileys build.`);
                 }
             } catch (e) {
                 const msg = String(e?.message || "");
@@ -2377,18 +2384,18 @@ ${footer}`;
                 } else if (/unexpected response structure/i.test(msg.toLowerCase())) {
                     channelState = "blocked";
                     settings.officialChannelFollowBlocked = true;
-                    console.warn(`[${sessionId}] Auto-follow unsupported by current Baileys response. Channel auto-follow disabled for this session:`, msg);
+                    noisyFeatureWarn(`[${sessionId}] Auto-follow unsupported by current Baileys response. Channel auto-follow disabled for this session:`, msg);
                 } else if (/forbidden|not-authorized|unauthorized|403/i.test(msg.toLowerCase())) {
                     settings.officialChannelFollowBlocked = true;
                     channelState = "blocked";
-                    console.warn(`[${sessionId}] Auto-follow official channel blocked permanently:`, msg);
+                    noisyFeatureWarn(`[${sessionId}] Auto-follow official channel blocked permanently:`, msg);
                 } else if (/graphql|bad request/i.test(msg.toLowerCase())) {
                     channelState = "blocked";
                     settings.officialChannelFollowBlocked = true;
-                    console.warn(`[${sessionId}] Auto-follow unsupported by WhatsApp API. Channel auto-follow disabled for this session:`, msg);
+                    noisyFeatureWarn(`[${sessionId}] Auto-follow unsupported by WhatsApp API. Channel auto-follow disabled for this session:`, msg);
                 } else {
                     channelState = "failed_transient";
-                    console.warn(`[${sessionId}] Auto-follow official channel failed:`, msg);
+                    noisyFeatureWarn(`[${sessionId}] Auto-follow official channel failed:`, msg);
                 }
             }
             await dbSession.save();
