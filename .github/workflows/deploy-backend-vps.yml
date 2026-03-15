@@ -43,9 +43,28 @@ jobs:
             git checkout main
             git reset --hard origin/main
 
-            # Restore server-local runtime config
-            [ -f /tmp/tervux-deploy-backup/backend.env ] && cp /tmp/tervux-deploy-backup/backend.env deploy/env/backend.env || true
+            # Merge server-local runtime config with new repo template keys.
             mkdir -p deploy/env
+            if [ -f /tmp/tervux-deploy-backup/backend.env ]; then
+              cp deploy/env/backend.env.example deploy/env/backend.env.merged
+              while IFS= read -r line || [ -n "$line" ]; do
+                case "$line" in
+                  ''|'#'*) continue ;;
+                  *=*)
+                    key="${line%%=*}"
+                    value="${line#*=}"
+                    if grep -q "^${key}=" deploy/env/backend.env.merged; then
+                      sed -i "s|^${key}=.*|${key}=${value}|" deploy/env/backend.env.merged
+                    else
+                      printf '%s\n' "${key}=${value}" >> deploy/env/backend.env.merged
+                    fi
+                    ;;
+                esac
+              done < /tmp/tervux-deploy-backup/backend.env
+              mv deploy/env/backend.env.merged deploy/env/backend.env
+            elif [ ! -f deploy/env/backend.env ]; then
+              cp deploy/env/backend.env.example deploy/env/backend.env
+            fi
             [ -f /tmp/tervux-deploy-backup/cookies.txt ] && cp /tmp/tervux-deploy-backup/cookies.txt deploy/env/cookies.txt || true
             [ -f deploy/env/cookies.txt ] || touch deploy/env/cookies.txt
             [ -f /tmp/tervux-deploy-backup/nginx.conf ] && cp /tmp/tervux-deploy-backup/nginx.conf deploy/nginx/nginx.conf || true
