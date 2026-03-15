@@ -16,6 +16,7 @@ import cron from "node-cron";
 const httpServer = createServer(app);
 initSocket(httpServer);
 const EAT_TIMEZONE = "Africa/Dar_es_Salaam";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 let lastSuppressedNoiseAt = 0;
 const flattenLogArgs = (args = []) =>
@@ -35,7 +36,10 @@ const isWaNoiseLog = (args = []) => {
         text.includes("bad mac") ||
         text.includes("messagecountererror") ||
         text.includes("key used already or never filled") ||
-        text.includes("removing old closed session: sessionentry")
+        text.includes("removing old closed session: sessionentry") ||
+        text.includes("closing open session in favor of incoming prekey bundle") ||
+        text.includes("closing session: sessionentry") ||
+        text.includes("decrypted message with closed session")
     );
 };
 
@@ -44,7 +48,7 @@ const patchConsole = (method) => {
     console[method] = (...args) => {
         if (isWaNoiseLog(args)) {
             const now = Date.now();
-            if (now - lastSuppressedNoiseAt > 60_000) {
+            if (!IS_PRODUCTION && now - lastSuppressedNoiseAt > 60_000) {
                 lastSuppressedNoiseAt = now;
                 original("⚠️ Suppressed repeated WhatsApp decrypt/session noise logs.");
             }
@@ -57,6 +61,8 @@ const patchConsole = (method) => {
 patchConsole("log");
 patchConsole("warn");
 patchConsole("error");
+patchConsole("info");
+patchConsole("debug");
 
 const getEatClock = () => {
     const parts = new Intl.DateTimeFormat("en-GB", {

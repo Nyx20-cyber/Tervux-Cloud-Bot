@@ -1,4 +1,4 @@
-import { default as makeWASocket, DisconnectReason, Browsers, delay as baileysDelay, fetchLatestWaWebVersion, jidNormalizedUser } from "@whiskeysockets/baileys";
+import { default as makeWASocket, DisconnectReason, Browsers, delay as baileysDelay, fetchLatestWaWebVersion, jidNormalizedUser, areJidsSameUser } from "@whiskeysockets/baileys";
 import pino from "pino";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -136,6 +136,61 @@ function extractWhatsAppChannelInviteCode(link = "") {
     const match = value.match(/whatsapp\.com\/channel\/([A-Za-z0-9]+)/i);
     if (match?.[1]) return match[1];
     return "";
+}
+
+function unwrapCommandMessageContent(message = {}) {
+    let content = message;
+    for (let i = 0; i < 8; i++) {
+        if (content?.ephemeralMessage?.message) {
+            content = content.ephemeralMessage.message;
+            continue;
+        }
+        if (content?.viewOnceMessage?.message) {
+            content = content.viewOnceMessage.message;
+            continue;
+        }
+        if (content?.viewOnceMessageV2?.message) {
+            content = content.viewOnceMessageV2.message;
+            continue;
+        }
+        if (content?.viewOnceMessageV2Extension?.message) {
+            content = content.viewOnceMessageV2Extension.message;
+            continue;
+        }
+        break;
+    }
+    return content || {};
+}
+
+function extractIncomingCommandText(message = {}) {
+    const content = unwrapCommandMessageContent(message);
+    return (
+        content?.conversation ||
+        content?.extendedTextMessage?.text ||
+        content?.imageMessage?.caption ||
+        content?.videoMessage?.caption ||
+        content?.documentMessage?.caption ||
+        ""
+    );
+}
+
+function isOwnerCommandMessage(sock, message, config) {
+    const senderRaw = message?.key?.participant || message?.participant || message?.key?.remoteJid || "";
+    const senderJid = senderRaw ? jidNormalizedUser(senderRaw) : "";
+    const botRaw = sock?.user?.id || "";
+    const botJid = botRaw ? jidNormalizedUser(botRaw) : "";
+    const ownerJid = config?.ownerJid ? jidNormalizedUser(config.ownerJid) : "";
+    const ownerNumber = String(config?.ownerNumber || "").replace(/\D/g, "");
+    const senderNumber = senderJid ? senderJid.split("@")[0].split(":")[0] : "";
+    const botNumber = botJid ? botJid.split("@")[0].split(":")[0] : "";
+
+    return Boolean(
+        message?.key?.fromMe ||
+        (senderJid && botJid && areJidsSameUser(senderJid, botJid)) ||
+        (ownerJid && senderJid && areJidsSameUser(senderJid, ownerJid)) ||
+        (ownerNumber && senderNumber === ownerNumber) ||
+        (botNumber && senderNumber === botNumber)
+    );
 }
 // Pre-fetch on module load
 getWaVersion();
@@ -981,10 +1036,7 @@ ${footer}`
                         if (ageMs > 5 * 60 * 1000) continue;
                     }
 
-                    const messageText = m.message.conversation ||
-                        m.message.extendedTextMessage?.text ||
-                        m.message.imageMessage?.caption ||
-                        m.message.videoMessage?.caption || "";
+                    const messageText = extractIncomingCommandText(m.message);
 
                     if (await handleGroupMessage(sock, m)) continue;
 
@@ -1007,10 +1059,7 @@ ${footer}`
                     }
 
                     // Check sender is the session owner
-                    const senderJid = m.key.participant || m.key.remoteJid;
-                    const botNumber = sock.user?.id?.split("@")[0]?.split(":")[0];
-                    const senderNumber = senderJid.split("@")[0].split(":")[0];
-                    const isOwner = m.key.fromMe || (senderNumber === botNumber) || (senderNumber === config?.ownerNumber?.replace(/\D/g, ""));
+                    const isOwner = isOwnerCommandMessage(sock, m, config);
 
                     if (!isOwner) {
                         await sock.sendMessage(m.key.remoteJid, {
