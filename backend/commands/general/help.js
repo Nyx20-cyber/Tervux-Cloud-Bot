@@ -38,6 +38,10 @@ export const help = async (sock, m, args) => {
 │ 🔥 ➾ *${p}roast*
 │ 🧩 ➾ *${p}riddle*
 │ 💻 ➾ *${p}hack* <@user>
+│ 🧠 ➾ *${p}iqtest* <@user>
+│ 💥 ➾ *${p}slap* <@user>
+│ 🏆 ➾ *${p}top10* <trait>
+│ 💀 ➾ *${p}suicide*
 ╰──────────────────────────────╯
 
 ╭───『 💕 *𝕃𝕆𝕍𝔼 & ℝ𝔼𝕃𝔸𝕋𝕀𝕆ℕ𝕊* 』───╮
@@ -49,6 +53,9 @@ export const help = async (sock, m, args) => {
 │ 🌙 ➾ *${p}goodnight* <name>
 │ 💞 ➾ *${p}compatibility* A & B
 │ 💑 ➾ *${p}dateidea* <type>
+│ 💍 ➾ *${p}marry* <@user>
+│ ✅ ➾ *${p}accept*
+│ 💔 ➾ *${p}divorce*
 ╰──────────────────────────────╯
 
 ╭───『 🎭 *ℙℝ𝔸ℕ𝕂𝕊 & 𝕋ℝ𝕆𝕃𝕃* 』───╮
@@ -93,6 +100,15 @@ export const help = async (sock, m, args) => {
 │ 👁️ ➾ *${p}vv* (reply to view once)
 ╰──────────────────────────────╯
 
+╭───『 🎵 *𝔸𝕌𝔻𝕀𝕆 𝔼𝔽𝔽𝔼ℂ𝕋𝕊* 』───╮
+│ 🎸 ➾ *${p}bass* / *${p}treble* / *${p}fat*
+│ ⚡ ➾ *${p}nightcore* / *${p}fast* / *${p}slow*
+│ 🤖 ➾ *${p}robot* / *${p}deep* / *${p}pitch*
+│ 💀 ➾ *${p}earrape* / *${p}blown* / *${p}cut*
+│ 🌊 ➾ *${p}smooth* / *${p}low* / *${p}histo*
+│ 🎹 ➾ *${p}avec* / *${p}black*
+╰──────────────────────────────╯
+
 ╭───『 👤 *𝕊𝕋𝔸𝕋𝕌𝕊* 』───╮
 │ 🕵️ ➾ *${p}status* <@user/num>
 │ 📝 ➾ *${p}setbio* <text>
@@ -113,6 +129,7 @@ export const help = async (sock, m, args) => {
 │ 🔣 ➾ *${p}base64* encode/decode
 │ 🌐 ➾ *${p}ip* <address>
 │ 🤖 ➾ *${p}ai* <question>
+│ 📥 ➾ *${p}save* (reply/caption)
 ╰──────────────────────────────╯
 
 ╭───『 ⚙️ *𝕊𝔼𝕋𝕋𝕀ℕ𝔾𝕊* 』───╮
@@ -138,6 +155,10 @@ export const help = async (sock, m, args) => {
 │ ⬆️ ➾ *${p}promote* / *${p}demote*
 │ 🔇 ➾ *${p}mute* / *${p}unmute*
 │ ✏️ ➾ *${p}setgroupname* / *${p}setdesc*
+│ 👑 ➾ *${p}tagadmins* <msg>
+│ 📊 ➾ *${p}stats* _(activity rank)_
+│ 👻 ➾ *${p}ghosts* _(silent users)_
+│ 🔒 ➾ *${p}grouplock* <time>
 ╰──────────────────────────────╯
 
 ╭───『 🎉 *𝔾ℝ𝕆𝕌ℙ 𝔸𝕌𝕋𝕆𝕄𝔸𝕋𝕀𝕆ℕ* 』───╮
@@ -146,6 +167,10 @@ export const help = async (sock, m, args) => {
 │ 🚪 ➾ *${p}goodbye* on/off
 │ ✏️ ➾ *${p}setgoodbye* <msg>
 │ 🔗 ➾ *${p}antilink* on/kick/off
+│ 🛡️ ➾ *${p}antimention* on/off
+│ 🚩 ➾ *${p}antifake* on/off
+│ 🚫 ➾ *${p}badword* add/remove
+│ 📸 ➾ *${p}autosticker* on/off
 │ 🛡️ ➾ *${p}groupantidelete* on/off
 │ 📊 ➾ *${p}poll* Q | A | B
 │ ⚠️ ➾ *${p}warn* / *${p}resetwarn*

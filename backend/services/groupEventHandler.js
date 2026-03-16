@@ -1,6 +1,9 @@
 import { loadGroupSettings, saveGroupSettings } from "./groupSettingsService.js";
 import { isAdmin, isBotAdmin, getGroupMetadata } from "../utils/groupUtils.js";
 import { getCachedConfig } from "./configService.js";
+import GroupMemberStats from "../models/GroupMemberStats.js";
+import { downloadMediaMessage } from "@whiskeysockets/baileys";
+import { sticker } from "../commands/tools/sticker.js";
 
 /**
  * Handle Group Participants Update (Welcome/Goodbye)
@@ -61,6 +64,23 @@ export async function handleGroupParticipantsUpdate(sock, update) {
                     mentions: [participant]
                 });
                 console.log(`📢 Sent ${isWelcome ? 'Welcome' : 'Goodbye'} message to ${id}`);
+            }
+
+            // --- 🚀 ANTIFAKE PROTECTION ---
+            if (action === "add" && settings.antifake?.enabled) {
+                // Check for +255 (Tanzania)
+                const isLocal = participant.startsWith("255");
+                if (!isLocal) {
+                    console.log(`🛡️ [Antifake] Kicking non-255 number: ${participant} from ${id}`);
+                    const botIsAdmin = await isBotAdmin(sock, id);
+                    if (botIsAdmin) {
+                        await sock.groupParticipantsUpdate(id, [participant], "remove");
+                        await sock.sendMessage(id, {
+                            text: `🛡️ *𝕋𝔼ℝ𝕍𝕌𝕏 𝔸ℕ𝕋𝕀𝔽𝔸𝕂𝔼* 🛡️\n\n@${participant.split("@")[0]} has been kicked. Only local (+255) numbers are allowed in this group!`,
+                            mentions: [participant]
+                        });
+                    }
+                }
             }
         }
     } catch (err) {
@@ -171,7 +191,111 @@ export async function handleGroupMessage(sock, m) {
         }
     }
 
-    // 2. Antispam (basic placeholder for now)
+    // --- 🚀 ACTIVITY TRACKING ---
+    try {
+        await GroupMemberStats.findOneAndUpdate(
+            { sessionId: sock.sessionId, groupJid: remoteJid, userJid: sender },
+            { $inc: { messageCount: 1 }, $set: { lastMessageAt: new Date() } },
+            { upsert: true }
+        );
+    } catch (e) {
+        console.error("Stats update error:", e.message);
+    }
+
+    // --- 🚀 GROUPLOCK CHECK ---
+    if (settings.grouplock?.until && new Date(settings.grouplock.until) > new Date()) {
+        const senderIsAdmin = await isAdmin(sock, remoteJid, sender);
+        if (!senderIsAdmin) {
+            console.log(`🛡️ [Grouplock] Deleting message from non-admin during lock in ${remoteJid}`);
+            const botIsAdmin = await isBotAdmin(sock, remoteJid);
+            if (botIsAdmin) {
+                await sock.sendMessage(remoteJid, { delete: m.key });
+                return true;
+            }
+        }
+    }
+
+    // --- 🚀 BADWORD FILTER ---
+    if (settings.badwords?.length > 0) {
+        const msgText = (
+            m.message.conversation ||
+            m.message.extendedTextMessage?.text ||
+            m.message.imageMessage?.caption ||
+            m.message.videoMessage?.caption ||
+            ""
+        ).toLowerCase();
+
+        const hasBadWord = settings.badwords.some(word => msgText.includes(word.toLowerCase()));
+        if (hasBadWord) {
+            const senderIsAdmin = await isAdmin(sock, remoteJid, sender);
+            if (!senderIsAdmin) {
+                console.log(`🛡️ [Badword] Filtered message in ${remoteJid}`);
+                const botIsAdmin = await isBotAdmin(sock, remoteJid);
+                if (botIsAdmin) {
+                    await sock.sendMessage(remoteJid, { delete: m.key });
+                    await sock.sendMessage(remoteJid, {
+                        text: `⚠️ @${sender.split("@")[0]}, *bad words are not allowed!* Your message has been removed.`,
+                        mentions: [sender]
+                    });
+                    return true;
+                }
+            }
+        }
+    }
+
+    // --- 🚀 AUTOSTICKER ---
+    if (settings.autosticker?.enabled) {
+        const isImage = !!m.message.imageMessage;
+        if (isImage) {
+            const botIsAdmin = await isBotAdmin(sock, remoteJid);
+            if (botIsAdmin) {
+                console.log(`🛡️ [Autosticker] Generating sticker for ${remoteJid}`);
+                // Simple trick: We call the sticker function directly with the message
+                // Since sticker function knows how to download from the message 'm'
+                try {
+                    await sticker(sock, m, []);
+                } catch (e) {
+                    console.error("Autosticker error:", e.message);
+                }
+            }
+        }
+    }
+
+    // 2. Antimention Check
+    if (settings.antimention?.enabled) {
+        const msgText = (
+            m.message.conversation ||
+            m.message.extendedTextMessage?.text ||
+            m.message.imageMessage?.caption ||
+            m.message.videoMessage?.caption ||
+            ""
+        ).toLowerCase();
+
+        const mentionedJids = m.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+        const hasTriggerText = msgText.includes("@all") || msgText.includes("@everyone") || msgText.includes("@status");
+        const hasMentions = mentionedJids.length > 0;
+
+        if (hasTriggerText || hasMentions) {
+            const senderIsAdmin = await isAdmin(sock, remoteJid, sender);
+            if (!senderIsAdmin) {
+                console.log(`🛡️ Antimention triggered for ${sender} in ${remoteJid}`);
+
+                const botIsAdmin = await isBotAdmin(sock, remoteJid);
+                if (botIsAdmin) {
+                    // Delete the forbidden mention
+                    await sock.sendMessage(remoteJid, { delete: m.key });
+                    
+                    await sock.sendMessage(remoteJid, {
+                        text: `⚠️ @${sender.split("@")[0]}, *mentions are disabled* in this group! Only admins can tag members or use @everyone.`,
+                        mentions: [sender]
+                    });
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 3. Antispam (basic placeholder for now)
     // if (settings.antispam?.enabled) { ... }
 
     return false; // Continue processing

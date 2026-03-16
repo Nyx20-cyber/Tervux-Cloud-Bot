@@ -13,6 +13,7 @@ import {
     getInviteCode,
     updateGroupName
 } from "../../services/groupSettingsService.js";
+import GroupMemberStats from "../../models/GroupMemberStats.js";
 
 /**
  * !hidetag <message> - Tag all members without showing mentions (stealth tag)
@@ -1080,4 +1081,229 @@ Deleted messages in this group will no longer be restored.`;
 
 💡 Use *!antidelete* for personal chats.
 🛡️ Restores deleted messages from other members!`;
+}
+
+/**
+ * !antifake on/off - Toggle local-only mode (+255)
+ */
+export async function antifake(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+    if (!remoteJid.endsWith("@g.us")) return `⚠️ This only works in groups.`;
+
+    if (!await isAdmin(sock, remoteJid, m.key.participant || m.key.remoteJid)) {
+        return `⚠️ Only admins can manage settings.`;
+    }
+
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
+    const action = args[0]?.toLowerCase();
+
+    if (action === "on") {
+        settings.antifake = { enabled: true };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `🛡️ *𝔸ℕ𝕋𝕀𝔽𝔸𝕂𝔼 𝔼ℕ𝔸𝔹𝕃𝔼𝔻* 🛡️\n\nOnly members with *+255* numbers can join. Others will be kicked automatically.`;
+    } else if (action === "off") {
+        settings.antifake = { enabled: false };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `❌ *𝔸ℕ𝕋𝕀𝔽𝔸𝕂𝔼 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌\n\nInternational numbers are now allowed to join.`;
+    }
+
+    const config = await getCachedConfig(sock.sessionId);
+    return `*Antifake Status:* ${settings.antifake?.enabled ? "✅ On" : "❌ Off"}\n\n*Usage:* ${config.prefix || "!" }antifake on/off`;
+}
+
+/**
+ * !autosticker on/off - Toggle auto image-to-sticker
+ */
+export async function autosticker(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+    if (!remoteJid.endsWith("@g.us")) return `⚠️ This only works in groups.`;
+
+    if (!await isAdmin(sock, remoteJid, m.key.participant || m.key.remoteJid)) {
+        return `⚠️ Only admins can manage settings.`;
+    }
+
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
+    const action = args[0]?.toLowerCase();
+
+    if (action === "on") {
+        settings.autosticker = { enabled: true };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `📸 *𝔸𝕌𝕋𝕆𝕊𝕋𝕀ℂ𝕂𝔼ℝ 𝔼ℕ𝔸𝔹𝕃𝔼𝔻* 📸\n\nAll images sent in this group will be converted to stickers automatically!`;
+    } else if (action === "off") {
+        settings.autosticker = { enabled: false };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `❌ *𝔸𝕌𝕋𝕆𝕊𝕋𝕀ℂ𝕂𝔼ℝ 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌`;
+    }
+
+    const config = await getCachedConfig(sock.sessionId);
+    return `*Autosticker Status:* ${settings.autosticker?.enabled ? "✅ On" : "❌ Off"}\n\n*Usage:* ${config.prefix || "!" }autosticker on/off`;
+}
+
+/**
+ * !badword add/remove/list - Manage forbidden words
+ */
+export async function badword(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+    if (!remoteJid.endsWith("@g.us")) return `⚠️ This only works in groups.`;
+
+    if (!await isAdmin(sock, remoteJid, m.key.participant || m.key.remoteJid)) {
+        return `⚠️ Only admins can manage settings.`;
+    }
+
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
+    const action = args[0]?.toLowerCase();
+    const word = args.slice(1).join(" ").trim();
+
+    if (action === "add") {
+        if (!word) return `⚠️ Please provide a word to blacklist.`;
+        if (settings.badwords.includes(word)) return `⚠️ "${word}" is already blacklisted.`;
+        settings.badwords.push(word);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `✅ Added "${word}" to the bad word list!`;
+    } else if (action === "remove") {
+        if (!word) return `⚠️ Please provide a word to remove.`;
+        const index = settings.badwords.indexOf(word);
+        if (index === -1) return `⚠️ "${word}" is not in the list.`;
+        settings.badwords.splice(index, 1);
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `✅ Removed "${word}" from the list.`;
+    } else if (action === "list") {
+        if (settings.badwords.length === 0) return `📝 The bad word list is empty.`;
+        return `📝 *𝔹𝕃𝔸ℂ𝕂𝕃𝕀𝕊𝕋𝔼𝔻 𝕎𝕆ℝ𝔻𝕊:* \n\n${settings.badwords.join(", ")}`;
+    }
+
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
+    return `╔══════════════════════════════════╗
+║  🚫 *𝔹𝔸𝔻 𝕎𝕆ℝ𝔻 𝕄𝔸ℕ𝔸𝔾𝔼ℝ* 🚫  ║
+╚══════════════════════════════════╝
+
+*Usage:*
+• ${p}badword add <word>
+• ${p}badword remove <word>
+• ${p}badword list`;
+}
+
+/**
+ * !stats - See who is the most active member
+ */
+export async function stats(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+    if (!remoteJid.endsWith("@g.us")) return `⚠️ This only works in groups.`;
+
+    try {
+        const topStats = await GroupMemberStats.find({ sessionId: sock.sessionId, groupJid: remoteJid })
+            .sort({ messageCount: -1 })
+            .limit(10);
+
+        if (topStats.length === 0) return `📊 No activity recorded yet!`;
+
+        let output = `╔══════════════════════════════════╗\n║  📊 *𝔾ℝ𝕆𝕌ℙ 𝔸ℂ𝕋𝕀𝕍𝕀𝕋𝕐 𝕊𝕋𝔸𝕋𝕊* 📊  ║\n╚══════════════════════════════════╝\n\n`;
+        const mentions = [];
+
+        topStats.forEach((stat, i) => {
+            const num = stat.userJid.split("@")[0];
+            output += `${i + 1}. @${num} — *${stat.messageCount} msg*\n`;
+            mentions.push(stat.userJid);
+        });
+
+        return { text: output, mentions };
+    } catch (e) {
+        return `❌ Error fetching stats: ${e.message}`;
+    }
+}
+
+/**
+ * !ghosts - Identify silent members
+ */
+export async function ghosts(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+    if (!remoteJid.endsWith("@g.us")) return `⚠️ This only works in groups.`;
+
+    if (!await isAdmin(sock, remoteJid, m.key.participant || m.key.remoteJid)) {
+        return `⚠️ Only admins can use this.`;
+    }
+
+    try {
+        const metadata = await sock.groupMetadata(remoteJid);
+        const members = metadata.participants.map(p => p.id);
+        
+        // Find everyone who HAS spoken
+        const activeMembers = await GroupMemberStats.find({ 
+            sessionId: sock.sessionId, 
+            groupJid: remoteJid 
+        }).distinct("userJid");
+
+        const ghostList = members.filter(id => !activeMembers.includes(id));
+
+        if (ghostList.length === 0) return `🚀 No ghosts found! Everyone is active.`;
+
+        let output = `╔══════════════════════════════════╗\n║  👻 *𝔾ℍ𝕆𝕊𝕋 𝕄𝔼𝕄𝔹𝔼ℝ𝕊* 👻  ║\n╚══════════════════════════════════╝\n\nFound ${ghostList.length} silent members:\n\n`;
+        const mentions = ghostList.slice(0, 50); // Mention max 50 to avoid lag
+
+        mentions.forEach((id, i) => {
+            output += `${i + 1}. @${id.split("@")[0]}\n`;
+        });
+
+        if (ghostList.length > 50) output += `\n...and ${ghostList.length - 50} more.`;
+
+        return { text: output, mentions };
+    } catch (e) {
+        return `❌ Error finding ghosts: ${e.message}`;
+    }
+}
+
+/**
+ * !tagadmins - Tag all admins
+ */
+export async function tagadmins(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+    if (!remoteJid.endsWith("@g.us")) return `⚠️ This only works in groups.`;
+
+    try {
+        const metadata = await sock.groupMetadata(remoteJid);
+        const admins = metadata.participants.filter(p => p.admin).map(p => p.id);
+        
+        const msg = args.join(" ") || "🆘 *Attention Admins!*";
+        
+        return {
+            text: `👑 *𝔸𝔻𝕄𝕀ℕ 𝕋𝔸𝔾:* \n\n${msg}`,
+            mentions: admins
+        };
+    } catch (e) {
+        return `❌ Error tagging admins: ${e.message}`;
+    }
+}
+
+/**
+ * !grouplock [duration] - Mute group for non-admins
+ */
+export async function grouplock(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+    if (!remoteJid.endsWith("@g.us")) return `⚠️ This only works in groups.`;
+
+    if (!await isAdmin(sock, remoteJid, m.key.participant || m.key.remoteJid)) {
+        return `⚠️ Only admins can lock the group.`;
+    }
+
+    const durationStr = args[0]?.toLowerCase() || "30m";
+    let minutes = 30;
+
+    if (durationStr.endsWith("m")) minutes = parseInt(durationStr);
+    else if (durationStr.endsWith("h")) minutes = parseInt(durationStr) * 60;
+    else if (durationStr === "off") {
+        const settings = await loadGroupSettings(sock.sessionId, remoteJid);
+        settings.grouplock = { until: null };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `🔓 *𝔾ℝ𝕆𝕌ℙ 𝕌ℕ𝕃𝕆ℂ𝕂𝔼𝔻*`;
+    }
+
+    if (isNaN(minutes)) return `⚠️ Invalid duration. Example: !grouplock 1h or !grouplock 30m`;
+
+    const until = new Date(Date.now() + minutes * 60000);
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
+    settings.grouplock = { until };
+    await saveGroupSettings(sock.sessionId, remoteJid, settings);
+
+    return `🔒 *𝔾ℝ𝕆𝕌ℙ 𝕃𝕆ℂ𝕂𝔼𝔻* 🔒\n\nGroup is locked for non-admins for *${durationStr}*.\n\n⏰ Unlocks at: ${until.toLocaleTimeString()}`;
 }

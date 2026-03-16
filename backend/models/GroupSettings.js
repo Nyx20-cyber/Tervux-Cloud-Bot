@@ -42,6 +42,22 @@ const GroupSettingsSchema = new mongoose.Schema({
     groupAntiDelete: {
         enabled: { type: Boolean, default: false }
     },
+    antimention: {
+        enabled: { type: Boolean, default: false }
+    },
+    antifake: {
+        enabled: { type: Boolean, default: false }
+    },
+    badwords: {
+        type: [String],
+        default: []
+    },
+    autosticker: {
+        enabled: { type: Boolean, default: false }
+    },
+    grouplock: {
+        until: { type: Date, default: null }
+    },
     inviteCode: { type: String, default: "" },
     lastKnownName: { type: String, default: "Unknown Group" },
     leftAt: { type: Date }

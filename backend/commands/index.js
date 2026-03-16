@@ -30,6 +30,13 @@ import { goodmorning } from "./fun/goodmorning.js";
 import { goodnight } from "./fun/goodnight.js";
 import { compatibility } from "./fun/compatibility.js";
 import { dateidea } from "./fun/dateidea.js";
+import { marry } from "./fun/marry.js";
+import { accept } from "./fun/accept.js";
+import { divorce } from "./fun/divorce.js";
+import { iqtest } from "./fun/iqtest.js";
+import { slap } from "./fun/slap.js";
+import { top10 } from "./fun/top10.js";
+import { suicide } from "./fun/suicide.js";
 
 // General Commands
 import { help } from "./general/help.js";
@@ -53,6 +60,25 @@ import { zodiac } from "./media/zodiac.js";
 import { wallpaper } from "./media/wallpaper.js";
 import { waifu } from "./media/waifu.js";
 import { vv } from "./media/vv.js";
+import {
+    avec,
+    bass,
+    black,
+    blown,
+    cut,
+    deep,
+    earrape,
+    fast,
+    fat,
+    histo,
+    low,
+    nightcore,
+    pitch,
+    robot,
+    slow,
+    smooth,
+    treble
+} from "./media/audio.js";
 
 // Status Commands
 import { status } from "./status/profile.js";
@@ -73,6 +99,7 @@ import { wiki } from "./tools/wiki.js";
 import { base64 } from "./tools/base64.js";
 import { ip } from "./tools/ip.js";
 import { ai } from "./tools/ai.js";
+import { save } from "./tools/save.js";
 
 // Settings Commands
 import { settings } from "./settings/settings.js";
@@ -110,6 +137,14 @@ import {
     goodbye,
     setgoodbye,
     antilink,
+    antimention,
+    antifake,
+    autosticker,
+    badword,
+    stats,
+    ghosts,
+    tagadmins,
+    grouplock,
     poll,
     warn,
     resetwarn,
@@ -151,6 +186,13 @@ export const commands = {
     goodnight,
     compatibility,
     dateidea,
+    marry,
+    accept,
+    divorce,
+    iqtest,
+    slap,
+    top10,
+    suicide,
 
     // General Commands
     help,
@@ -174,6 +216,23 @@ export const commands = {
     wallpaper,
     waifu,
     vv,
+    avec,
+    bass,
+    black,
+    blown,
+    cut,
+    deep,
+    earrape,
+    fast,
+    fat,
+    histo,
+    low,
+    nightcore,
+    pitch,
+    robot,
+    slow,
+    smooth,
+    treble,
 
     // Status Commands
     status,
@@ -194,6 +253,7 @@ export const commands = {
     base64,
     ip,
     ai,
+    save,
 
     // Settings & Toggle Commands
     settings,
@@ -228,6 +288,14 @@ export const commands = {
     goodbye,
     setgoodbye,
     antilink,
+    antimention,
+    antifake,
+    autosticker,
+    badword,
+    stats,
+    ghosts,
+    tagadmins,
+    grouplock,
     poll,
     warn,
     resetwarn,
