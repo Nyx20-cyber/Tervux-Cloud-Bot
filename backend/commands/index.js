@@ -47,6 +47,7 @@ import { block } from "./general/block.js";
 import { unblock } from "./general/unblock.js";
 import { creator } from "./general/creator.js";
 import { quote } from "./general/quote.js";
+import { bible, quran, verse } from "./general/religion.js";
 
 // Media Commands
 import { movie } from "./media/movie.js";
@@ -60,6 +61,7 @@ import { zodiac } from "./media/zodiac.js";
 import { wallpaper } from "./media/wallpaper.js";
 import { waifu } from "./media/waifu.js";
 import { vv } from "./media/vv.js";
+import { convert } from "./media/convert.js";
 import {
     avec,
     bass,
@@ -100,6 +102,7 @@ import { base64 } from "./tools/base64.js";
 import { ip } from "./tools/ip.js";
 import { ai } from "./tools/ai.js";
 import { save } from "./tools/save.js";
+import { profiled } from "./tools/profiled.js";
 
 // Settings Commands
 import { settings } from "./settings/settings.js";
@@ -203,6 +206,9 @@ export const commands = {
     unblock,
     creator,
     quote,
+    bible,
+    quran,
+    verse,
 
     // Media Commands
     movie,
@@ -216,6 +222,7 @@ export const commands = {
     wallpaper,
     waifu,
     vv,
+    convert,
     avec,
     bass,
     black,
@@ -254,6 +261,7 @@ export const commands = {
     ip,
     ai,
     save,
+    profiled,
 
     // Settings & Toggle Commands
     settings,

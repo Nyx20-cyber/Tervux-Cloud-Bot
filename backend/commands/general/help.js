@@ -98,6 +98,7 @@ export const help = async (sock, m, args) => {
 │ 🖼️ ➾ *${p}wallpaper* <theme>
 │ 🌸 ➾ *${p}waifu* <category>
 │ 👁️ ➾ *${p}vv* (reply to view once)
+│ 🔄 ➾ *${p}convert* <format>
 ╰──────────────────────────────╯
 
 ╭───『 🎵 *𝔸𝕌𝔻𝕀𝕆 𝔼𝔽𝔽𝔼ℂ𝕋𝕊* 』───╮
@@ -130,6 +131,7 @@ export const help = async (sock, m, args) => {
 │ 🌐 ➾ *${p}ip* <address>
 │ 🤖 ➾ *${p}ai* <question>
 │ 📥 ➾ *${p}save* (reply/caption)
+│ 👤 ➾ *${p}profiled* <@user>
 ╰──────────────────────────────╯
 
 ╭───『 ⚙️ *𝕊𝔼𝕋𝕋𝕀ℕ𝔾𝕊* 』───╮
@@ -143,6 +145,12 @@ export const help = async (sock, m, args) => {
 │ ✔️ ➾ *${p}autoread* _(mark messages as read)_
 │ ⌨️ ➾ *${p}alwaystyping*
 │ 🎙️ ➾ *${p}alwaysrecording*
+╰──────────────────────────────╯
+
+╭───『 📜 *ℝ𝔼𝕃𝕀𝔾𝕀𝕆ℕ* 』───╮
+│ 📖 ➾ *${p}bible*
+│ 🌙 ➾ *${p}quran*
+│ ✨ ➾ *${p}verse*
 ╰──────────────────────────────╯
 
 ╭───『 👥 *𝔾ℝ𝕆𝕌ℙ 𝕄𝔸ℕ𝔸𝔾𝔼𝕄𝔼ℕ𝕋* 』───╮
