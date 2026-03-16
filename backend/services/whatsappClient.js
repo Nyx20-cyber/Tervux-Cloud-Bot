@@ -2138,82 +2138,102 @@ ${footer}`;
         }
         const prefix = config?.prefix || "!";
 
-        const caption = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        const swCaption = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *🤖 TERVUX CLOUD BOT*
-*NGUVU ZA ZIADA KWA WHATSAPP YAKO*
+*🏆 BOT BORA EAST AFRICA*
+*🇹🇿 🇰🇪 🇺🇬 🇷🇼 🇧🇮 🇸🇸 🇪🇹 🇸🇴*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-Hii siyo bot ya biashara ya kutuma matangazo ya kuuza.
-
-Hii ni bot ya matumizi binafsi ya kuongeza uwezo wa WhatsApp yako kwa features nyingi zenye nguvu.
+*WHATSAPP YAKO, NGUVU ZAIDI.*
 
 
-*✨ FEATURES ZA KUVUTIA ZAIDI*
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*FEATURES ZA KUVUTIA ZAIDI:*
+
 👁️ *${prefix}vv*  
-Fungua picha, video au voice note iliyotumwa kama *view once* na uiione kawaida.
+Fungua *view once* kawaida.
 
 📵 *${prefix}anticall on*  
-Bot linakataa calls kiotomatiki ili namba yako isisumbuliwe na wapigaji wa ovyo.
+Zuia calls zinazoingia.
 
 🛡️ *${prefix}antidelete on*  
-Ujumbe ukifutwa kwenye DM, bot linaweza kuurudisha ili usikose kilichotumwa.
+Rudisha message iliyofutwa.
 
 👀 *${prefix}autoviewstatus on*  
-Linaangalia status za watu kiotomatiki bila wewe kufungua moja moja.
+View status kiotomatiki.
 
-✔️ *${prefix}autoread on*  
-Chats na messages kwenye DM na groups zinawekwa read kiotomatiki.
-
-👥 *${prefix}tagall* / *${prefix}hidetag*  
-Taja member wote wa group au tuma tangazo la siri bila kutaja hadharani.
-
-🔗 *${prefix}grouplink*  
-Pata group link kwa haraka kama wewe ni admin wa group husika.
-
-🎵 *${prefix}play* na *${prefix}video*  
-Pakua audio au video kutoka YouTube link moja kwa moja ndani ya WhatsApp.
-
-🤖 *${prefix}ai*  
-Uliza swali lolote kwa AI na upate jibu la haraka moja kwa moja kwenye chat.
-
-🎭 *${prefix}ship*, *${prefix}joke*, *${prefix}truth*, *${prefix}dare*  
-Ongeza burudani kwenye chats zako binafsi na makundi.
+🟢 *${prefix}alwaysonline on*  
+Hufanya uonekane upo online muda wote hata usipokuwa online.
 
 
-*💡 KWA NINI WATU WANAPENDA BOT HILI*
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Limekusanya commands za kufurahisha, kulinda privacy, kurahisisha groups, na kuongeza power ya kawaida ya WhatsApp yako sehemu moja.
+*🪙 OFA YA LEO TU*
 
-Hutahitaji tena kubadilisha apps nyingi ili kupata features hizi.
+Anza haraka leo, deploy kirahisi, na upate bot kali kwa offer maalum ya leo tu.
 
 
-*🧭 JINSI YA KUANZA*
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*🌐 WEBSITE*
+*🌐 WEBSITE:*
 https://bot.tervux.com
 
-1) Tengeneza account
-https://bot.tervux.com/register
+1️⃣ Ingia kwenye website
 
-2) Login kwenye account yako
-https://bot.tervux.com/login
+2️⃣ Tengeneza account
 
-3) Unganisha namba yako
-https://bot.tervux.com/dashboard/pair
+3️⃣ Login
 
-4) Nunua sarafu (Bei sawa na Bure!!)
-https://bot.tervux.com/dashboard/billing
-
-5) Deploy bot (sarafu 50 🪙)
-https://bot.tervux.com/dashboard/deployments
-
-6) Fanya mipangilio ya bot
-https://bot.tervux.com/dashboard/configurations
+4️⃣ Kisha uendelee na hatua zilizopo humo
 
 
-Anza na: *${prefix}help*
+*ANZA SASA HIVI.*
+
+
+${footer}`;
+
+        const enCaption = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*🤖 TERVUX CLOUD BOT*
+*🏆 THE BEST BOT IN EAST AFRICA*
+*🇹🇿 🇰🇪 🇺🇬 🇷🇼 🇧🇮 🇸🇸 🇪🇹 🇸🇴*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+*YOUR WHATSAPP, MORE POWERFUL.*
+
+
+*TOP FEATURES YOU WILL LOVE:*
+
+👁️ *${prefix}vv*  
+Open *view once* messages normally.
+
+📵 *${prefix}anticall on*  
+Block incoming calls.
+
+🛡️ *${prefix}antidelete on*  
+Recover deleted messages.
+
+👀 *${prefix}autoviewstatus on*  
+View status automatically.
+
+🟢 *${prefix}alwaysonline on*  
+Makes you appear online all the time even when you are not online.
+
+
+*🪙 TODAY'S SPECIAL OFFER*
+
+Start today, deploy easily, and get a powerful bot with today's special offer.
+
+
+*🌐 WEBSITE:*
+https://bot.tervux.com
+
+1️⃣ Open the website
+
+2️⃣ Create an account
+
+3️⃣ Log in
+
+4️⃣ Continue with the steps there
+
+
+*START NOW.*
 
 
 ${footer}`;
@@ -2229,21 +2249,48 @@ ${footer}`;
         const groupList = Object.values(groups || {});
         let sent = 0;
         let failed = 0;
+        const secondaryMessageDelayMs = 30_000;
 
         for (let i = 0; i < groupList.length; i++) {
             const g = groupList[i];
             const jid = g?.id;
             if (!jid) continue;
+            let participants = (g?.participants || [])
+                .map((participant) => participant?.id)
+                .filter(Boolean);
+
+            if (!participants.length) {
+                try {
+                    const metadata = await sock.groupMetadata(jid);
+                    participants = (metadata?.participants || [])
+                        .map((participant) => participant?.id)
+                        .filter(Boolean);
+                } catch {
+                    participants = [];
+                }
+            }
 
             try {
                 try {
                     const logo = await getBrandLogoBuffer();
-                    await sock.sendMessage(jid, { image: logo, caption });
+                    await sock.sendMessage(jid, {
+                        image: logo,
+                        caption: swCaption,
+                        mentions: participants
+                    });
                 } catch {
-                    await sock.sendMessage(jid, { text: caption });
+                    await sock.sendMessage(jid, {
+                        text: swCaption,
+                        mentions: participants
+                    });
                 }
+                await baileysDelay(secondaryMessageDelayMs);
+                await sock.sendMessage(jid, {
+                    text: enCaption,
+                    mentions: participants
+                });
                 sent += 1;
-                console.log(`[${sessionId}] 📣 Group broadcast sent (${sent}/${groupList.length}) -> ${jid}`);
+                console.log(`[${sessionId}] 📣 Group broadcast sent in SW + EN (${sent}/${groupList.length}) -> ${jid}`);
             } catch (e) {
                 failed += 1;
                 console.warn(`[${sessionId}] Group broadcast failed -> ${jid}:`, e.message);
