@@ -30,7 +30,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#1a73e8",
+  themeColor: "#0a933c",
 };
 
 import PWARegistration from "@/components/PWARegistration";
