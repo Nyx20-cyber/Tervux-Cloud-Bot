@@ -18,6 +18,7 @@ import Announcement from "./models/Announcement.js";
 import { getCachedPublicSettings } from "./models/SystemSettings.js";
 import { sessionManager } from "./services/whatsappService.js";
 import User from "./models/User.js";
+import { getJson, setJson, delKey } from "./lib/redis.js";
 
 const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || "dev-only-secret-do-not-use-in-prod";
@@ -29,6 +30,10 @@ const trustProxy = trustProxyRaw === undefined
 // Required for correct req.ip handling behind reverse proxies (Nginx/Cloudflare),
 // and prevents express-rate-limit X-Forwarded-For validation warnings.
 app.set("trust proxy", trustProxy);
+const PLANS_CACHE_KEY = "public:plans:v1";
+const PLANS_CACHE_TTL_SECONDS = Number(process.env.PLANS_CACHE_TTL_SECONDS || 120);
+const ANNOUNCEMENTS_CACHE_TTL_SECONDS = Number(process.env.ANNOUNCEMENTS_CACHE_TTL_SECONDS || 30);
+const getAnnouncementsCacheKey = (userId) => `announcements:active:${userId}`;
 
 // Maintenance Mode Middleware
 app.use(async (req, res, next) => {
@@ -101,10 +106,18 @@ app.get("/", (req, res) => {
 // Fetch active announcements for users
 app.get("/api/announcements", authenticate, async (req, res) => {
     try {
+        const cacheKey = getAnnouncementsCacheKey(req.user._id);
+        const cached = await getJson(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
+
         const announcements = await Announcement.find({ isActive: true })
             .populate("createdBy", "name")
             .sort({ createdAt: -1 });
-        res.json({ announcements });
+        const payload = { announcements };
+        await setJson(cacheKey, payload, ANNOUNCEMENTS_CACHE_TTL_SECONDS);
+        res.json(payload);
     } catch (error) {
         console.error("Fetch announcements error:", error);
         res.status(500).json({ error: "Failed to fetch announcements" });
@@ -114,8 +127,15 @@ app.get("/api/announcements", authenticate, async (req, res) => {
 // Public: list plans
 app.get("/api/plans", async (req, res) => {
     try {
+        const cached = await getJson(PLANS_CACHE_KEY);
+        if (cached) {
+            return res.json(cached);
+        }
+
         const plans = await Plan.find({ isActive: true }).sort({ price: 1 });
-        res.json({ plans });
+        const payload = { plans };
+        await setJson(PLANS_CACHE_KEY, payload, PLANS_CACHE_TTL_SECONDS);
+        res.json(payload);
     } catch (error) {
         res.status(500).json({ error: "Failed to list plans" });
     }

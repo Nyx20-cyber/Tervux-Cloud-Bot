@@ -90,6 +90,17 @@ export const delKey = async (key) => {
     const client = getRedisClient();
     if (!client) return;
     try {
+        if (typeof key === "string" && key.includes("*")) {
+            const matchedKeys = [];
+            for await (const foundKey of client.scanIterator({ MATCH: key, COUNT: 100 })) {
+                matchedKeys.push(foundKey);
+            }
+            if (matchedKeys.length > 0) {
+                await client.del(matchedKeys);
+            }
+            return;
+        }
+
         await client.del(key);
     } catch (error) {
         console.warn(`Redis DEL ${key} failed:`, error?.message || error);

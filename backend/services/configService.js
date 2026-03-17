@@ -1,5 +1,6 @@
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import { join } from "path";
+import { delKey, getJson, setJson } from "../lib/redis.js";
 
 /**
  * Per-User Config Service (DB-backed)
@@ -9,6 +10,8 @@ import { join } from "path";
 // In-memory cache keyed by sessionId
 const configCache = new Map();
 const CACHE_TTL = 5000;
+const REDIS_CACHE_TTL_SECONDS = Number(process.env.SESSION_CONFIG_CACHE_TTL_SECONDS || 30);
+const getRedisConfigKey = (sessionId) => `session_config:${sessionId}`;
 
 /**
  * Default session settings
@@ -40,6 +43,13 @@ export async function getCachedConfig(sessionId) {
         return cached.data;
     }
 
+    const redisKey = getRedisConfigKey(sessionId);
+    const redisCached = await getJson(redisKey);
+    if (redisCached) {
+        configCache.set(sessionId, { data: redisCached, timestamp: now });
+        return redisCached;
+    }
+
     const session = await WhatsAppSession.findById(sessionId);
     if (!session) return { ...DEFAULT_SETTINGS };
 
@@ -52,6 +62,7 @@ export async function getCachedConfig(sessionId) {
     };
 
     configCache.set(sessionId, { data: config, timestamp: now });
+    await setJson(redisKey, config, REDIS_CACHE_TTL_SECONDS);
     return config;
 }
 
@@ -69,15 +80,16 @@ export async function updateConfig(sessionId, updates) {
     }
 
     await WhatsAppSession.findByIdAndUpdate(sessionId, { $set: setUpdates });
-    invalidateConfigCache(sessionId);
+    await invalidateConfigCache(sessionId);
 }
 
 /**
  * Invalidate config cache for a session
  */
-export function invalidateConfigCache(sessionId) {
+export async function invalidateConfigCache(sessionId) {
     if (sessionId) {
         configCache.delete(sessionId);
+        await delKey(getRedisConfigKey(sessionId));
     } else {
         configCache.clear();
     }

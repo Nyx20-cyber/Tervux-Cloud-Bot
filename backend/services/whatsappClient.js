@@ -212,7 +212,9 @@ class SessionManager {
         // Map<dbSessionId, { sock, reconnectAttempts, configCache, configCacheTime }>
         this.sessions = new Map();
         this.MAX_RECONNECT_ATTEMPTS = 10;
-        this.CONFIG_CACHE_TTL = 5000;
+        this.CONFIG_CACHE_TTL = Number.parseInt(process.env.WA_CONFIG_CACHE_TTL_MS || "30000", 10);
+        this.RUNTIME_META_CACHE_TTL = Number.parseInt(process.env.WA_RUNTIME_META_CACHE_TTL_MS || "30000", 10);
+        this.STATUS_AUTOMATION_MIN_INTERVAL_MS = Number.parseInt(process.env.WA_STATUS_AUTOMATION_MIN_INTERVAL_MS || "15000", 10);
         this.RUNTIME_HEALTH_INTERVAL_MS = Number.parseInt(process.env.WA_RUNTIME_HEALTH_INTERVAL_MS || "60000", 10);
         this.RUNTIME_STALE_MS = Number.parseInt(process.env.WA_RUNTIME_STALE_MS || "180000", 10);
         this.SOCKET_CONNECT_GRACE_MS = Number.parseInt(process.env.WA_SOCKET_CONNECT_GRACE_MS || "45000", 10);
@@ -298,7 +300,7 @@ class SessionManager {
         return (Date.now() - startedAt) < this.SOCKET_CONNECT_GRACE_MS;
     }
 
-    _scheduleReconnect(sessionId) {
+    _scheduleReconnect(sessionId, options = {}) {
         const key = String(sessionId);
         // Keep one reconnect timer per session to avoid storms.
         if (this.reconnectTimers.has(key)) {
@@ -309,9 +311,13 @@ class SessionManager {
         this.reconnectAttempts.set(key, attempts);
 
         const isSoftMaxExceeded = attempts > this.MAX_RECONNECT_ATTEMPTS;
-        const delay = isSoftMaxExceeded
+        let delay = isSoftMaxExceeded
             ? Math.min(60_000 * Math.max(attempts - this.MAX_RECONNECT_ATTEMPTS, 1), 5 * 60_000)
             : Math.min(5000 * Math.pow(1.5, attempts), 60_000);
+        const minDelayMs = Number(options.minDelayMs || 0);
+        if (minDelayMs > 0) {
+            delay = Math.max(delay, minDelayMs);
+        }
 
         if (!isSoftMaxExceeded) {
             console.log(`🔄 [${key}] Reconnecting in ${delay / 1000}s (${attempts}/${this.MAX_RECONNECT_ATTEMPTS})...`);
@@ -487,11 +493,39 @@ class SessionManager {
         return config;
     }
 
+    async getSessionRuntimeMeta(sessionId) {
+        const entry = this.sessions.get(sessionId);
+        const now = Date.now();
+
+        if (entry?.runtimeMeta && (now - (entry.runtimeMetaTime || 0) < this.RUNTIME_META_CACHE_TTL)) {
+            return entry.runtimeMeta;
+        }
+
+        const session = await WhatsAppSession.findById(sessionId).select("status expiresAt");
+        if (!session) return null;
+
+        const runtimeMeta = {
+            status: session.status,
+            expiresAt: session.expiresAt || null,
+            isPaused: session.status === "paused",
+            isDeployed: !!(session.expiresAt && new Date(session.expiresAt) > new Date())
+        };
+
+        if (entry) {
+            entry.runtimeMeta = runtimeMeta;
+            entry.runtimeMetaTime = now;
+        }
+
+        return runtimeMeta;
+    }
+
     invalidateConfigCache(sessionId) {
         const entry = this.sessions.get(sessionId);
         if (entry) {
             entry.configCache = null;
             entry.configCacheTime = 0;
+            entry.runtimeMeta = null;
+            entry.runtimeMetaTime = 0;
         }
     }
 
@@ -684,9 +718,12 @@ class SessionManager {
                 lastActivityAt: Date.now(),
                 connectStartedAt: Date.now(),
                 connectionState: "connecting",
+                lastStatusAutomationAt: 0,
                 heartbeatFailures: 0,
                 staleProbeFailures: 0,
-                lastCommunitySyncAt: 0
+                lastCommunitySyncAt: 0,
+                runtimeMeta: null,
+                runtimeMetaTime: 0
             });
 
             // Save creds on update
@@ -737,6 +774,15 @@ class SessionManager {
                     }
 
                     await WhatsAppSession.findByIdAndUpdate(sessionId, dbUpdates);
+                    if (entry) {
+                        entry.runtimeMeta = {
+                            status: liveDbSession?.status === "paused" ? "paused" : "active",
+                            expiresAt: liveDbSession?.expiresAt || dbSession.expiresAt || null,
+                            isPaused: liveDbSession?.status === "paused",
+                            isDeployed: !!((liveDbSession?.expiresAt || dbSession.expiresAt) && new Date(liveDbSession?.expiresAt || dbSession.expiresAt) > new Date())
+                        };
+                        entry.runtimeMetaTime = Date.now();
+                    }
                     emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
                         sessionId,
                         status: liveDbSession?.status === "paused" ? "paused" : "active",
@@ -858,7 +904,8 @@ class SessionManager {
                         if (shouldAutoRepair) {
                             await this.autoRepairSession(sessionId, `close_code_${statusCode || "unknown"}`);
                         } else {
-                            this._scheduleReconnect(sessionId);
+                            const timeoutBackoffMs = statusCode === 408 ? 30_000 : 0;
+                            this._scheduleReconnect(sessionId, { minDelayMs: timeoutBackoffMs });
                         }
                     }
                 }
@@ -906,16 +953,21 @@ ${footer}`
                     if (m.key.remoteJid === "status@broadcast" && !m.key.fromMe) {
                         if (m.message?.protocolMessage || m.message?.reactionMessage) continue;
 
+                        const entry = this.sessions.get(sessionId);
+                        if (!entry || entry.connectionState !== "open") continue;
+                        if (Date.now() - (entry.lastStatusAutomationAt || 0) < this.STATUS_AUTOMATION_MIN_INTERVAL_MS) {
+                            continue;
+                        }
+
                         const config = await this.getSessionConfig(sessionId);
                         if (!config?.autoViewStatus && !config?.autoLikeStatus) continue;
 
-                        // Check if session is active (deployed and not paused)
-                        const dbSession = await WhatsAppSession.findById(sessionId);
-                        const isDeployed = dbSession?.expiresAt && new Date(dbSession.expiresAt) > new Date();
-                        if (dbSession?.status === "paused" || !isDeployed) continue;
+                        const runtimeMeta = await this.getSessionRuntimeMeta(sessionId);
+                        if (!runtimeMeta || runtimeMeta.isPaused || !runtimeMeta.isDeployed) continue;
 
                         const participantRaw = m.key.participant || m.participant;
                         const participant = participantRaw ? jidNormalizedUser(participantRaw) : "";
+                        entry.lastStatusAutomationAt = Date.now();
                         if (config?.autoViewStatus) {
                             try {
                                 if (!participant || !m.key?.id) {

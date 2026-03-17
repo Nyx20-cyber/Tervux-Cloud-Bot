@@ -2,8 +2,11 @@ import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import User from "../models/User.js";
 import Payment from "../models/Payment.js";
+import { getJson, setJson } from "../lib/redis.js";
 
 const router = Router();
+const DASHBOARD_STATS_CACHE_TTL_SECONDS = Number(process.env.DASHBOARD_STATS_CACHE_TTL_SECONDS || 30);
+const getDashboardStatsCacheKey = (userId) => `dashboard:stats:${userId}`;
 
 /**
  * GET /api/dashboard/stats
@@ -12,6 +15,11 @@ const router = Router();
 router.get("/stats", authenticate, async (req, res) => {
     try {
         const userId = req.user._id;
+        const cacheKey = getDashboardStatsCacheKey(userId);
+        const cached = await getJson(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
 
         // Calculate the last 7 days window
         const sevenDaysAgo = new Date();
@@ -72,14 +80,17 @@ router.get("/stats", authenticate, async (req, res) => {
             amount: coinStats.find(s => s._id === day)?.total || 0
         }));
 
-        res.json({
+        const payload = {
             referralGrowth: formattedReferrals,
             coinUsage: formattedCoins,
             summary: {
                 totalCoins: req.user.coins || 0,
                 referralCount: await User.countDocuments({ referredBy: userId, referredByPaid: true })
             }
-        });
+        };
+
+        await setJson(cacheKey, payload, DASHBOARD_STATS_CACHE_TTL_SECONDS);
+        res.json(payload);
     } catch (error) {
         console.error("Dashboard stats error:", error);
         res.status(500).json({ error: "Failed to fetch dashboard stats" });

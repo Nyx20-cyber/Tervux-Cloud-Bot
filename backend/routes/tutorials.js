@@ -2,8 +2,11 @@ import { Router } from "express";
 import sanitizeHtml from "sanitize-html";
 import { authenticate } from "../middleware/auth.js";
 import TutorialVideo from "../models/TutorialVideo.js";
+import { getJson, setJson } from "../lib/redis.js";
 
 const router = Router();
+const TUTORIALS_CACHE_TTL_SECONDS = Number(process.env.TUTORIALS_CACHE_TTL_SECONDS || 60);
+const TUTORIALS_CACHE_KEY = "tutorials:active:v1";
 
 const sanitize = (value) => sanitizeHtml(String(value || ""), { allowedTags: [], allowedAttributes: {} }).trim();
 
@@ -42,11 +45,18 @@ const extractYoutubeVideoId = (value) => {
 
 router.get("/", authenticate, async (_req, res) => {
     try {
+        const cached = await getJson(TUTORIALS_CACHE_KEY);
+        if (cached) {
+            return res.json(cached);
+        }
+
         const tutorials = await TutorialVideo.find({ isActive: true })
             .sort({ createdAt: -1 })
             .select("title description youtubeUrl youtubeVideoId createdAt updatedAt");
 
-        res.json({ tutorials });
+        const payload = { tutorials };
+        await setJson(TUTORIALS_CACHE_KEY, payload, TUTORIALS_CACHE_TTL_SECONDS);
+        res.json(payload);
     } catch (error) {
         console.error("Fetch tutorials error:", error);
         res.status(500).json({ error: "Failed to fetch tutorials" });

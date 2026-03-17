@@ -18,8 +18,14 @@ import { checkOrderStatus, extractBongoPayOrderStatus } from "../services/bongop
 import { extractYoutubeVideoId, sanitize } from "./tutorials.js";
 import mongoose from "mongoose";
 import { shouldHaveVip } from "../services/gamificationService.js";
+import { getJson, setJson, delKey } from "../lib/redis.js";
 
 const router = Router();
+const ADMIN_STATS_CACHE_TTL_SECONDS = Number(process.env.ADMIN_STATS_CACHE_TTL_SECONDS || 20);
+const ADMIN_STATS_CACHE_KEY = "admin:stats:v1";
+const PLANS_CACHE_KEY = "public:plans:v1";
+const TUTORIALS_CACHE_KEY = "tutorials:active:v1";
+const ANNOUNCEMENTS_CACHE_KEY_PATTERN = "announcements:active:*";
 
 /**
  * GET /api/admin/stats
@@ -27,6 +33,11 @@ const router = Router();
  */
 router.get("/stats", authenticate, requireAdmin, async (req, res) => {
     try {
+        const cached = await getJson(ADMIN_STATS_CACHE_KEY);
+        if (cached) {
+            return res.json(cached);
+        }
+
         const [
             totalUsers,
             activeSubscriptions,
@@ -50,7 +61,7 @@ router.get("/stats", authenticate, requireAdmin, async (req, res) => {
                 .populate("planId", "name price")
         ]);
 
-        res.json({
+        const payload = {
             totalUsers,
             activeSubscriptions,
             totalSessions,
@@ -59,7 +70,10 @@ router.get("/stats", authenticate, requireAdmin, async (req, res) => {
             totalRevenue: totalRevenue[0]?.total || 0,
             currency: "TZS",
             recentPayments
-        });
+        };
+
+        await setJson(ADMIN_STATS_CACHE_KEY, payload, ADMIN_STATS_CACHE_TTL_SECONDS);
+        res.json(payload);
     } catch (error) {
         console.error("Admin stats error:", error);
         res.status(500).json({ error: "Failed to fetch stats" });
@@ -158,6 +172,7 @@ router.put("/users/:id", authenticate, requireAdmin, async (req, res) => {
 
         await user.save();
         const serializedUser = user.toJSON();
+        await delKey(ADMIN_STATS_CACHE_KEY);
 
         emitUpdate("admin_user_updated", {
             user: serializedUser
@@ -243,6 +258,7 @@ router.delete("/users/:id", authenticate, requireAdmin, async (req, res) => {
         emitUpdate("admin_user_deleted", {
             userId: targetUserId
         });
+        await delKey(ADMIN_STATS_CACHE_KEY);
 
         res.json({
             success: true,
@@ -384,6 +400,7 @@ router.delete("/payments/:id", authenticate, requireAdmin, async (req, res) => {
         emitUpdate("admin_payment_deleted", {
             paymentId: payment._id.toString()
         });
+        await delKey(ADMIN_STATS_CACHE_KEY);
 
         res.json({
             success: true,
@@ -580,6 +597,7 @@ router.post("/plans", authenticate, requireAdmin, async (req, res) => {
         emitUpdate("admin_plan_created", {
             plan
         });
+        await delKey(PLANS_CACHE_KEY);
 
         res.status(201).json({ success: true, plan });
     } catch (error) {
@@ -608,6 +626,7 @@ router.put("/plans/:id", authenticate, requireAdmin, async (req, res) => {
         if (isActive !== undefined) plan.isActive = isActive;
 
         await plan.save();
+        await delKey(PLANS_CACHE_KEY);
 
         emitUpdate("admin_plan_updated", {
             plan
@@ -632,6 +651,7 @@ router.delete("/plans/:id", authenticate, requireAdmin, async (req, res) => {
         emitUpdate("admin_plan_deleted", {
             planId: plan._id.toString()
         });
+        await delKey(PLANS_CACHE_KEY);
 
         res.json({ success: true, message: "Plan deleted" });
     } catch (error) {
@@ -978,6 +998,7 @@ router.post("/users/:id/coins", authenticate, requireAdmin, async (req, res) => 
 
         user.coins = newBalance;
         await user.save();
+        await delKey(ADMIN_STATS_CACHE_KEY);
         emitToUser(user._id, "balance_update", { coins: user.coins });
 
         // Notify user about coin adjustment
@@ -1103,6 +1124,7 @@ router.post("/announcements", authenticate, requireAdmin, async (req, res) => {
         });
 
         const populated = await announcement.populate("createdBy", "name email");
+        await delKey(ANNOUNCEMENTS_CACHE_KEY_PATTERN);
         res.status(201).json({ success: true, announcement: populated });
     } catch (error) {
         console.error("Admin create announcement error:", error);
@@ -1127,6 +1149,7 @@ router.put("/announcements/:id", authenticate, requireAdmin, async (req, res) =>
 
         await announcement.save();
         const populated = await announcement.populate("createdBy", "name email");
+        await delKey(ANNOUNCEMENTS_CACHE_KEY_PATTERN);
         res.json({ success: true, announcement: populated });
     } catch (error) {
         console.error("Admin update announcement error:", error);
@@ -1142,6 +1165,7 @@ router.delete("/announcements/:id", authenticate, requireAdmin, async (req, res)
     try {
         const announcement = await Announcement.findByIdAndDelete(req.params.id);
         if (!announcement) return res.status(404).json({ error: "Announcement not found" });
+        await delKey(ANNOUNCEMENTS_CACHE_KEY_PATTERN);
         res.json({ success: true, message: "Announcement deleted" });
     } catch (error) {
         console.error("Admin delete announcement error:", error);
@@ -1198,6 +1222,7 @@ router.post("/tutorials", authenticate, requireAdmin, async (req, res) => {
 
         emitUpdate("admin_tutorial_created", { tutorial: populated });
         emitUpdate("tutorials_updated", { action: "created", tutorial: populated });
+        await delKey(TUTORIALS_CACHE_KEY);
 
         res.status(201).json({ success: true, tutorial: populated });
     } catch (error) {
@@ -1237,6 +1262,7 @@ router.put("/tutorials/:id", authenticate, requireAdmin, async (req, res) => {
 
         emitUpdate("admin_tutorial_updated", { tutorial: populated });
         emitUpdate("tutorials_updated", { action: "updated", tutorial: populated });
+        await delKey(TUTORIALS_CACHE_KEY);
 
         res.json({ success: true, tutorial: populated });
     } catch (error) {
@@ -1256,6 +1282,7 @@ router.delete("/tutorials/:id", authenticate, requireAdmin, async (req, res) => 
 
         emitUpdate("admin_tutorial_deleted", { tutorialId: tutorial._id.toString() });
         emitUpdate("tutorials_updated", { action: "deleted", tutorialId: tutorial._id.toString() });
+        await delKey(TUTORIALS_CACHE_KEY);
 
         res.json({ success: true, tutorialId: tutorial._id.toString() });
     } catch (error) {
