@@ -828,6 +828,51 @@ Members can now share links freely.`;
 }
 
 /**
+ * !antimention on/off - Toggle anti-mention protection
+ */
+export async function antimention(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+
+    if (!remoteJid.endsWith("@g.us")) {
+        return `⚠️ This command only works in groups.`;
+    }
+
+    if (!await isAdmin(sock, remoteJid, m.key.participant || m.key.remoteJid)) {
+        return `⚠️ Only admins can manage antimention.`;
+    }
+
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
+    const action = args[0]?.toLowerCase();
+
+    if (action === "on") {
+        settings.antimention = { enabled: true };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `🛡️ *𝔸ℕ𝕋𝕀𝕄𝔼ℕ𝕋𝕀𝕆ℕ 𝔼ℕ𝔸𝔹𝕃𝔼𝔻* 🛡️\n\nNon-admins can no longer tag @all or many members at once.`;
+    }
+
+    if (action === "off") {
+        settings.antimention = { enabled: false };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `❌ *𝔸ℕ𝕋𝕀𝕄𝔼ℕ𝕋𝕀𝕆ℕ 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌\n\nMembers can now toggle mentions freely.`;
+    }
+
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
+    return `╔══════════════════════════════════╗
+║  📣 *𝔸ℕ𝕋𝕀𝕄𝔼ℕ𝕋𝕀𝕆ℕ 𝕊𝕐𝕊𝕋𝔼𝕄* 📣  ║
+╚══════════════════════════════════╝
+
+*Status:* ${settings.antimention?.enabled ? "✅ Enabled" : "❌ Disabled"}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*Commands:*
+• ${p}antimention on - Enable
+• ${p}antimention off - Disable
+
+🛡️ Stops @everyone / @all spam from non-admins!`;
+}
+
+/**
  * !poll <question> | <option1> | <option2> ... - Create a poll
  */
 export async function poll(sock, m, args) {

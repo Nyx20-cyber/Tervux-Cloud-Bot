@@ -16,7 +16,21 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 export const metadata: Metadata = {
   title: translations.en.site_title,
   description: translations.en.site_description,
+  manifest: "/manifest.json",
+  themeColor: "#1a73e8",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Tervux",
+    startupImage: "/icons/icon-512x512.png",
+  },
+  icons: {
+    icon: "/icons/icon-192x192.png",
+    apple: "/icons/icon-192x192.png",
+  },
 };
+
+import PWARegistration from "@/components/PWARegistration";
 
 export default function RootLayout({
   children,
@@ -30,6 +44,7 @@ export default function RootLayout({
           <TooltipProvider>
             <ParticlesBackground />
             <div className="relative z-10 w-full">
+              <PWARegistration />
               {children}
             </div>
             <Toaster />
