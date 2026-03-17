@@ -74,7 +74,8 @@ router.get("/users", authenticate, requireAdmin, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
-        const skip = (page - 1) * limit;
+        const fetchAll = String(req.query.all || "").toLowerCase() === "true";
+        const skip = fetchAll ? 0 : (page - 1) * limit;
         const search = String(req.query.search || "").trim();
 
         const query = {};
@@ -88,11 +89,16 @@ router.get("/users", authenticate, requireAdmin, async (req, res) => {
             query.$or = conditions;
         }
 
+        const usersQuery = User.find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip);
+
+        if (!fetchAll) {
+            usersQuery.limit(limit);
+        }
+
         const [users, total] = await Promise.all([
-            User.find(query)
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit),
+            usersQuery,
             User.countDocuments(query)
         ]);
 
@@ -126,7 +132,7 @@ router.get("/users", authenticate, requireAdmin, async (req, res) => {
             users: usersData,
             total,
             page,
-            pages: Math.ceil(total / limit)
+            pages: fetchAll ? 1 : Math.ceil(total / limit)
         });
     } catch (error) {
         console.error("Admin list users error:", error);

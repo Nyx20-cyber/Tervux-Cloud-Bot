@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
+import { useAuthStore } from "@/store/useAuthStore";
 
 interface UserRecord {
     _id: string;
@@ -16,10 +17,12 @@ interface UserRecord {
     name: string;
     phone: string;
     coins: number;
+    role?: "user" | "admin";
 }
 
 export function CoinManagement() {
     const { language } = useLocaleStore();
+    const currentUser = useAuthStore((state) => state.user);
     const t = translations[language];
     const [users, setUsers] = useState<UserRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -40,20 +43,44 @@ export function CoinManagement() {
     const fetchUsers = useCallback(async (searchTerm = "") => {
         setIsLoading(true);
         try {
-            const params = new URLSearchParams({ limit: "100" });
+            const params = new URLSearchParams({ all: "true" });
             const trimmedSearch = searchTerm.trim();
             if (trimmedSearch) {
                 params.set("search", trimmedSearch);
             }
 
             const res = await api.get(`/admin/users?${params.toString()}`);
-            setUsers(res.data.users);
+            const fetchedUsers = Array.isArray(res.data.users) ? res.data.users : [];
+
+            const mergedUsers = [...fetchedUsers];
+            const shouldIncludeCurrentAdmin =
+                currentUser?.role === "admin" &&
+                !mergedUsers.some((user: UserRecord) => user._id === currentUser._id) &&
+                (
+                    !trimmedSearch ||
+                    currentUser.name?.toLowerCase().includes(trimmedSearch.toLowerCase()) ||
+                    currentUser.email?.toLowerCase().includes(trimmedSearch.toLowerCase()) ||
+                    trimmedSearch.toLowerCase().includes("admin")
+                );
+
+            if (shouldIncludeCurrentAdmin) {
+                mergedUsers.unshift({
+                    _id: currentUser._id,
+                    name: currentUser.name,
+                    email: currentUser.email,
+                    phone: currentUser.phone || "",
+                    coins: currentUser.coins,
+                    role: currentUser.role
+                });
+            }
+
+            setUsers(mergedUsers);
         } catch (err) {
             console.error(err);
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [currentUser]);
 
     useEffect(() => {
         const timeoutId = window.setTimeout(() => {
