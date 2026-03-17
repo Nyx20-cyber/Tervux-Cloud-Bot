@@ -215,6 +215,8 @@ class SessionManager {
         this.CONFIG_CACHE_TTL = Number.parseInt(process.env.WA_CONFIG_CACHE_TTL_MS || "30000", 10);
         this.RUNTIME_META_CACHE_TTL = Number.parseInt(process.env.WA_RUNTIME_META_CACHE_TTL_MS || "30000", 10);
         this.STATUS_AUTOMATION_MIN_INTERVAL_MS = Number.parseInt(process.env.WA_STATUS_AUTOMATION_MIN_INTERVAL_MS || "15000", 10);
+        this.DELAYED_COMMAND_HEAL_THRESHOLD_MS = Number.parseInt(process.env.WA_DELAYED_COMMAND_HEAL_THRESHOLD_MS || "20000", 10);
+        this.DELAYED_COMMAND_HEAL_COOLDOWN_MS = Number.parseInt(process.env.WA_DELAYED_COMMAND_HEAL_COOLDOWN_MS || "180000", 10);
         this.RUNTIME_HEALTH_INTERVAL_MS = Number.parseInt(process.env.WA_RUNTIME_HEALTH_INTERVAL_MS || "60000", 10);
         this.RUNTIME_STALE_MS = Number.parseInt(process.env.WA_RUNTIME_STALE_MS || "180000", 10);
         this.SOCKET_CONNECT_GRACE_MS = Number.parseInt(process.env.WA_SOCKET_CONNECT_GRACE_MS || "45000", 10);
@@ -227,6 +229,8 @@ class SessionManager {
         this.reconnectAttempts = new Map();
         this.cryptoRepairCooldowns = new Map();
         this.cryptoRepairInFlight = new Set();
+        this.delayedCommandHealCooldowns = new Map();
+        this.delayedCommandHealInFlight = new Set();
         this.healthMonitor = null;
         this.healthWarmupTimer = null;
         this.healthSweepRunning = false;
@@ -453,6 +457,46 @@ class SessionManager {
         } finally {
             this.healthSweepRunning = false;
         }
+    }
+
+    async scheduleDelayedCommandHeal(sessionId, ageMs) {
+        const sid = String(sessionId);
+        const now = Date.now();
+        const lastAt = this.delayedCommandHealCooldowns.get(sid) || 0;
+        if (now - lastAt < this.DELAYED_COMMAND_HEAL_COOLDOWN_MS) {
+            return false;
+        }
+        if (this.delayedCommandHealInFlight.has(sid)) {
+            return false;
+        }
+
+        this.delayedCommandHealCooldowns.set(sid, now);
+        this.delayedCommandHealInFlight.add(sid);
+
+        setTimeout(async () => {
+            try {
+                const current = await WhatsAppSession.findById(sid).select("status expiresAt");
+                if (!current) return;
+                if (current.expiresAt && new Date(current.expiresAt) <= new Date()) return;
+                if (!["active", "paused", "disconnected"].includes(current.status)) return;
+
+                const entry = this.sessions.get(sid);
+                if (!entry) return;
+                if (entry.connectionState !== "open" || this.reconnectTimers.has(sid) || this.connectingSessions.has(sid)) {
+                    return;
+                }
+
+                console.warn(`🩺 [${sid}] Delayed command delivery detected (${Math.round(ageMs / 1000)}s old). Recycling socket.`);
+                await this.disconnectSession(sid);
+                await this.connectSession(sid);
+            } catch (error) {
+                console.warn(`🩺 [${sid}] Delayed command heal failed: ${error.message}`);
+            } finally {
+                this.delayedCommandHealInFlight.delete(sid);
+            }
+        }, 1000);
+
+        return true;
     }
 
     /**
@@ -1090,9 +1134,10 @@ ${footer}`
 
                     // Ignore stale history batches so old commands are not replayed after reconnect.
                     const tsSeconds = Number(m.messageTimestamp || 0);
+                    let messageAgeMs = 0;
                     if (tsSeconds > 0) {
-                        const ageMs = Date.now() - (tsSeconds * 1000);
-                        if (ageMs > 5 * 60 * 1000) continue;
+                        messageAgeMs = Date.now() - (tsSeconds * 1000);
+                        if (messageAgeMs > 5 * 60 * 1000) continue;
                     }
 
                     const messageText = extractIncomingCommandText(m.message);
@@ -1207,6 +1252,9 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
                         try {
                             console.log(`⚡ [${sessionId}] Command: ${commandName}`);
                             const result = await commands[commandName](sock, m, args);
+                            if (messageAgeMs >= this.DELAYED_COMMAND_HEAL_THRESHOLD_MS) {
+                                this.scheduleDelayedCommandHeal(sessionId, messageAgeMs).catch(() => { });
+                            }
                             if (result) {
                                 const footer = `\n\n${await getCommandFooterText()}`;
                                 if (typeof result === "string") {
