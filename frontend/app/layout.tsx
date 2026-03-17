@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Outfit } from "next/font/google";
 import "./globals.css";
 import ParticlesBackground from "@/components/ParticlesBackground";
@@ -17,17 +17,20 @@ export const metadata: Metadata = {
   title: translations.en.site_title,
   description: translations.en.site_description,
   manifest: "/manifest.json",
-  themeColor: "#1a73e8",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Tervux",
+    title: "Tervux Cloud Bot",
     startupImage: "/icons/icon-512x512.png",
   },
   icons: {
     icon: "/icons/icon-192x192.png",
     apple: "/icons/icon-192x192.png",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#1a73e8",
 };
 
 import PWARegistration from "@/components/PWARegistration";

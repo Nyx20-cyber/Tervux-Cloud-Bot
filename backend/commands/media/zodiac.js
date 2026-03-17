@@ -152,6 +152,8 @@ export const zodiac = async (sock, m, args) => {
 ║   🔮 *ℤ𝕆𝔻𝕀𝔸ℂ ℍ𝕆ℝ𝕆𝕊ℂ𝕆ℙ𝔼* 🔮       ║
 ╚══════════════════════════════════╝
 
+This command shows today's horoscope for the zodiac sign you choose.
+
 *Usage:* ${p}zodiac <sign>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

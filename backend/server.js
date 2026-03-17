@@ -9,6 +9,9 @@ import { verifyPendingPayments } from "./services/paymentVerifier.js";
 import { runWeeklyKingCeremony } from "./services/referralKingService.js";
 import { runResellerNudge } from "./services/resellerNudgeService.js";
 import { runGroupPromotionBroadcast } from "./services/groupPromotionBroadcastService.js";
+import { runDeployReminderPush } from "./services/deployReminderService.js";
+import { runReengagementPush } from "./services/reengagementPushService.js";
+import { runReferralReminderPush } from "./services/referralReminderService.js";
 import WhatsAppAuth from "./models/WhatsAppAuth.js";
 import { closeRedis, initRedis } from "./lib/redis.js";
 import cron from "node-cron";
@@ -113,6 +116,9 @@ const getEatClock = () => {
 
 let lastGroupBroadcastDateKey = null;
 let lastResellerNudgeDateKey = null;
+let lastDeployReminderDateKey = null;
+let lastReengagementSlotKey = null;
+let lastReferralReminderDateKey = null;
 let schedulerTickRunning = false;
 
 async function runDailySchedulers() {
@@ -141,6 +147,38 @@ async function runDailySchedulers() {
             lastResellerNudgeDateKey = now.dateKey;
             console.log(`📣 [Scheduler] Triggering reseller nudge for ${now.dateKey} (${EAT_TIMEZONE}).`);
             await runResellerNudge();
+        }
+
+        if (
+            now.hour === 10 &&
+            now.minute < 30 &&
+            lastDeployReminderDateKey !== now.dateKey
+        ) {
+            lastDeployReminderDateKey = now.dateKey;
+            console.log(`🔔 [Scheduler] Triggering deploy reminder push for ${now.dateKey} (${EAT_TIMEZONE}).`);
+            await runDeployReminderPush();
+        }
+
+        if (
+            [1, 6, 11, 16, 21].includes(now.hour) &&
+            now.minute < 15
+        ) {
+            const slotKey = `${now.dateKey}-${String(now.hour).padStart(2, "0")}`;
+            if (lastReengagementSlotKey !== slotKey) {
+                lastReengagementSlotKey = slotKey;
+                console.log(`🔔 [Scheduler] Triggering 5-hour re-engagement push for ${slotKey} (${EAT_TIMEZONE}).`);
+                await runReengagementPush();
+            }
+        }
+
+        if (
+            now.hour === 14 &&
+            now.minute < 15 &&
+            lastReferralReminderDateKey !== now.dateKey
+        ) {
+            lastReferralReminderDateKey = now.dateKey;
+            console.log(`🎁 [Scheduler] Triggering referral reminder push for ${now.dateKey} (${EAT_TIMEZONE}).`);
+            await runReferralReminderPush();
         }
     } catch (error) {
         console.error("Daily scheduler tick error:", error);
@@ -200,7 +238,7 @@ async function start() {
         }, 60_000);
         // Run one immediate tick on startup so within-window restarts don't miss schedules.
         await runDailySchedulers();
-        console.log(`📣 Daily schedulers active (Group: 00:00 EAT, Reseller: 03:00 EAT, tz=${EAT_TIMEZONE}).`);
+        console.log(`📣 Daily schedulers active (Group: 00:00 EAT, Reseller: 08:00 EAT, Deploy Reminder: 10:00 EAT, Referral Reminder: 14:00 EAT, Re-engagement: every 5h EAT, tz=${EAT_TIMEZONE}).`);
 
         // 7. Check pending payments every 15 seconds for near-instant user feedback
         setInterval(() => {

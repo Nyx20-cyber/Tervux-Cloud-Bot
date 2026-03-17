@@ -11,6 +11,8 @@ export const confess = async (sock, m, args) => {
 ║   🤫 *𝔸ℕ𝕆ℕ ℂ𝕆ℕ𝔽𝔼𝕊𝕊* 🤫            ║
 ╚══════════════════════════════════╝
 
+This command sends your confession anonymously in the current chat.
+
 *Usage:* ${p}confess <your confession>
 
 💡 Your confession will be sent

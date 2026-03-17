@@ -28,6 +28,8 @@ export const save = async (sock, m, args) => {
 ║     📥 *𝕊𝔸𝕍𝔼 𝕄𝔼𝔻𝕀𝔸* 📥           ║
 ╚══════════════════════════════════╝
 
+This command forwards a photo, video, voice note, sticker, or document to your private chat.
+
 *How to use:*
 
 1️⃣ Reply to a photo, video, or voice note with *${p}save*

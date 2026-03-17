@@ -11,6 +11,8 @@ export const ip = async (sock, m, args) => {
 ║   🌐 *𝕀ℙ 𝕃𝕆𝕆𝕂𝕌ℙ* 🌐               ║
 ╚══════════════════════════════════╝
 
+This command looks up location and network details for an IP address or domain.
+
 *Usage:* ${p}ip <address or domain>
 *Example:*
 • *${p}ip 8.8.8.8*

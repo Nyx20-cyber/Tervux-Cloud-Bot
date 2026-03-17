@@ -48,6 +48,8 @@ export const wallpaper = async (sock, m, args) => {
 🔗 *Source:* Wallhaven
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+This command fetches a wallpaper based on your search or a random category.
+
 💡 *Tips:*
 • *${p}wallpaper ${query}* → more like this
 • *${p}wallpaper* → random wallpaper

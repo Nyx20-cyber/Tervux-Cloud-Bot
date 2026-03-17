@@ -49,6 +49,8 @@ export const aesthetic = async (sock, m, args) => {
 ║   ✨ *𝔸𝔼𝕊𝕋ℍ𝔼𝕋𝕀ℂ 𝕋𝔼𝕏𝕋* ✨          ║
 ╚══════════════════════════════════╝
 
+This command turns normal text into stylish aesthetic text formats.
+
 *Usage:* ${p}aesthetic <text>
 *Example:* ${p}aesthetic hello world`;
     }

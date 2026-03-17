@@ -1,6 +1,13 @@
 import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import Notification from "../models/Notification.js";
+import {
+    getWebPushPublicKey,
+    isWebPushConfigured,
+    removePushSubscription,
+    savePushSubscription,
+    sendPushToUser
+} from "../services/pushNotificationService.js";
 
 const router = Router();
 
@@ -80,6 +87,53 @@ router.delete("/:id", authenticate, async (req, res) => {
     } catch (error) {
         console.error("Delete notification error:", error);
         res.status(500).json({ error: "Failed to delete notification" });
+    }
+});
+
+router.get("/push/public-key", authenticate, async (req, res) => {
+    if (!isWebPushConfigured()) {
+        return res.status(503).json({ error: "Web push is not configured" });
+    }
+    res.json({ publicKey: getWebPushPublicKey() });
+});
+
+router.post("/push/subscribe", authenticate, async (req, res) => {
+    try {
+        if (!isWebPushConfigured()) {
+            return res.status(503).json({ error: "Web push is not configured" });
+        }
+        const { subscription } = req.body;
+        const count = await savePushSubscription(req.user._id, subscription, req.headers["user-agent"] || "");
+        res.json({ success: true, subscriptions: count });
+    } catch (error) {
+        console.error("Save push subscription error:", error);
+        res.status(400).json({ error: error.message || "Failed to save push subscription" });
+    }
+});
+
+router.post("/push/unsubscribe", authenticate, async (req, res) => {
+    try {
+        const { endpoint } = req.body;
+        await removePushSubscription(req.user._id, endpoint);
+        res.json({ success: true });
+    } catch (error) {
+        console.error("Remove push subscription error:", error);
+        res.status(500).json({ error: "Failed to remove push subscription" });
+    }
+});
+
+router.post("/push/test", authenticate, async (req, res) => {
+    try {
+        const result = await sendPushToUser(req.user._id, {
+            title: "Tervux Push Test",
+            body: "Push notifications are now working on your device.",
+            url: `${process.env.FRONTEND_URL || "https://bot.tervux.com"}/dashboard/deployments`,
+            tag: "push-test"
+        });
+        res.json({ success: true, result });
+    } catch (error) {
+        console.error("Test push error:", error);
+        res.status(500).json({ error: "Failed to send test push" });
     }
 });
 

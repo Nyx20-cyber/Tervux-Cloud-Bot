@@ -11,6 +11,8 @@ export const wiki = async (sock, m, args) => {
 ║   📚 *𝕎𝕀𝕂𝕀ℙ𝔼𝔻𝕀𝔸* 📚               ║
 ╚══════════════════════════════════╝
 
+This command searches Wikipedia and returns a short summary for a topic.
+
 *Usage:* ${p}wiki <topic>
 *Example:* ${p}wiki Elon Musk`;
     }

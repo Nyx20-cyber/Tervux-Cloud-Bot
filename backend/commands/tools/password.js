@@ -48,6 +48,8 @@ export const password = async (sock, m, args) => {
 💪 *Strength:* ${strength}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+This command generates a random password for you.
+
 💡 *Usage:*
 • *${p}password* → 16 chars (default)
 • *${p}password 24* → 24 chars

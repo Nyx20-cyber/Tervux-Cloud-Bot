@@ -18,6 +18,8 @@ export const ai = async (sock, m, args) => {
 ║   🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 𝔸𝕀* 🤖                ║
 ╚══════════════════════════════════╝
 
+This command lets you ask the bot questions and get an AI-generated answer.
+
 *Usage:* ${p}ai <your question>
 
 *Examples:*

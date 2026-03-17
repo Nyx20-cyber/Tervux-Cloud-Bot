@@ -11,6 +11,8 @@ export const lyrics = async (sock, m, args) => {
 ║   🎵 *𝕃𝕐ℝ𝕀ℂ𝕊 𝔽𝕀ℕ𝔻𝔼ℝ* 🎵           ║
 ╚══════════════════════════════════╝
 
+This command searches for the lyrics of a song.
+
 *Usage:* ${p}lyrics <song name>
 *Example:* ${p}lyrics Blinding Lights`;
     }

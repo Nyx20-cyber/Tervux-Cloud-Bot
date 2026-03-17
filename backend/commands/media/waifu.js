@@ -36,6 +36,8 @@ export const waifu = async (sock, m, args) => {
 🏷️ *Category:* ${type}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+This command sends a random anime image from the selected category.
+
 💡 *Categories:*
 waifu • neko • shinobu • megumin 
 hug • kiss • pat • smile • wave

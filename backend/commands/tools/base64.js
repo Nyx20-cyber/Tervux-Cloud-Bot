@@ -12,6 +12,8 @@ export const base64 = async (sock, m, args) => {
 ║   🔣 *𝔹𝔸𝕊𝔼𝟞𝟜* 🔣                  ║
 ╚══════════════════════════════════╝
 
+This command encodes normal text into Base64 or decodes Base64 back into text.
+
 *Usage:*
 • *${p}base64 encode* <text>
 • *${p}base64 decode* <encoded text>

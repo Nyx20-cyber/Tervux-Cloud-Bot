@@ -1,7 +1,10 @@
 import { getGroupDrama } from "../../utils/dramaStore.js";
+import { getCachedConfig } from "../../services/configService.js";
 
 export const marry = async (sock, m, args) => {
     const remoteJid = m.key.remoteJid;
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
     if (!remoteJid.endsWith("@g.us")) {
         return "❌ This drama only happens in groups!";
     }
@@ -36,7 +39,7 @@ export const marry = async (sock, m, args) => {
     drama[target].proposal = sender;
 
     return {
-        text: `💍 *𝕄𝔸ℝℝ𝕀𝔸𝔾𝔼 ℙℝ𝕆ℙ𝕆𝕊𝔸𝕃* 💍\n\n@${sender.split("@")[0]} has proposed to @${target.split("@")[0]}!\n\n✨ @${target.split("@")[0]}, do you accept? Reply with *.accept* to make it official!`,
+        text: `💍 *𝕄𝔸ℝℝ𝕀𝔸𝔾𝔼 ℙℝ𝕆ℙ𝕆𝕊𝔸𝕃* 💍\n\n@${sender.split("@")[0]} has proposed to @${target.split("@")[0]}!\n\n✨ @${target.split("@")[0]}, do you accept? Reply with *${p}accept* to make it official!`,
         mentions: [sender, target]
     };
 };

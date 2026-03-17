@@ -8,6 +8,14 @@ import { sessionManager } from "../services/whatsappService.js";
 import { queueService } from "../services/queueService.js";
 import { emitToUser, emitUpdate } from "../services/socketService.js";
 import { pairingLimiter } from "../middleware/rateLimiter.js";
+import {
+    shouldHaveVip,
+    syncVipFlagOnUser,
+    BOT_MASTER_DEPLOYMENT_THRESHOLD,
+    VIP_DEPLOYMENT_THRESHOLD,
+    VIP_TOTAL_COINS_SPENT_THRESHOLD,
+    VIP_TOTAL_REFERRALS_THRESHOLD
+} from "../services/gamificationService.js";
 
 const router = Router();
 
@@ -286,6 +294,9 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         }
 
         const user = await User.findById(req.user._id);
+        if (syncVipFlagOnUser(user)) {
+            await user.save();
+        }
         const cost = user.isVIP ? 45 : 50;
 
         if (!user || user.coins < cost) {
@@ -300,13 +311,17 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         let earnedBotMaster = false;
         let earnedVIP = false;
 
-        if (user.totalDeployments >= 3 && !user.badges.includes("bot_master")) {
+        if (user.totalDeployments >= BOT_MASTER_DEPLOYMENT_THRESHOLD && !user.badges.includes("bot_master")) {
             user.badges.push("bot_master");
             user.badges = user.badges.filter(b => b !== "pioneer");
             earnedBotMaster = true;
         }
 
-        if (user.totalCoinsSpent >= 1000 && !user.isVIP) {
+        if (shouldHaveVip({
+            totalDeployments: user.totalDeployments,
+            totalCoinsSpent: user.totalCoinsSpent,
+            totalReferrals: user.totalReferrals
+        }) && !user.isVIP) {
             user.isVIP = true;
             earnedVIP = true;
         }
@@ -321,7 +336,9 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         // Notification for coin deduction
         try {
             let badgeMsg = earnedBotMaster ? "\n\nYou unlocked the 'Bot Master' badge! 🤖" : "";
-            let vipMsg = earnedVIP ? "\n\n🎉 You have unlocked VIP Status! 💎" : "";
+            let vipMsg = earnedVIP
+                ? `\n\n🎉 You have unlocked VIP Status! Earn it with ${VIP_DEPLOYMENT_THRESHOLD} deployments, ${VIP_TOTAL_COINS_SPENT_THRESHOLD} coins spent, or ${VIP_TOTAL_REFERRALS_THRESHOLD} referrals. 💎`
+                : "";
 
             await Notification.create({
                 userId: user._id,

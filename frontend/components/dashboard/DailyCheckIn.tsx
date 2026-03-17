@@ -1,12 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Gift, CheckCircle2, Flame, Loader2, Sparkles } from "lucide-react";
+import { motion } from "framer-motion";
+import { Gift, CheckCircle2, Flame, Loader2 } from "lucide-react";
 import { useAuthStore, api } from "@/store/useAuthStore";
 import { translations } from "@/lib/translations";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { toast } from "sonner";
+
+const EAT_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+function getCurrentDailyClaimWindowStart(now = new Date()) {
+    const eatNow = new Date(now.getTime() + EAT_OFFSET_MS);
+    const y = eatNow.getUTCFullYear();
+    const m = eatNow.getUTCMonth();
+    const d = eatNow.getUTCDate();
+    const h = eatNow.getUTCHours();
+
+    let startAtEatMs = Date.UTC(y, m, d, 6, 0, 0, 0); // 12 asubuhi (06:00 EAT)
+    if (h < 6) {
+        startAtEatMs -= 24 * 60 * 60 * 1000;
+    }
+
+    return new Date(startAtEatMs - EAT_OFFSET_MS);
+}
 
 export function DailyCheckIn() {
     const { user, setUser } = useAuthStore();
@@ -17,10 +34,10 @@ export function DailyCheckIn() {
 
     if (!user) return null;
 
-    // Check if claimed today based on local time
-    const today = new Date().setHours(0, 0, 0, 0);
-    const lastClaim = user.lastDailyClaim ? new Date(user.lastDailyClaim).setHours(0, 0, 0, 0) : 0;
-    const canClaim = lastClaim !== today;
+    // Match backend reset window exactly: 12 asubuhi (06:00 EAT)
+    const currentWindowStart = getCurrentDailyClaimWindowStart();
+    const lastClaimAt = user.lastDailyClaim ? new Date(user.lastDailyClaim) : null;
+    const canClaim = !lastClaimAt || lastClaimAt < currentWindowStart;
 
     const handleClaim = async () => {
         if (!canClaim) return;
@@ -61,7 +78,7 @@ export function DailyCheckIn() {
                     </h2>
                     <p className="text-xs font-medium text-gray-400 uppercase tracking-widest">
                         {canClaim
-                            ? "Claim your free random coins today! (1-5 🪙)"
+                            ? "Claim your free random coins today! (1-3 🪙)"
                             : `${t.already_claimed_today} • ${t.come_back_tomorrow}`}
                     </p>
                 </div>

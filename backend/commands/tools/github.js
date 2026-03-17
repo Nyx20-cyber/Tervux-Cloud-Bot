@@ -11,6 +11,8 @@ export const github = async (sock, m, args) => {
 ║   🐙 *𝔾𝕀𝕋ℍ𝕌𝔹 𝕃𝕆𝕆𝕂𝕌ℙ* 🐙           ║
 ╚══════════════════════════════════╝
 
+This command fetches a public GitHub profile and shows the user's details and stats.
+
 *Usage:* ${p}github <username>
 *Example:* ${p}github torvalds`;
     }

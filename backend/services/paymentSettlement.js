@@ -2,6 +2,7 @@ import Payment from "../models/Payment.js";
 import Notification from "../models/Notification.js";
 import { emitToUser, emitUpdate } from "./socketService.js";
 import { getSettings } from "../models/SystemSettings.js";
+import { shouldHaveVip, VIP_TOTAL_REFERRALS_THRESHOLD } from "./gamificationService.js";
 
 export function extractFastLipaFields(payload) {
     const root = payload && typeof payload === "object" ? payload : {};
@@ -107,11 +108,14 @@ export async function settleCompletedPayment(paymentId, gatewayResponse, source 
                     referrer.badges = referrer.badges.filter((b) => b !== "pioneer");
                     earnedNewBadge = true;
                 }
-                if (referrer.totalReferrals >= 50 && !referrer.isVIP) {
+                if (shouldHaveVip({
+                    totalDeployments: referrer.totalDeployments,
+                    totalCoinsSpent: referrer.totalCoinsSpent,
+                    totalReferrals: referrer.totalReferrals
+                }) && !referrer.isVIP) {
                     referrer.isVIP = true;
                     earnedVIP = true;
                 }
-
                 if (earnedNewBadge || earnedVIP) {
                     await referrer.save();
                 }
@@ -119,8 +123,9 @@ export async function settleCompletedPayment(paymentId, gatewayResponse, source 
                 emitToUser(referrer._id, "balance_update", { coins: referrer.coins });
 
                 const badgeMsg = earnedNewBadge ? "\n\nYou also unlocked the 'Social Butterfly' badge! 🦋" : "";
-                const vipMsg = earnedVIP ? "\n\n🎉 Incredible! You have unlocked VIP Status! 💎" : "";
-
+                const vipMsg = earnedVIP
+                    ? `\n\n🎉 Incredible! You have unlocked VIP Status by reaching ${VIP_TOTAL_REFERRALS_THRESHOLD} referrals! 💎`
+                    : "";
                 const referralNotify = await Notification.create({
                     userId: referrer._id,
                     title: "Referral Reward Earned! ✅",

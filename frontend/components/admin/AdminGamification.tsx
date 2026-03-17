@@ -30,6 +30,7 @@ export function AdminGamification() {
     const [users, setUsers] = useState<GamificationUser[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
+    const [badgeFilter, setBadgeFilter] = useState<"all" | "vip" | "pioneer" | "social_butterfly" | "bot_master">("all");
     const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
     const [pendingAction, setPendingAction] = useState<{
         type: "badge" | "vip";
@@ -98,10 +99,25 @@ export function AdminGamification() {
         };
     }, [token]);
 
-    const filteredUsers = users.filter(u =>
-        u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        u.name?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const badgeFilterOptions = [
+        { value: "all" as const, label: language === "sw" ? "Zote" : "All" },
+        { value: "vip" as const, label: `💎 ${t.vip_rank}` },
+        { value: "pioneer" as const, label: `🌱 ${t.pioneer_badge}` },
+        { value: "social_butterfly" as const, label: `🦋 ${t.social_butterfly_badge}` },
+        { value: "bot_master" as const, label: `🤖 ${t.bot_master_badge}` },
+    ];
+
+    const filteredUsers = users.filter((u) => {
+        const matchesSearch =
+            u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            u.name?.toLowerCase().includes(searchTerm.toLowerCase());
+
+        if (!matchesSearch) return false;
+
+        if (badgeFilter === "all") return true;
+        if (badgeFilter === "vip") return !!u.isVIP;
+        return (u.badges || []).includes(badgeFilter);
+    });
 
     const stats = useMemo(() => {
         const vipCount = users.filter((u) => u.isVIP).length;
@@ -189,24 +205,46 @@ export function AdminGamification() {
 
     return (
         <div className="space-y-4 sm:space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center">
-                <div>
-                    <h2 className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2 uppercase">
-                        <Crown className="w-5 h-5 text-yellow-500" />
-                        {t.admin_badges_vip_management}
-                    </h2>
-                    <p className="text-xs text-gray-500 uppercase tracking-widest mt-1">{t.admin_control_user_achievements}</p>
+            <div className="flex flex-col gap-4">
+                <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center">
+                    <div>
+                        <h2 className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2 uppercase">
+                            <Crown className="w-5 h-5 text-yellow-500" />
+                            {t.admin_badges_vip_management}
+                        </h2>
+                        <p className="text-xs text-gray-500 uppercase tracking-widest mt-1">{t.admin_control_user_achievements}</p>
+                    </div>
+
+                    <div className="relative w-full sm:w-auto">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                        <input
+                            type="text"
+                            placeholder={t.admin_search_email_or_name}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full sm:w-64 pl-9 pr-4 h-11 bg-white/5 border border-white/10 rounded-xl text-xs uppercase tracking-widest text-white focus:outline-none focus:border-primary/50"
+                        />
+                    </div>
                 </div>
 
-                <div className="relative w-full sm:w-auto">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                    <input
-                        type="text"
-                        placeholder={t.admin_search_email_or_name}
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full sm:w-64 pl-9 pr-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs uppercase tracking-widest text-white focus:outline-none focus:border-primary/50"
-                    />
+                <div className="flex flex-wrap gap-2 sm:gap-2.5">
+                    {badgeFilterOptions.map((option) => {
+                        const active = badgeFilter === option.value;
+                        return (
+                            <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => setBadgeFilter(option.value)}
+                                className={`min-h-10 px-3 sm:px-4 rounded-xl border text-[10px] sm:text-[11px] font-black uppercase tracking-widest transition-all ${
+                                    active
+                                        ? "bg-primary text-black border-primary shadow-lg shadow-primary/20"
+                                        : "bg-white/5 border-white/10 text-gray-400 hover:border-primary/30 hover:text-white"
+                                }`}
+                            >
+                                {option.label}
+                            </button>
+                        );
+                    })}
                 </div>
             </div>
 
@@ -245,7 +283,11 @@ export function AdminGamification() {
                             layout
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
-                            className="bg-white/5 border border-white/10 p-4 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col gap-4 relative overflow-hidden"
+                            className={`p-4 sm:p-5 rounded-xl sm:rounded-2xl flex flex-col gap-4 relative overflow-hidden transition-all ${
+                                user.isVIP
+                                    ? "bg-gradient-to-br from-amber-500/10 via-white/5 to-yellow-400/10 border border-amber-400/30 shadow-[0_0_30px_rgba(251,191,36,0.08)]"
+                                    : "bg-white/5 border border-white/10"
+                            }`}
                         >
                             {isUpdating && (
                                 <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-10 flex items-center justify-center">
@@ -254,7 +296,14 @@ export function AdminGamification() {
                             )}
 
                             <div>
-                                <h3 className="text-sm font-bold text-white uppercase tracking-widest truncate">{user.name}</h3>
+                                <div className="flex items-start justify-between gap-3">
+                                    <h3 className="text-sm font-bold text-white uppercase tracking-widest truncate">{user.name}</h3>
+                                    {user.isVIP && (
+                                        <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/12 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-amber-300">
+                                            💎 VIP
+                                        </span>
+                                    )}
+                                </div>
                                 <p className="text-[10px] text-gray-500 uppercase tracking-widest truncate">{user.email}</p>
                                 <p className="mt-2 text-[9px] text-gray-500 uppercase tracking-wider">
                                     Deployments: {user.totalDeployments || 0} · Referrals: {user.totalReferrals || 0} · Coins spent: {user.totalCoinsSpent || 0}

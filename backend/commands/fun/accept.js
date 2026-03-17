@@ -1,7 +1,10 @@
 import { getGroupDrama } from "../../utils/dramaStore.js";
+import { getCachedConfig } from "../../services/configService.js";
 
 export const accept = async (sock, m, args) => {
     const remoteJid = m.key.remoteJid;
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
     if (!remoteJid.endsWith("@g.us")) {
         return "❌ This drama only happens in groups!";
     }
@@ -13,7 +16,7 @@ export const accept = async (sock, m, args) => {
     const proposer = drama[sender]?.proposal;
 
     if (!proposer) {
-        return "🤨 No one has proposed to you lately. Try using *.marry* on someone yourself!";
+        return `🤨 No one has proposed to you lately. Try using *${p}marry* on someone yourself!`;
     }
 
     // Check if proposer is already married (edge case)

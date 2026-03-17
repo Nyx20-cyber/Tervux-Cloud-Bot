@@ -1,13 +1,16 @@
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { sessionManager } from "../../services/whatsappService.js";
+import { getCachedConfig } from "../../services/configService.js";
 
 export const vv = async (sock, m, args) => {
     try {
+        const config = await getCachedConfig(sock.sessionId);
+        const p = config.prefix || "!";
         const quotedMsgId = m.message?.extendedTextMessage?.contextInfo?.stanzaId;
         const quotedMessage = m.message?.extendedTextMessage?.contextInfo?.quotedMessage;
 
         if (!quotedMsgId || !quotedMessage) {
-            return "╔══════════════════════════════════╗\n║   👁️ *𝕋𝔼ℝ𝕍𝕌X 𝕍𝕀𝔼𝕎 𝕆ℕℂ𝔼* 👁️      ║\n╚══════════════════════════════════╝\n\n❌ *Error:* Please reply to a View Once message with *!vv* to open it.";
+            return `╔══════════════════════════════════╗\n║   👁️ *𝕋𝔼ℝ𝕍𝕌X 𝕍𝕀𝔼𝕎 𝕆ℕℂ𝔼* 👁️      ║\n╚══════════════════════════════════╝\n\nThis command opens a View Once photo, video, or voice note as normal media.\n\n❌ *Error:* Please reply to a View Once message with *${p}vv* to open it.`;
         }
 
         const session = sessionManager.sessions.get(sock.sessionId);

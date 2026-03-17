@@ -4,10 +4,13 @@ import path from "path";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { promisify } from "util";
 import { sticker as createSticker } from "../tools/sticker.js";
+import { getCachedConfig } from "../../services/configService.js";
 
 const execPromise = promisify(exec);
 
 export const convert = async (sock, m, args) => {
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
     const remoteJid = m.key.remoteJid;
     const quoted = m.message.extendedTextMessage?.contextInfo?.quotedMessage;
     
@@ -21,12 +24,14 @@ export const convert = async (sock, m, args) => {
 ║    🔄 *𝕄𝔼𝔻𝕀𝔸 ℂ𝕆ℕ𝕍𝔼ℝ𝕋𝔼ℝ* 🔄      ║
 ╚══════════════════════════════════╝
 
+Convert replied media into audio, voice note, PDF, document, or sticker format.
+
 *Usage:* Reply to media with:
-• *!convert tomp3* (Video/Audio -> MP3)
-• *!convert tovn* (Video/Audio -> Voice Note)
-• *!convert topdf* (Image -> PDF)
-• *!convert todoc* (Any -> Document)
-• *!convert tosticker* (Image/Video -> Sticker)
+• *${p}convert tomp3* (Video/Audio -> MP3)
+• *${p}convert tovn* (Video/Audio -> Voice Note)
+• *${p}convert topdf* (Image -> PDF)
+• *${p}convert todoc* (Any -> Document)
+• *${p}convert tosticker* (Image/Video -> Sticker)
 
 🛡️ *Careful & Professional Conversion!*`;
     }
@@ -92,7 +97,7 @@ export const convert = async (sock, m, args) => {
             }, { quoted: m });
         }
         else {
-            return `❌ Unknown format: *${targetFormat}*. Use !convert to see supported formats.`;
+            return `❌ Unknown format: *${targetFormat}*. Use *${p}convert* to see supported formats.`;
         }
 
         // --- 3. CLEANUP ---

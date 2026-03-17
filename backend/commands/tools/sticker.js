@@ -21,6 +21,8 @@ export const sticker = async (sock, m, args) => {
 ║   🖼️ *𝕊𝕋𝕀ℂ𝕂𝔼ℝ 𝕄𝔸𝕂𝔼ℝ* 🖼️          ║
 ╚══════════════════════════════════╝
 
+This command converts a replied image or video into a sticker.
+
 *How to use:*
 
 1️⃣ Send an image/video with caption *${p}sticker*

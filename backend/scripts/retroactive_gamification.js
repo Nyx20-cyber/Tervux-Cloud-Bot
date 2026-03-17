@@ -9,14 +9,16 @@ dotenv.config();
  *
  * Requirements:
  * 1. All users must have exactly one base badge (Pioneer).
- * 2. If they qualify for Social Butterfly (10+ refs) or Bot Master (3+ deployments), they receive those instead of Pioneer.
+ * 2. If they qualify for Social Butterfly (10+ refs) or Bot Master (10+ deployments), they receive those instead of Pioneer.
  * 3. They can hold BOTH Social Butterfly and Bot Master.
- * 4. VIP Status (💎) is separate, awarded at 50+ referrals OR 1000+ coins spent.
+ * 4. VIP Status (💎) is separate, awarded at:
+ *    - 50+ deployments, or
+ *    - 10000+ coins spent, or
+ *    - 100+ referrals.
  *
- * NOTE: Since we didn't track totalDeployments and totalCoinsSpent previously, 
- * we can't reliably retroactively award Bot Master or spend-based VIP for past sessions 
- * (unless we parse all historical sessions if they are kept). 
- * We will calculate what we can (Referrals) and default the rest.
+ * NOTE: Since some historical counters may not have been tracked reliably before,
+ * retroactive VIP results depend on the accuracy of totalDeployments, totalCoinsSpent,
+ * and totalReferrals already stored on each user.
  */
 
 const executeMigration = async () => {
@@ -51,12 +53,19 @@ const executeMigration = async () => {
             const earnedBadges = new Set(user.badges);
 
             // 1. Check VIP Constraints
-            if (user.totalReferrals >= 50 || user.totalCoinsSpent >= 1000) {
+            if (
+                user.totalDeployments >= 50 ||
+                user.totalCoinsSpent >= 10000 ||
+                user.totalReferrals >= 100
+            ) {
                 if (!user.isVIP) {
                     user.isVIP = true;
                     modified = true;
-                    console.log(`Awarded VIP to ${user.email} (Refs: ${user.totalReferrals}, Spent: ${user.totalCoinsSpent})`);
+                    console.log(`Awarded VIP to ${user.email} (Deployments: ${user.totalDeployments}, Spent: ${user.totalCoinsSpent}, Referrals: ${user.totalReferrals})`);
                 }
+            } else if (user.isVIP) {
+                user.isVIP = false;
+                modified = true;
             }
 
             // 2. Check Advanced Badges
@@ -65,7 +74,7 @@ const executeMigration = async () => {
                 modified = true;
             }
 
-            if (user.totalDeployments >= 3 && !earnedBadges.has("bot_master")) {
+            if (user.totalDeployments >= 10 && !earnedBadges.has("bot_master")) {
                 earnedBadges.add("bot_master");
                 modified = true;
             }

@@ -24,6 +24,11 @@ const userSchema = new mongoose.Schema({
         trim: true,
         default: ""
     },
+    preferredLanguage: {
+        type: String,
+        enum: ["en", "sw"],
+        default: "en"
+    },
     role: {
         type: String,
         enum: ["user", "admin"],
@@ -99,6 +104,40 @@ const userSchema = new mongoose.Schema({
     totalCoinsSpent: {
         type: Number,
         default: 0
+    },
+    pushSubscriptions: {
+        type: [{
+            endpoint: { type: String, required: true },
+            keys: {
+                p256dh: { type: String, required: true },
+                auth: { type: String, required: true }
+            },
+            userAgent: {
+                type: String,
+                default: ""
+            },
+            createdAt: {
+                type: Date,
+                default: Date.now
+            },
+            updatedAt: {
+                type: Date,
+                default: Date.now
+            }
+        }],
+        default: []
+    },
+    lastDeployReminderAt: {
+        type: Date,
+        default: null
+    },
+    lastReengagementReminderAt: {
+        type: Date,
+        default: null
+    },
+    lastReferralReminderAt: {
+        type: Date,
+        default: null
     }
 }, {
     timestamps: true
@@ -119,6 +158,7 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 userSchema.methods.toJSON = function () {
     const obj = this.toObject();
     delete obj.password;
+    delete obj.pushSubscriptions;
     return obj;
 };
 

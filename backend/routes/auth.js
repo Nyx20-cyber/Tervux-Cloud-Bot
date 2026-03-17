@@ -7,6 +7,7 @@ import { emitToUser } from "../services/socketService.js";
 import { authLimiter } from "../middleware/rateLimiter.js";
 import validator from "validator";
 import sanitizeHtml from "sanitize-html";
+import { syncVipFlagOnUser } from "../services/gamificationService.js";
 
 const sanitize = (str) => sanitizeHtml(str, { allowedTags: [], allowedAttributes: {} }).trim();
 const EAT_OFFSET_MS = 3 * 60 * 60 * 1000; // Africa/Dar_es_Salaam (UTC+3)
@@ -137,6 +138,10 @@ router.post("/login", authLimiter, async (req, res) => {
         const isValid = await user.comparePassword(password);
         if (!isValid) {
             return res.status(401).json({ error: "Invalid email or password" });
+        }
+
+        if (syncVipFlagOnUser(user)) {
+            await user.save();
         }
 
         const token = generateToken(user._id);
@@ -286,10 +291,38 @@ router.put("/account/password", authenticate, async (req, res) => {
 router.get("/me", authenticate, async (req, res) => {
     try {
         const user = await User.findById(req.user._id);
+        if (syncVipFlagOnUser(user)) {
+            await user.save();
+        }
         res.json({ user: user.toJSON() });
     } catch (error) {
         console.error("Profile error:", error);
         res.status(500).json({ error: "Failed to fetch profile" });
+    }
+});
+
+router.put("/preferences/language", authenticate, async (req, res) => {
+    try {
+        const language = String(req.body?.language || "").toLowerCase();
+        if (!["en", "sw"].includes(language)) {
+            return res.status(400).json({ error: "Invalid language" });
+        }
+
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        user.preferredLanguage = language;
+        await user.save();
+
+        const serializedUser = user.toJSON();
+        emitToUser(user._id, "account_profile_updated", { user: serializedUser });
+
+        res.json({ success: true, user: serializedUser });
+    } catch (error) {
+        console.error("Update language preference error:", error);
+        res.status(500).json({ error: "Failed to update language preference" });
     }
 });
 
@@ -299,27 +332,43 @@ router.get("/me", authenticate, async (req, res) => {
  */
 router.post("/daily-claim", authenticate, async (req, res) => {
     try {
-        const user = await User.findById(req.user._id);
-
         // Daily reset window is 12:00 asubuhi (06:00 EAT) every day.
         const now = new Date();
         const currentWindowStart = getCurrentDailyClaimWindowStart(now);
         const nextResetAt = new Date(currentWindowStart.getTime() + 24 * 60 * 60 * 1000);
 
-        if (user.lastDailyClaim && new Date(user.lastDailyClaim) >= currentWindowStart) {
+        // Random 1-3 coins
+        const rewardCoins = Math.floor(Math.random() * 3) + 1;
+
+        const user = await User.findOneAndUpdate(
+            {
+                _id: req.user._id,
+                $or: [
+                    { lastDailyClaim: null },
+                    { lastDailyClaim: { $lt: currentWindowStart } }
+                ]
+            },
+            {
+                $inc: {
+                    dailyClaimCount: 1,
+                    coins: rewardCoins
+                },
+                $set: {
+                    lastDailyClaim: now
+                }
+            },
+            {
+                returnDocument: "after"
+            }
+        );
+
+        if (!user) {
             return res.status(400).json({
                 error: "Already claimed for this cycle. Come back after 12:00 asubuhi (06:00 EAT).",
                 nextClaimAt: nextResetAt.toISOString()
             });
         }
 
-        // Random 1-5 coins
-        let rewardCoins = Math.floor(Math.random() * 5) + 1;
-
-        user.dailyClaimCount += 1;
-        user.coins += rewardCoins;
-        user.lastDailyClaim = now;
-        await user.save();
         emitToUser(user._id, "balance_update", {
             coins: user.coins,
             delta: rewardCoins,

@@ -32,6 +32,8 @@ export const compatibility = async (sock, m, args) => {
 ║   💞 *ℂ𝕆𝕄ℙ𝔸𝕋𝕀𝔹𝕀𝕃𝕀𝕋𝕐* 💞            ║
 ╚══════════════════════════════════╝
 
+This command checks a fun love compatibility score between two names.
+
 *Usage:* ${p}compatibility <name1> & <name2>
 
 *Examples:*

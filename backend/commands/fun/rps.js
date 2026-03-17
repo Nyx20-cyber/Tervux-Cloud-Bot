@@ -24,6 +24,8 @@ export const rps = async (sock, m, args) => {
 ║   ✊ *ℝ𝕆ℂ𝕂 ℙ𝔸ℙ𝔼ℝ 𝕊ℂ𝕀𝕊𝕊𝕆ℝ𝕊* ✊    ║
 ╚══════════════════════════════════╝
 
+This command lets you play Rock Paper Scissors against the bot.
+
 *Usage:* ${p}rps <choice>
 
 🪨 *${p}rps rock*

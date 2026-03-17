@@ -484,7 +484,11 @@ function BillingContent() {
                         <Button onClick={handleCheckout} disabled={isProcessing} className="w-full h-12 sm:h-14 bg-primary text-black hover:bg-primary/90 font-black uppercase tracking-[0.16em] sm:tracking-[0.2em] text-[10px] sm:text-[11px] rounded-xl sm:rounded-2xl shadow-xl shadow-primary/20">
                             {isProcessing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {t.processing}</> : (paymentMarket === "international" ? t.billing_continue_to_card : t.pay_now)}
                         </Button>
-                        <Button variant="ghost" onClick={handleCancelPayment} className="w-full h-12 text-[10px] text-gray-500 font-bold uppercase tracking-widest hover:text-white hover:bg-white/5 rounded-xl">
+                        <Button
+                            variant="ghost"
+                            onClick={handleCancelPayment}
+                            className="w-full h-12 rounded-xl border border-red-500/25 bg-red-500/10 text-[10px] font-black uppercase tracking-[0.16em] text-red-300 shadow-[0_0_25px_rgba(239,68,68,0.10)] transition-all duration-200 hover:border-red-400/45 hover:bg-red-500/18 hover:text-red-100 hover:scale-[1.015] active:scale-[0.97] active:bg-red-500/25 motion-safe:animate-[pulse_2.4s_ease-in-out_infinite]"
+                        >
                             {isProcessing && activePaymentId ? t.cancel_payment : t.cancel}
                         </Button>
                     </div>

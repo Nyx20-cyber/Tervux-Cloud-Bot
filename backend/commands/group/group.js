@@ -112,6 +112,8 @@ export async function kick(sock, m, args) {
 ║  🦶 *𝕂𝕀ℂ𝕂 𝕄𝔼𝕄𝔹𝔼ℝ* 🦶  ║
 ╚══════════════════════════════════╝
 
+This command removes a member from the group.
+
 *Usage:* ${p}kick @user
 *Alt:* Reply to a message with ${p}kick`;
     }
@@ -145,6 +147,8 @@ export async function add(sock, m, args) {
         return `╔══════════════════════════════════╗
 ║  ➕ *𝔸𝔻𝔻 𝕄𝔼𝕄𝔹𝔼ℝ* ➕  ║
 ╚══════════════════════════════════╝
+
+This command adds a member to the group using their number.
 
 *Usage:* ${p}add 255712345678
 Include country code without + or spaces.`;
@@ -190,6 +194,8 @@ export async function promote(sock, m, args) {
 ║  👑 *ℙℝ𝕆𝕄𝕆𝕋𝔼 𝕋𝕆 𝔸𝔻𝕄𝕀ℕ* 👑  ║
 ╚══════════════════════════════════╝
 
+This command gives admin rights to a group member.
+
 *Usage:* ${p}promote @user
 *Alt:* Reply to a message with ${p}promote`;
     }
@@ -227,6 +233,8 @@ export async function demote(sock, m, args) {
         return `╔══════════════════════════════════╗
 ║  📉 *𝔻𝔼𝕄𝕆𝕋𝔼 𝔸𝔻𝕄𝕀ℕ* 📉  ║
 ╚══════════════════════════════════╝
+
+This command removes admin rights from a group member.
 
 *Usage:* ${p}demote @user
 *Alt:* Reply to a message with ${p}demote`;
@@ -520,7 +528,7 @@ export async function setgroupname(sock, m, args) {
     if (!newName) {
         const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
-        return `*Usage:* ${p}setgroupname <new name>`;
+        return `This command changes the group name.\n\n*Usage:* ${p}setgroupname <new name>`;
     }
 
     try {
@@ -549,7 +557,7 @@ export async function setdesc(sock, m, args) {
     if (!newDesc) {
         const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
-        return `*Usage:* ${p}setdesc <new description>`;
+        return `This command changes the group description.\n\n*Usage:* ${p}setdesc <new description>`;
     }
 
     try {
@@ -633,6 +641,8 @@ export async function setwelcome(sock, m, args) {
         return `╔══════════════════════════════════╗
 ║  ✏️ *𝕊𝔼𝕋 𝕎𝔼𝕃ℂ𝕆𝕄𝔼* ✏️  ║
 ╚══════════════════════════════════╝
+
+This command sets the custom message sent to new members when they join.
 
 *Usage:* ${p}setwelcome <your message>
 
@@ -734,6 +744,8 @@ export async function setgoodbye(sock, m, args) {
         return `╔══════════════════════════════════╗
 ║  ✏️ *𝕊𝔼𝕋 𝔾𝕆𝕆𝔻𝔹𝕐𝔼* ✏️  ║
 ╚══════════════════════════════════╝
+
+This command sets the custom message sent when members leave the group.
 
 *Usage:* ${p}setgoodbye <your message>
 
@@ -892,6 +904,8 @@ export async function poll(sock, m, args) {
 ║  📊 *ℂℝ𝔼𝔸𝕋𝔼 ℙ𝕆𝕃𝕃* 📊  ║
 ╚══════════════════════════════════╝
 
+This command creates a WhatsApp poll in the group.
+
 *Usage:* ${p}poll Question | Option1 | Option2 | ...
 
 *Example:*
@@ -943,6 +957,8 @@ export async function warn(sock, m, args) {
         return `╔══════════════════════════════════╗
 ║  ⚠️ *𝕎𝔸ℝℕ 𝕌𝕊𝔼ℝ* ⚠️  ║
 ╚══════════════════════════════════╝
+
+This command warns a member, and 3 warnings can lead to an automatic kick.
 
 *Usage:* ${p}warn @user
 *Alt:* Reply to a message with ${p}warn
@@ -998,7 +1014,7 @@ export async function resetwarn(sock, m, args) {
     if (!target) {
         const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
-        return `*Usage:* ${p}resetwarn @user`;
+        return `This command clears all warnings for a member.\n\n*Usage:* ${p}resetwarn @user`;
     }
 
     const key = `${remoteJid}_${target}`;
@@ -1030,7 +1046,7 @@ export async function botToggle(sock, m, args) {
         return `📴 *Bot Disabled:* Tervux will no longer respond to commands in this group (except ${p}bot on).`;
     }
 
-    return `*Status:* ${settings.botEnabled ? "✅ Active" : "📴 Inactive"}\n\n*Usage:* ${p}bot on/off`;
+    return `*Status:* ${settings.botEnabled ? "✅ Active" : "📴 Inactive"}\n\nThis command turns bot replies on or off in the group.\n\n*Usage:* ${p}bot on/off`;
 }
 
 /**
@@ -1040,13 +1056,17 @@ export async function rejoin(sock, m, args) {
     const targetJid = args[0];
 
     if (!targetJid) {
+        const config = await getCachedConfig(sock.sessionId);
+        const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  🔄 *ℝ𝔼𝕁𝕆𝕀ℕ 𝔾ℝ𝕆𝕌ℙ* 🔄  ║
 ╚════════════════════╚════════════╝
 
-*Usage:* !rejoin <group_id>
+This command makes the bot rejoin a group using a previously saved invite code.
 
-*How to find ID:* Check the bot logs or use !groupinfo while in the group.`;
+*Usage:* ${p}rejoin <group_id>
+
+*How to find ID:* Check the bot logs or use ${p}groupinfo while in the group.`;
     }
 
     const inviteCode = await getInviteCode(sock.sessionId, targetJid);
@@ -1153,7 +1173,7 @@ export async function antifake(sock, m, args) {
     }
 
     const config = await getCachedConfig(sock.sessionId);
-    return `*Antifake Status:* ${settings.antifake?.enabled ? "✅ On" : "❌ Off"}\n\n*Usage:* ${config.prefix || "!" }antifake on/off`;
+    return `*Antifake Status:* ${settings.antifake?.enabled ? "✅ On" : "❌ Off"}\n\nThis command blocks non-Tanzanian numbers from joining the group automatically.\n\n*Usage:* ${(config.prefix || "!")}antifake on/off`;
 }
 
 /**
@@ -1181,7 +1201,7 @@ export async function autosticker(sock, m, args) {
     }
 
     const config = await getCachedConfig(sock.sessionId);
-    return `*Autosticker Status:* ${settings.autosticker?.enabled ? "✅ On" : "❌ Off"}\n\n*Usage:* ${config.prefix || "!" }autosticker on/off`;
+    return `*Autosticker Status:* ${settings.autosticker?.enabled ? "✅ On" : "❌ Off"}\n\nThis command automatically turns new images sent in the group into stickers.\n\n*Usage:* ${(config.prefix || "!")}autosticker on/off`;
 }
 
 /**
@@ -1222,6 +1242,8 @@ export async function badword(sock, m, args) {
     return `╔══════════════════════════════════╗
 ║  🚫 *𝔹𝔸𝔻 𝕎𝕆ℝ𝔻 𝕄𝔸ℕ𝔸𝔾𝔼ℝ* 🚫  ║
 ╚══════════════════════════════════╝
+
+This command lets admins add, remove, or list forbidden words in the group.
 
 *Usage:*
 • ${p}badword add <word>
@@ -1343,7 +1365,11 @@ export async function grouplock(sock, m, args) {
         return `🔓 *𝔾ℝ𝕆𝕌ℙ 𝕌ℕ𝕃𝕆ℂ𝕂𝔼𝔻*`;
     }
 
-    if (isNaN(minutes)) return `⚠️ Invalid duration. Example: !grouplock 1h or !grouplock 30m`;
+    if (isNaN(minutes)) {
+        const config = await getCachedConfig(sock.sessionId);
+        const p = config.prefix || "!";
+        return `⚠️ This command locks the group for non-admins for a chosen time.\n\nInvalid duration. Example: ${p}grouplock 1h or ${p}grouplock 30m`;
+    }
 
     const until = new Date(Date.now() + minutes * 60000);
     const settings = await loadGroupSettings(sock.sessionId, remoteJid);

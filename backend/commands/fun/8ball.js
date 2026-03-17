@@ -12,6 +12,8 @@ export const eightball = async (sock, m, args) => {
 
 ❓ Ask me a yes/no question!
 
+This command gives a random yes/no style answer to your question.
+
 *Usage:* ${p}8ball Will I pass my exams?`;
     }
 

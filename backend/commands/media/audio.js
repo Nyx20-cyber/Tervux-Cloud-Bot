@@ -3,18 +3,21 @@ import fs from "fs";
 import path from "path";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { promisify } from "util";
+import { getCachedConfig } from "../../services/configService.js";
 
 const execPromise = promisify(exec);
 
 // Helper to process audio with ffmpeg
 async function processAudio(sock, m, filter) {
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
     const remoteJid = m.key.remoteJid;
     const quoted = m.message.extendedTextMessage?.contextInfo?.quotedMessage || m.message;
     
     // Check if it's audio
     const isAudio = !!quoted.audioMessage;
     if (!isAudio) {
-        return "⚠️ Please reply to an audio or voice note to apply this effect.";
+        return `⚠️ This command changes the sound of a replied audio or voice note.\n\nReply to an audio or voice note, then use an effect command.\n\n*Example:* ${p}bass`;
     }
 
     try {

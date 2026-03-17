@@ -17,6 +17,7 @@ import { extractFastLipaFields, settleCompletedPayment, settleFailedPayment } fr
 import { checkOrderStatus, extractBongoPayOrderStatus } from "../services/bongopayService.js";
 import { extractYoutubeVideoId, sanitize } from "./tutorials.js";
 import mongoose from "mongoose";
+import { shouldHaveVip } from "../services/gamificationService.js";
 
 const router = Router();
 
@@ -83,7 +84,15 @@ router.get("/users", authenticate, requireAdmin, async (req, res) => {
             User.countDocuments()
         ]);
 
-        const usersData = users.map((u) => u.toJSON());
+        const usersData = users.map((u) => {
+            const serialized = u.toJSON();
+            serialized.isVIP = shouldHaveVip({
+                totalDeployments: serialized.totalDeployments,
+                totalCoinsSpent: serialized.totalCoinsSpent,
+                totalReferrals: serialized.totalReferrals
+            });
+            return serialized;
+        });
         const userIds = usersData.map((u) => u._id);
         const recentPayments = await Payment.find({ userId: { $in: userIds }, payerPhone: { $ne: "" } })
             .select("userId payerPhone createdAt")
