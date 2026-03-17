@@ -2,18 +2,29 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ShieldCheck, CircleDollarSign, AlertTriangle, Users, LayoutDashboard, Activity, Settings2, Network, GraduationCap, SlidersHorizontal, CircleHelp, HandCoins, ReceiptText } from "lucide-react";
+import { ShieldCheck, CircleDollarSign, AlertTriangle, Users, LayoutDashboard, Activity, Settings2, Network, GraduationCap, SlidersHorizontal, CircleHelp, HandCoins, ReceiptText, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLocaleStore } from "@/store/useLocaleStore";
+import { usePWAStore } from "@/store/usePWAStore";
 import { translations } from "@/lib/translations";
 
 export function Sidebar({ isMobile }: { isMobile?: boolean }) {
     const pathname = usePathname();
     const { user } = useAuthStore();
     const { language } = useLocaleStore();
+    const { isInstallable, deferredPrompt, clearDeferredPrompt } = usePWAStore();
     const t = translations[language];
     const compact = !!isMobile;
+
+    const handleInstallClick = async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            clearDeferredPrompt();
+        }
+    };
 
     const links = [
         { href: '/dashboard', label: t.dashboard, icon: LayoutDashboard },
@@ -64,6 +75,19 @@ export function Sidebar({ isMobile }: { isMobile?: boolean }) {
                         </Link>
                     )
                 })}
+
+                {isInstallable && (
+                    <button
+                        onClick={handleInstallClick}
+                        className={cn(
+                            "flex w-full items-center gap-3 rounded-2xl transition-all duration-300 group border bg-gradient-to-r from-primary/20 to-transparent border-primary/20 text-primary hover:bg-primary/30",
+                            compact ? "px-2.5 py-2" : "px-4 py-3"
+                        )}
+                    >
+                        <Download className={cn(compact ? "w-3.5 h-3.5 shrink-0" : "w-4 h-4")} />
+                        <span className={cn("font-black uppercase tracking-widest leading-tight", compact ? "text-[8px]" : "text-[10px]")}>{t.install_app}</span>
+                    </button>
+                )}
             </nav>
 
             <div className={cn("mt-auto shrink-0", compact ? "px-2.5 py-2.5" : "p-4")}>

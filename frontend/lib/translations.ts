@@ -38,6 +38,7 @@ export const translations = {
         securely_connected: "Securely connected",
         service_status: "Service Status",
         online: "ONLINE",
+        install_app: "Install App",
 
         // Admin
         system_management: "System management · Analytics · User control",
@@ -884,6 +885,7 @@ export const translations = {
         securely_connected: "Imeunganishwa salama",
         service_status: "Hali ya huduma",
         online: "IPO",
+        install_app: "Pakua App",
 
         // Admin
         system_management: "Usimamizi wa mfumo · Analytics · Udhibiti",
