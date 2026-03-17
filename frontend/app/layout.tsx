@@ -1,4 +1,4 @@
-import type { Metadata, Viewport } from "next";
+import type { Metadata } from "next";
 import { Outfit } from "next/font/google";
 import "./globals.css";
 import ParticlesBackground from "@/components/ParticlesBackground";
@@ -27,10 +27,6 @@ export const metadata: Metadata = {
     icon: "/icons/icon-192x192.png",
     apple: "/icons/icon-192x192.png",
   },
-};
-
-export const viewport: Viewport = {
-  themeColor: "#0a933c",
 };
 
 import PWARegistration from "@/components/PWARegistration";

@@ -1,5 +1,5 @@
-const CACHE_NAME = "tervux-cache-v2";
-const URLS_TO_CACHE = [
+const CACHE_NAME = "tervux-cache-v4";
+const APP_SHELL_CACHE = [
   "/",
   "/manifest.json",
   "/icons/icon-192x192.png",
@@ -7,31 +7,66 @@ const URLS_TO_CACHE = [
 ];
 
 self.addEventListener("install", (event) => {
+  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(URLS_TO_CACHE))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL_CACHE))
   );
 });
 
 self.addEventListener("activate", (event) => {
-  const cacheWhitelist = [CACHE_NAME];
-  event.waitUntil(
-    caches.keys().then((cacheNames) => Promise.all(
+  event.waitUntil((async () => {
+    const cacheNames = await caches.keys();
+    await Promise.all(
       cacheNames.map((cacheName) => {
-        if (!cacheWhitelist.includes(cacheName)) {
+        if (cacheName !== CACHE_NAME) {
           return caches.delete(cacheName);
         }
         return undefined;
       })
-    ))
-  );
+    );
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener("fetch", (event) => {
-  event.respondWith(
-    caches.match(event.request)
-      .then((response) => response || fetch(event.request))
-  );
+  const { request } = event;
+  const url = new URL(request.url);
+
+  if (request.method !== "GET") {
+    return;
+  }
+
+  // Always prefer fresh HTML/app routes so installed PWA doesn't stay stuck on old builds.
+  if (request.mode === "navigate") {
+    event.respondWith((async () => {
+      try {
+        const networkResponse = await fetch(request);
+        const cache = await caches.open(CACHE_NAME);
+        cache.put(request, networkResponse.clone());
+        return networkResponse;
+      } catch {
+        const cachedResponse = await caches.match(request);
+        return cachedResponse || caches.match("/");
+      }
+    })());
+    return;
+  }
+
+  // Cache-first for same-origin static assets, with background refresh.
+  if (url.origin === self.location.origin) {
+    event.respondWith((async () => {
+      const cachedResponse = await caches.match(request);
+      const fetchPromise = fetch(request)
+        .then(async (networkResponse) => {
+          const cache = await caches.open(CACHE_NAME);
+          cache.put(request, networkResponse.clone());
+          return networkResponse;
+        })
+        .catch(() => cachedResponse);
+
+      return cachedResponse || fetchPromise;
+    })());
+  }
 });
 
 self.addEventListener("push", (event) => {
