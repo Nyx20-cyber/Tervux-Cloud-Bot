@@ -75,13 +75,25 @@ router.get("/users", authenticate, requireAdmin, async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const skip = (page - 1) * limit;
+        const search = String(req.query.search || "").trim();
+
+        const query = {};
+        if (search) {
+            const conditions = [
+                { name: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } },
+                { phone: { $regex: search, $options: "i" } },
+                { role: { $regex: search, $options: "i" } }
+            ];
+            query.$or = conditions;
+        }
 
         const [users, total] = await Promise.all([
-            User.find()
+            User.find(query)
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit),
-            User.countDocuments()
+            User.countDocuments(query)
         ]);
 
         const usersData = users.map((u) => {

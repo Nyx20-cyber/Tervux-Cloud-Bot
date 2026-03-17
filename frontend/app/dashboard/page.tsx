@@ -47,7 +47,7 @@ export default function DashboardPage() {
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [isStatsLoading, setIsStatsLoading] = useState(true);
     const isMaintenanceError = (err: any) => err?.response?.status === 503 && err?.response?.data?.maintenance;
-    const isAuthError = (err: any) => err?.response?.status === 401 || err?.response?.status === 403;
+    const isAuthError = (err: any) => err?.response?.status === 401;
 
     useEffect(() => {
         if (!token || !user) return;

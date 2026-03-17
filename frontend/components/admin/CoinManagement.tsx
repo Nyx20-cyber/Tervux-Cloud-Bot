@@ -37,10 +37,16 @@ export function CoinManagement() {
     const [sendingBonus, setSendingBonus] = useState(false);
     const [bonusResult, setBonusResult] = useState<{ usersRewarded: number; totalCoinsDistributed: number } | null>(null);
 
-    const fetchUsers = useCallback(async () => {
+    const fetchUsers = useCallback(async (searchTerm = "") => {
         setIsLoading(true);
         try {
-            const res = await api.get("/admin/users?limit=100");
+            const params = new URLSearchParams({ limit: "100" });
+            const trimmedSearch = searchTerm.trim();
+            if (trimmedSearch) {
+                params.set("search", trimmedSearch);
+            }
+
+            const res = await api.get(`/admin/users?${params.toString()}`);
             setUsers(res.data.users);
         } catch (err) {
             console.error(err);
@@ -49,13 +55,17 @@ export function CoinManagement() {
         }
     }, []);
 
-    useEffect(() => { fetchUsers(); }, [fetchUsers]);
+    useEffect(() => {
+        const timeoutId = window.setTimeout(() => {
+            fetchUsers(search);
+        }, 200);
 
-    const filteredUsers = users.filter(u =>
-        u.email.toLowerCase().includes(search.toLowerCase()) ||
-        u.name.toLowerCase().includes(search.toLowerCase()) ||
-        u.phone.includes(search)
-    );
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [fetchUsers, search]);
+
+    const filteredUsers = users;
 
     const handleSubmit = async () => {
         if (!selectedUser || amount <= 0) {
@@ -103,7 +113,7 @@ export function CoinManagement() {
             setBonusReason("");
             setBonusMessage("");
             toast.success(`✅ ${res.data.usersRewarded} ${t.users} ${t.admin_received} +${amt} ${t.coins_word}!`);
-            fetchUsers();
+            fetchUsers(search);
         } catch (err: any) {
             toast.error(err.response?.data?.error || t.admin_failed_distribute_bonus);
         } finally {

@@ -1,3 +1,4 @@
+import "../env.js";
 import webpush from "web-push";
 import User from "../models/User.js";
 
@@ -39,11 +40,24 @@ export async function savePushSubscription(userId, subscription, userAgent = "")
     };
 
     const existingIndex = (user.pushSubscriptions || []).findIndex((item) => item.endpoint === normalized.endpoint);
+    let isNewSubscription = false;
+    let didChange = false;
+
     if (existingIndex >= 0) {
-        user.pushSubscriptions[existingIndex].keys = normalized.keys;
-        user.pushSubscriptions[existingIndex].userAgent = normalized.userAgent;
-        user.pushSubscriptions[existingIndex].updatedAt = normalized.updatedAt;
+        const existing = user.pushSubscriptions[existingIndex];
+        didChange =
+            existing.keys?.p256dh !== normalized.keys.p256dh ||
+            existing.keys?.auth !== normalized.keys.auth ||
+            existing.userAgent !== normalized.userAgent;
+
+        if (didChange) {
+            user.pushSubscriptions[existingIndex].keys = normalized.keys;
+            user.pushSubscriptions[existingIndex].userAgent = normalized.userAgent;
+            user.pushSubscriptions[existingIndex].updatedAt = normalized.updatedAt;
+        }
     } else {
+        isNewSubscription = true;
+        didChange = true;
         user.pushSubscriptions.push({
             ...normalized,
             createdAt: new Date()
@@ -51,7 +65,12 @@ export async function savePushSubscription(userId, subscription, userAgent = "")
     }
 
     await user.save();
-    return user.pushSubscriptions.length;
+    console.log(`🔔 [Push] Saved subscription for user ${userId}. Total subscriptions: ${user.pushSubscriptions.length}`);
+    return {
+        total: user.pushSubscriptions.length,
+        isNewSubscription,
+        didChange
+    };
 }
 
 export async function removePushSubscription(userId, endpoint) {
@@ -72,11 +91,13 @@ async function removeExpiredSubscription(endpoint) {
 
 export async function sendPushToUser(userId, payload) {
     if (!isConfigured) {
+        console.warn(`🔕 [Push] Skipped send for user ${userId}: web push not configured.`);
         return { sent: 0, failed: 0, skipped: true, reason: "web_push_not_configured" };
     }
 
     const user = await User.findById(userId).select("pushSubscriptions");
     if (!user?.pushSubscriptions?.length) {
+        console.warn(`🔕 [Push] Skipped send for user ${userId}: no subscriptions saved.`);
         return { sent: 0, failed: 0, skipped: true, reason: "no_subscriptions" };
     }
 
@@ -118,5 +139,6 @@ export async function sendPushToUser(userId, payload) {
         }
     }
 
+    console.log(`🔔 [Push] Send result for user ${userId}: sent=${sent}, failed=${failed}, subscriptions=${user.pushSubscriptions.length}`);
     return { sent, failed, skipped: false };
 }

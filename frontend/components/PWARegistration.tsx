@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { BellRing, CheckCircle2, Smartphone } from "lucide-react";
+import { toast } from "sonner";
 import { usePWAStore } from "@/store/usePWAStore";
 import { api, useAuthStore } from "@/store/useAuthStore";
 import { useLocaleStore } from "@/store/useLocaleStore";
@@ -15,7 +16,26 @@ function urlBase64ToUint8Array(base64String: string) {
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
 }
 
+function uint8ArraysEqual(a: Uint8Array | null, b: Uint8Array) {
+  if (!a || a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
+}
+
+async function ensureServiceWorkerRegistration() {
+  const existingRegistration = await navigator.serviceWorker.getRegistration();
+  if (existingRegistration) {
+    return existingRegistration;
+  }
+
+  const newRegistration = await navigator.serviceWorker.register("/sw.js");
+  return newRegistration;
+}
+
 type PermissionState = NotificationPermission | "unsupported" | "unknown";
+const IS_DEV = process.env.NODE_ENV !== "production";
 
 export default function PWARegistration() {
   const setDeferredPrompt = usePWAStore((state) => state.setDeferredPrompt);
@@ -47,6 +67,9 @@ export default function PWARegistration() {
         deniedButton: "Nimeshawasha, Angalia Tena",
         cancel: "Ghairi",
         alertsLabel: "Tervux Alerts",
+        enabledToast: "Notifications zimewashwa kwenye kifaa hiki.",
+        delayedToast: "Subscription imehifadhiwa, lakini browser haijaonyesha test notification bado.",
+        failedToast: "Imeshindwa kuwasha push notifications kwenye kifaa hiki.",
       };
     }
 
@@ -66,6 +89,9 @@ export default function PWARegistration() {
       deniedButton: "I Enabled Them, Check Again",
       cancel: "Cancel",
       alertsLabel: "Tervux Alerts",
+      enabledToast: "Notifications are now enabled on this device.",
+      delayedToast: "Your subscription was saved, but the browser did not show the test notification yet.",
+      failedToast: "Failed to enable push notifications on this device.",
     };
   }, [language]);
 
@@ -100,6 +126,13 @@ export default function PWARegistration() {
 
   useEffect(() => {
     if (!hasHydrated || !isAuthenticated || !user?._id) {
+      if (IS_DEV) {
+        console.info("[Push][PWA] Waiting for authenticated user.", {
+          hasHydrated,
+          isAuthenticated,
+          userId: user?._id || null,
+        });
+      }
       setShowPushModal(false);
       return;
     }
@@ -107,15 +140,57 @@ export default function PWARegistration() {
     if (typeof window === "undefined") return;
 
     if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      if (IS_DEV) {
+        console.warn("[Push][PWA] Browser does not support web push APIs on this origin.");
+      }
       setPermissionState("unsupported");
       setShowPushModal(false);
       return;
     }
 
     const currentPermission = Notification.permission;
+    if (IS_DEV) {
+      console.info("[Push][PWA] Permission state detected.", {
+        permission: currentPermission,
+        origin: window.location.origin,
+      });
+    }
     setPermissionState(currentPermission);
     setShowPushModal(currentPermission !== "granted");
   }, [isAuthenticated, hasHydrated, user?._id]);
+
+  useEffect(() => {
+    if (!IS_DEV) return;
+    if (!hasHydrated || !isAuthenticated || !user?._id) return;
+    if (typeof window === "undefined") return;
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return;
+
+    let cancelled = false;
+
+    const runDiagnosticPing = async () => {
+      try {
+        await ensureServiceWorkerRegistration();
+        const res = await api.get("/notifications/push/public-key");
+        if (!cancelled) {
+          console.info("[Push][PWA] Diagnostic ping reached backend.", {
+            hasPublicKey: Boolean(res.data?.publicKey),
+            permission: Notification.permission,
+            origin: window.location.origin,
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("[Push][PWA] Diagnostic ping failed.", error);
+        }
+      }
+    };
+
+    runDiagnosticPing();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasHydrated, isAuthenticated, user?._id]);
 
   useEffect(() => {
     if (!hasHydrated || !isAuthenticated) return;
@@ -127,32 +202,78 @@ export default function PWARegistration() {
 
     const registerPush = async () => {
       try {
-        const registration = await navigator.serviceWorker.ready;
+        if (IS_DEV) {
+          console.info("[Push][PWA] Starting push registration.", {
+            origin: window.location.origin,
+            permissionState,
+          });
+        }
+        const registration = await ensureServiceWorkerRegistration();
+        await navigator.serviceWorker.ready;
+        const keyRes = await api.get("/notifications/push/public-key");
+        const publicKey = keyRes.data.publicKey;
+        const serverKey = urlBase64ToUint8Array(publicKey);
+        if (IS_DEV) {
+          console.info("[Push][PWA] Received public key from backend.");
+        }
+
         let subscription = await registration.pushManager.getSubscription();
+        const currentKey = subscription?.options?.applicationServerKey
+          ? new Uint8Array(subscription.options.applicationServerKey)
+          : null;
+
+        if (subscription && !uint8ArraysEqual(currentKey, serverKey)) {
+          await subscription.unsubscribe();
+          subscription = null;
+        }
 
         if (!subscription) {
-          const res = await api.get("/notifications/push/public-key");
-          const publicKey = res.data.publicKey;
           subscription = await registration.pushManager.subscribe({
             userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(publicKey)
+            applicationServerKey: serverKey
           });
         }
 
         if (!cancelled && subscription) {
-          await api.post("/notifications/push/subscribe", {
+          let subscribeRes = await api.post("/notifications/push/subscribe", {
             subscription: subscription.toJSON()
           });
+          if (IS_DEV) {
+            console.info("[Push][PWA] Subscription saved on backend.", subscribeRes.data);
+          }
+
+          const testResult = subscribeRes.data?.testResult;
+          if ((testResult?.sent || 0) === 0 && !cancelled) {
+            await subscription.unsubscribe();
+            subscription = await registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: serverKey
+            });
+
+            subscribeRes = await api.post("/notifications/push/subscribe", {
+              subscription: subscription.toJSON()
+            });
+          }
+
+          const finalResult = subscribeRes.data?.testResult;
+          if ((finalResult?.sent || 0) > 0) {
+            toast.success(copy.enabledToast);
+          } else if (!cancelled) {
+            toast.message(copy.delayedToast);
+          }
         }
       } catch (error) {
         const status = (error as { response?: { status?: number } })?.response?.status;
         if (status === 503) {
-          if (process.env.NODE_ENV !== "production") {
+          if (IS_DEV) {
             console.warn("Web push backend is not ready yet. Skipping push subscription for now.");
           }
           return;
         }
         console.error("Push registration failed:", error);
+        if (!cancelled) {
+          toast.error(copy.failedToast);
+        }
       }
     };
 
@@ -161,7 +282,7 @@ export default function PWARegistration() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, hasHydrated, permissionState]);
+  }, [isAuthenticated, hasHydrated, permissionState, copy.enabledToast, copy.delayedToast, copy.failedToast]);
 
   useEffect(() => {
     if (!hasHydrated || !isAuthenticated || !user?._id) return;

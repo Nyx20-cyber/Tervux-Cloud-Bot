@@ -14,6 +14,30 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error?.response?.status;
+    const requestUrl = String(error?.config?.url || "");
+    const isAuthRoute =
+      requestUrl.includes("/auth/login") ||
+      requestUrl.includes("/auth/register") ||
+      requestUrl.includes("/auth/logout");
+
+    // When JWT expires, silently log the user out and redirect to login from
+    // any page without letting each screen raise its own error toast.
+    if (typeof window !== "undefined" && status === 401 && !isAuthRoute) {
+      const { token, isAuthenticated, forceLocalLogout } = useAuthStore.getState();
+      if (token || isAuthenticated) {
+        forceLocalLogout();
+      }
+      return new Promise(() => {});
+    }
+
+    return Promise.reject(error);
+  }
+);
+
 export interface User {
   _id: string;
   email: string;
@@ -109,8 +133,20 @@ export const useAuthStore = create<AuthState>()(
             return;
           }
 
-          console.error("Auth check failed:", error);
-          set({ isAuthenticated: false, user: null, token: null });
+          // Only clear the session on definitive auth failures.
+          if (status === 401 || status === 403) {
+            console.error("Auth check failed with definitive auth status:", error);
+            set({ isAuthenticated: false, user: null, token: null });
+            return;
+          }
+
+          // Keep the local session on transient/network/server errors to avoid
+          // forcing users to log in again while the backend or connection recovers.
+          console.error("Auth check failed temporarily; keeping local session:", error);
+          set((state) => ({
+            ...state,
+            isAuthenticated: !!state.token
+          }));
         }
       },
     }),

@@ -44,7 +44,7 @@ export function NotificationBell() {
             setNotifications(res.data.notifications);
             setUnreadCount(res.data.notifications.filter((n: Notification) => !n.isRead).length);
         } catch (error: any) {
-            if (error?.response?.status === 401 || error?.response?.status === 403) {
+            if (error?.response?.status === 401) {
                 forceLocalLogout();
                 return;
             }

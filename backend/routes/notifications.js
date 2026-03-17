@@ -94,6 +94,7 @@ router.get("/push/public-key", authenticate, async (req, res) => {
     if (!isWebPushConfigured()) {
         return res.status(503).json({ error: "Web push is not configured" });
     }
+    console.log(`🔔 [Push] Public key requested by user ${req.user._id}`);
     res.json({ publicKey: getWebPushPublicKey() });
 });
 
@@ -103,8 +104,20 @@ router.post("/push/subscribe", authenticate, async (req, res) => {
             return res.status(503).json({ error: "Web push is not configured" });
         }
         const { subscription } = req.body;
-        const count = await savePushSubscription(req.user._id, subscription, req.headers["user-agent"] || "");
-        res.json({ success: true, subscriptions: count });
+        const saveResult = await savePushSubscription(req.user._id, subscription, req.headers["user-agent"] || "");
+        let testResult = { sent: 0, failed: 0, skipped: true, reason: "unchanged_subscription" };
+
+        if (saveResult.didChange) {
+            testResult = await sendPushToUser(req.user._id, {
+                title: "Tervux Notifications Enabled",
+                body: "Push notifications are now active on this device.",
+                url: `${process.env.FRONTEND_URL || "https://bot.tervux.com"}/dashboard/notifications`,
+                tag: "push-enabled-test"
+            });
+        }
+
+        console.log(`🔔 [Push] Subscribe route completed for user ${req.user._id}: subscriptions=${saveResult.total}, isNew=${saveResult.isNewSubscription}, changed=${saveResult.didChange}, testSent=${testResult.sent}, testFailed=${testResult.failed}, skipped=${Boolean(testResult.skipped)}`);
+        res.json({ success: true, subscriptions: saveResult.total, subscriptionChanged: saveResult.didChange, testResult });
     } catch (error) {
         console.error("Save push subscription error:", error);
         res.status(400).json({ error: error.message || "Failed to save push subscription" });
@@ -130,6 +143,7 @@ router.post("/push/test", authenticate, async (req, res) => {
             url: `${process.env.FRONTEND_URL || "https://bot.tervux.com"}/dashboard/deployments`,
             tag: "push-test"
         });
+        console.log(`🔔 [Push] Manual test for user ${req.user._id}: sent=${result.sent}, failed=${result.failed}, skipped=${Boolean(result.skipped)}`);
         res.json({ success: true, result });
     } catch (error) {
         console.error("Test push error:", error);
