@@ -10,12 +10,19 @@ import { useEffect } from "react";
 export default function PWARegistration() {
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
+      const registerSW = () => {
         navigator.serviceWorker
           .register("/sw.js")
           .then((reg) => console.log("SW registered:", reg))
-          .catch((err) => console.log("SW error:", err));
-      });
+          .catch((err) => console.error("SW error:", err));
+      };
+
+      if (document.readyState === "complete") {
+        registerSW();
+      } else {
+        window.addEventListener("load", registerSW);
+        return () => window.removeEventListener("load", registerSW);
+      }
     }
   }, []);
 

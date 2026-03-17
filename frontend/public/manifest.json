@@ -3,21 +3,49 @@
   "short_name": "Tervux-Bot",
   "description": "Premium WhatsApp Cloud Bot management dashboard.",
   "start_url": "/",
+  "id": "/",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#1a73e8",
   "icons": [
     {
       "src": "/icons/icon-192x192.png",
-      "sizes": "192x192",
+      "sizes": "640x640",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "640x640",
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "/icons/icon-512x512.png",
-      "sizes": "512x512",
+      "sizes": "640x640",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "640x640",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/desktop.png",
+      "sizes": "640x640",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Tervux Desktop Dashboard"
+    },
+    {
+      "src": "/screenshots/mobile.png",
+      "sizes": "640x640",
+      "type": "image/png",
+      "label": "Tervux Mobile View"
     }
   ]
 }
