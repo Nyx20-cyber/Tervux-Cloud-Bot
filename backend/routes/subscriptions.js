@@ -331,17 +331,10 @@ router.post("/checkout", authenticate, async (req, res) => {
 router.post("/checkout/card", authenticate, async (req, res) => {
     try {
         const { planSlug, buyerPhone } = req.body;
-        const rawBuyerPhone = String(buyerPhone || "").trim();
         const normalizedPhone = normalizeBongoPayPhone(buyerPhone);
 
         if (!planSlug || !normalizedPhone) {
             return res.status(400).json({ error: "planSlug and buyerPhone are required" });
-        }
-
-        if (!/^\+[1-9]\d{11}$/.test(rawBuyerPhone)) {
-            return res.status(400).json({
-                error: "Please enter a valid international phone number with country code. It should be 12 digits long."
-            });
         }
 
         if (!/^\d{12}$/.test(normalizedPhone)) {

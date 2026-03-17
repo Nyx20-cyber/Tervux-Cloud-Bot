@@ -46,10 +46,9 @@ function BillingContent() {
         ? [...plans].sort((a, b) => (b.coinsAmount / Math.max(b.price, 1)) - (a.coinsAmount / Math.max(a.price, 1)))[0]?._id
         : null;
 
-    const isValidInternationalPhone = (value: string) => /^\+[1-9]\d{11}$/.test(value.trim());
+    const isValidInternationalPhone = (value: string) => /^[1-9]\d{11}$/.test(value.trim());
     const formatInternationalPhoneInput = (value: string) => {
-        const digits = value.replace(/\D/g, "").slice(0, 12);
-        return digits ? `+${digits}` : "";
+        return value.replace(/\D/g, "").slice(0, 12);
     };
     const normalizeTanzaniaPhoneInput = (value: string) => {
         const digits = value.replace(/\D/g, "");
@@ -201,7 +200,7 @@ function BillingContent() {
             if (paymentMarket === "international") {
                 const res = await api.post("/subscription/checkout/card", {
                     planSlug: selectedPlan.slug,
-                    buyerPhone: rawPhone
+                    buyerPhone: normalizedPhone
                 });
 
                 if (res.data?.paymentUrl) {

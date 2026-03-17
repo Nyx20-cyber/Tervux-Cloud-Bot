@@ -45,6 +45,8 @@ export default function PWARegistration() {
           "Messages za lugha unayopendelea",
         ],
         deniedButton: "Nimeshawasha, Angalia Tena",
+        cancel: "Ghairi",
+        alertsLabel: "Tervux Alerts",
       };
     }
 
@@ -62,6 +64,8 @@ export default function PWARegistration() {
         "Messages in your preferred language",
       ],
       deniedButton: "I Enabled Them, Check Again",
+      cancel: "Cancel",
+      alertsLabel: "Tervux Alerts",
     };
   }, [language]);
 
@@ -216,6 +220,10 @@ export default function PWARegistration() {
     }
   };
 
+  const handleDismissForNow = () => {
+    setShowPushModal(false);
+  };
+
   if (!isAuthenticated || !hasHydrated || permissionState === "unsupported") {
     return null;
   }
@@ -225,17 +233,17 @@ export default function PWARegistration() {
       <Dialog open={showPushModal} onOpenChange={() => {}}>
         <DialogContent
           showCloseButton={false}
-          className="w-[calc(100vw-1rem)] max-w-md max-h-[90vh] rounded-[1.75rem] sm:rounded-[2rem] border-white/10 bg-[#07111b]/95 text-white backdrop-blur-3xl p-0 overflow-hidden"
+          className="w-[calc(100vw-1rem)] max-w-md max-h-[90vh] rounded-[1.75rem] sm:rounded-[2rem] border-white/10 bg-[#0d1117]/95 text-white backdrop-blur-3xl p-0 overflow-hidden shadow-2xl shadow-black/40"
         >
           <div className="relative">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(26,115,232,0.25),_transparent_60%)]" />
-            <div className="absolute right-6 top-6 h-20 w-20 rounded-full bg-primary/20 blur-2xl animate-pulse" />
-            <div className="absolute left-8 top-20 h-14 w-14 rounded-full bg-cyan-400/15 blur-xl animate-pulse" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.08),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(26,115,232,0.16),_transparent_42%)]" />
+            <div className="absolute right-6 top-6 h-20 w-20 rounded-full bg-primary/15 blur-2xl animate-pulse" />
+            <div className="absolute left-8 top-20 h-14 w-14 rounded-full bg-white/10 blur-xl animate-pulse" />
 
             <div className="relative max-h-[90vh] overflow-y-auto px-4 pb-4 pt-5 sm:px-6 sm:pb-6 sm:pt-6 custom-scrollbar">
               <DialogHeader className="space-y-4 text-left">
                 <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
-                  <div className="flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-2xl border border-primary/30 bg-primary/15 text-primary shadow-[0_0_35px_rgba(26,115,232,0.2)]">
+                  <div className="flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary shadow-[0_0_35px_rgba(26,115,232,0.14)]">
                     <BellRing className="h-6 w-6 sm:h-7 sm:w-7 animate-pulse" />
                   </div>
                   <div className="min-w-0">
@@ -252,7 +260,7 @@ export default function PWARegistration() {
               <div className="mt-4 sm:mt-5 rounded-[1.5rem] border border-white/10 bg-white/5 p-3.5 sm:p-4">
                 <div className="mb-3 flex items-center gap-2 text-xs sm:text-sm font-bold uppercase tracking-[0.18em] sm:tracking-[0.2em] text-primary">
                   <Smartphone className="h-4 w-4" />
-                  {permissionState === "granted" ? copy.grantedTitle : "Tervux Alerts"}
+                  {permissionState === "granted" ? copy.grantedTitle : copy.alertsLabel}
                 </div>
                 <div className="space-y-2.5 sm:space-y-3">
                   {copy.benefits.map((item) => (
@@ -264,12 +272,20 @@ export default function PWARegistration() {
                 </div>
               </div>
 
-              <div className="mt-4 sm:mt-5">
+              <div className="mt-4 sm:mt-5 flex flex-col-reverse sm:flex-row gap-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={handleDismissForNow}
+                  className="h-11 sm:h-12 w-full rounded-2xl border border-white/10 bg-white/5 text-gray-200 hover:bg-white/10 hover:text-white text-xs sm:text-sm font-black uppercase tracking-[0.16em] sm:tracking-widest"
+                >
+                  {copy.cancel}
+                </Button>
                 <Button
                   type="button"
                   onClick={permissionState === "denied" ? handleCheckPermissionAgain : handleEnableNotifications}
                   disabled={isSubscribing}
-                  className="h-11 sm:h-12 w-full rounded-2xl bg-primary text-black hover:bg-primary/90 text-xs sm:text-sm font-black uppercase tracking-[0.16em] sm:tracking-widest shadow-[0_0_35px_rgba(26,115,232,0.25)]"
+                  className="h-11 sm:h-12 w-full rounded-2xl bg-primary text-black hover:bg-primary/90 text-xs sm:text-sm font-black uppercase tracking-[0.16em] sm:tracking-widest shadow-[0_0_35px_rgba(26,115,232,0.18)]"
                 >
                   {isSubscribing
                     ? copy.checking
