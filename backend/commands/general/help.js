@@ -2,8 +2,8 @@ import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { getCachedConfig } from "../../services/configService.js";
 
-export const help = async (sock, m, args) => {
-  const config = await getCachedConfig(sock.sessionId);
+export const help = async (sock, m, args, ctx = {}) => {
+  const config = ctx.config || await getCachedConfig(sock.sessionId);
   const p = config.prefix || "!";
 
   // Load Logo securely

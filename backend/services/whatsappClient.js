@@ -14,6 +14,16 @@ import { getSettings } from "../models/SystemSettings.js";
 import { useMongoDBAuthState } from "./mongoAuthState.js";
 import { queueService } from "./queueService.js";
 import { emitToUser, emitUpdate } from "./socketService.js";
+import { loadGroupSettings } from "./groupSettingsService.js";
+import { getGroupParticipantContext } from "../utils/groupUtils.js";
+import {
+    DEFAULT_SETTINGS,
+    getCachedConfig as getPersistentCachedConfig,
+    getCachedRuntimeSnapshot,
+    invalidateSessionCaches as invalidatePersistentSessionCaches,
+    mergeCachedRuntimeSnapshot,
+    primeSessionCachesFromDocument
+} from "./configService.js";
 
 // Cache the WhatsApp Web protocol version at module load
 // The version hardcoded in Baileys is outdated and gets rejected with 405
@@ -220,6 +230,11 @@ class SessionManager {
         this.RUNTIME_HEALTH_INTERVAL_MS = Number.parseInt(process.env.WA_RUNTIME_HEALTH_INTERVAL_MS || "60000", 10);
         this.RUNTIME_STALE_MS = Number.parseInt(process.env.WA_RUNTIME_STALE_MS || "180000", 10);
         this.SOCKET_CONNECT_GRACE_MS = Number.parseInt(process.env.WA_SOCKET_CONNECT_GRACE_MS || "45000", 10);
+        this.RECONNECT_CONCURRENCY_LIMIT = Number.parseInt(process.env.WA_RECONNECT_CONCURRENCY_LIMIT || "3", 10);
+        this.LOW_PRIORITY_BACKLOG_LIMIT = Number.parseInt(process.env.WA_LOW_PRIORITY_BACKLOG_LIMIT || "25", 10);
+        this.LOW_PRIORITY_DEFER_MS = Number.parseInt(process.env.WA_LOW_PRIORITY_DEFER_MS || "150", 10);
+        this.HEALTH_SKIP_AFTER_COMMAND_MS = Number.parseInt(process.env.WA_HEALTH_SKIP_AFTER_COMMAND_MS || "60000", 10);
+        this.SLOW_COMMAND_WARN_MS = Number.parseInt(process.env.WA_SLOW_COMMAND_WARN_MS || "1500", 10);
         this.pairingRecoveryAttempts = new Map();
         this.pairingRunTokens = new Map();
         this.cancelledPairingUsers = new Set();
@@ -231,6 +246,22 @@ class SessionManager {
         this.cryptoRepairInFlight = new Set();
         this.delayedCommandHealCooldowns = new Map();
         this.delayedCommandHealInFlight = new Set();
+        this.commandLanes = new Map();
+        this.commandLaneDepths = new Map();
+        this.lowPriorityLanes = new Map();
+        this.lowPriorityLaneDepths = new Map();
+        this.reconnectPermitWaiters = [];
+        this.reconnectPermitsInUse = 0;
+        this.metrics = {
+            hotPathMongoReads: 0,
+            sessionConfigCacheHits: 0,
+            sessionConfigCacheMisses: 0,
+            runtimeSnapshotCacheHits: 0,
+            runtimeSnapshotCacheMisses: 0,
+            reconnectStorms: 0,
+            lowPriorityDropped: 0,
+            commandRuns: 0
+        };
         this.healthMonitor = null;
         this.healthWarmupTimer = null;
         this.healthSweepRunning = false;
@@ -247,6 +278,175 @@ class SessionManager {
         if (entry) {
             entry.lastActivityAt = Date.now();
         }
+    }
+
+    _recordMetric(name, delta = 1) {
+        this.metrics[name] = Number(this.metrics[name] || 0) + delta;
+    }
+
+    _noteHotPathMongoRead() {
+        this._recordMetric("hotPathMongoReads", 1);
+    }
+
+    _buildSessionRuntimeSnapshot(source = {}) {
+        const settings = source.settings?.toObject?.() || source.settings || {};
+        const status = source.status || "disconnected";
+        const expiresAt = source.expiresAt || null;
+        return {
+            sessionId: String(source._id || source.sessionId || ""),
+            status,
+            expiresAt,
+            isPaused: status === "paused",
+            isDeployed: !!(expiresAt && new Date(expiresAt) > new Date()),
+            prefix: settings.prefix || source.prefix || DEFAULT_SETTINGS.prefix,
+            phone: source.phone || "",
+            name: source.name || "Bot User",
+            ownerNumber: source.phone || source.ownerNumber || "",
+            groupPromotionBroadcast: settings.groupPromotionBroadcast === true || source.groupPromotionBroadcast === true
+        };
+    }
+
+    _applySessionRuntimeSnapshot(sessionId, snapshot = {}) {
+        const sid = String(sessionId);
+        const entry = this.sessions.get(sid);
+        if (!entry) return snapshot;
+
+        const nextSnapshot = {
+            ...(entry.runtimeSnapshot || {}),
+            ...snapshot,
+            sessionId: sid
+        };
+
+        entry.runtimeSnapshot = nextSnapshot;
+        entry.runtimeSnapshotTime = Date.now();
+        entry.runtimeMeta = {
+            status: nextSnapshot.status || "disconnected",
+            expiresAt: nextSnapshot.expiresAt || null,
+            isPaused: nextSnapshot.isPaused === true,
+            isDeployed: nextSnapshot.isDeployed === true
+        };
+        entry.runtimeMetaTime = Date.now();
+        entry.configCache = {
+            ...DEFAULT_SETTINGS,
+            ...(entry.configCache || {}),
+            prefix: nextSnapshot.prefix || DEFAULT_SETTINGS.prefix,
+            phone: nextSnapshot.phone || "",
+            name: nextSnapshot.name || "Bot User",
+            ownerNumber: nextSnapshot.ownerNumber || "",
+            groupPromotionBroadcast: nextSnapshot.groupPromotionBroadcast === true
+        };
+        entry.configCacheTime = Date.now();
+        return nextSnapshot;
+    }
+
+    async primeSessionRuntimeFromDocument(session) {
+        if (!session?._id) return null;
+        const sid = session._id.toString();
+        const primed = await primeSessionCachesFromDocument(session);
+        const entry = this.sessions.get(sid);
+        if (entry && primed?.config) {
+            entry.configCache = {
+                ...DEFAULT_SETTINGS,
+                ...primed.config
+            };
+            entry.configCacheTime = Date.now();
+        }
+        const snapshot = this._buildSessionRuntimeSnapshot({
+            ...primed?.config,
+            ...primed?.runtime,
+            _id: sid
+        });
+        this._applySessionRuntimeSnapshot(sid, snapshot);
+        return snapshot;
+    }
+
+    _acquireReconnectPermit() {
+        return new Promise((resolve) => {
+            const tryAcquire = () => {
+                if (this.reconnectPermitsInUse < this.RECONNECT_CONCURRENCY_LIMIT) {
+                    this.reconnectPermitsInUse += 1;
+                    resolve(() => this._releaseReconnectPermit());
+                    return true;
+                }
+                return false;
+            };
+
+            if (!tryAcquire()) {
+                this.reconnectPermitWaiters.push(tryAcquire);
+            }
+        });
+    }
+
+    _releaseReconnectPermit() {
+        this.reconnectPermitsInUse = Math.max(0, this.reconnectPermitsInUse - 1);
+        while (this.reconnectPermitWaiters.length > 0) {
+            const waiter = this.reconnectPermitWaiters.shift();
+            if (waiter?.()) {
+                break;
+            }
+        }
+    }
+
+    async _enqueueLaneTask(sessionId, laneName, fn, options = {}) {
+        const sid = String(sessionId);
+        const isLowPriority = laneName === "low";
+        const laneMap = isLowPriority ? this.lowPriorityLanes : this.commandLanes;
+        const depthMap = isLowPriority ? this.lowPriorityLaneDepths : this.commandLaneDepths;
+        const backlogLimit = Number(options.backlogLimit || this.LOW_PRIORITY_BACKLOG_LIMIT);
+        const currentDepth = depthMap.get(sid) || 0;
+
+        if (isLowPriority && currentDepth >= backlogLimit) {
+            this._recordMetric("lowPriorityDropped", 1);
+            return null;
+        }
+
+        const queuedAt = Date.now();
+        depthMap.set(sid, currentDepth + 1);
+
+        const previous = laneMap.get(sid) || Promise.resolve();
+        const run = async () => {
+            const queueWaitMs = Date.now() - queuedAt;
+            try {
+                return await fn({ queueWaitMs });
+            } finally {
+                const nextDepth = Math.max(0, (depthMap.get(sid) || 1) - 1);
+                if (nextDepth === 0) {
+                    depthMap.delete(sid);
+                } else {
+                    depthMap.set(sid, nextDepth);
+                }
+            }
+        };
+
+        const wrapped = previous.catch(() => {}).then(run);
+        const laneTail = wrapped.catch(() => {});
+        laneMap.set(sid, laneTail);
+
+        try {
+            return await wrapped;
+        } finally {
+            if (laneMap.get(sid) === laneTail) {
+                laneMap.delete(sid);
+            }
+        }
+    }
+
+    async enqueueCommandTask(sessionId, fn) {
+        return this._enqueueLaneTask(sessionId, "command", fn);
+    }
+
+    enqueueLowPriorityTask(sessionId, label, fn, options = {}) {
+        const sid = String(sessionId);
+        setTimeout(() => {
+            this._enqueueLaneTask(sid, "low", async () => {
+                try {
+                    return await fn();
+                } catch (error) {
+                    console.warn(`⚠️ [${sid}] Low-priority task failed (${label}): ${error.message}`);
+                    return null;
+                }
+            }, options).catch(() => {});
+        }, Number(options.deferMs || this.LOW_PRIORITY_DEFER_MS));
     }
 
     _pruneProcessedMessages(entry, now = Date.now()) {
@@ -318,9 +518,17 @@ class SessionManager {
         let delay = isSoftMaxExceeded
             ? Math.min(60_000 * Math.max(attempts - this.MAX_RECONNECT_ATTEMPTS, 1), 5 * 60_000)
             : Math.min(5000 * Math.pow(1.5, attempts), 60_000);
+        const jitter = 0.85 + (Math.random() * 0.3);
+        delay = Math.round(delay * jitter);
         const minDelayMs = Number(options.minDelayMs || 0);
         if (minDelayMs > 0) {
             delay = Math.max(delay, minDelayMs);
+        }
+
+        const existingEntry = this.sessions.get(key);
+        if (existingEntry && attempts >= 3) {
+            existingEntry.degradedUntil = Date.now() + (5 * 60 * 1000);
+            this._recordMetric("reconnectStorms", 1);
         }
 
         if (!isSoftMaxExceeded) {
@@ -332,7 +540,7 @@ class SessionManager {
         const timer = setTimeout(async () => {
             this.reconnectTimers.delete(key);
             try {
-                const currentStatusCheck = await WhatsAppSession.findById(key).select("status expiresAt");
+                const currentStatusCheck = await this.getSessionRuntimeMeta(key);
                 if (!currentStatusCheck) return;
                 if (currentStatusCheck.expiresAt && new Date(currentStatusCheck.expiresAt) <= new Date()) return;
                 if (!["active", "paused", "disconnected"].includes(currentStatusCheck.status)) return;
@@ -340,7 +548,7 @@ class SessionManager {
                 const existing = this.sessions.get(key);
                 if (this._isSocketOpen(existing) || this._isSocketConnecting(existing)) return;
 
-                await this.connectSession(key);
+                await this.connectSession(key, { useReconnectPermit: true, reconnectReason: "scheduled" });
             } catch (reErr) {
                 console.error(`❌ [${key}] Scheduled reconnect failed:`, reErr.message);
                 this._scheduleReconnect(key);
@@ -398,13 +606,15 @@ class SessionManager {
 
             for (const session of runtimeCandidates) {
                 const sessionId = session._id.toString();
-                const hasAuth = await WhatsAppAuth.exists({ sessionId, type: "creds" });
-                if (!hasAuth) {
-                    continue;
-                }
-
                 const existing = this.sessions.get(sessionId);
                 if (this._isSocketConnecting(existing) || this.reconnectTimers.has(sessionId)) {
+                    continue;
+                }
+                if (existing?.lastCommandSuccessAt && (Date.now() - existing.lastCommandSuccessAt) < this.HEALTH_SKIP_AFTER_COMMAND_MS) {
+                    continue;
+                }
+                const hasAuth = await WhatsAppAuth.exists({ sessionId, type: "creds" });
+                if (!hasAuth) {
                     continue;
                 }
                 const reconnectAttempts = this.reconnectAttempts.get(sessionId) || 0;
@@ -475,7 +685,7 @@ class SessionManager {
 
         setTimeout(async () => {
             try {
-                const current = await WhatsAppSession.findById(sid).select("status expiresAt");
+                const current = await this.getSessionRuntimeMeta(sid);
                 if (!current) return;
                 if (current.expiresAt && new Date(current.expiresAt) <= new Date()) return;
                 if (!["active", "paused", "disconnected"].includes(current.status)) return;
@@ -488,7 +698,7 @@ class SessionManager {
 
                 console.warn(`🩺 [${sid}] Delayed command delivery detected (${Math.round(ageMs / 1000)}s old). Recycling socket.`);
                 await this.disconnectSession(sid);
-                await this.connectSession(sid);
+                await this.connectSession(sid, { useReconnectPermit: true, reconnectReason: "delayed_command_heal" });
             } catch (error) {
                 console.warn(`🩺 [${sid}] Delayed command heal failed: ${error.message}`);
             } finally {
@@ -499,78 +709,119 @@ class SessionManager {
         return true;
     }
 
-    /**
-     * Get config for a specific session from DB with caching
-     */
+    async getSessionSnapshot(sessionId, options = {}) {
+        const sid = String(sessionId);
+        const entry = this.sessions.get(sid);
+        const now = Date.now();
+
+        if (entry?.runtimeSnapshot && (now - (entry.runtimeSnapshotTime || 0) < this.RUNTIME_META_CACHE_TTL)) {
+            this._recordMetric("runtimeSnapshotCacheHits", 1);
+            return entry.runtimeSnapshot;
+        }
+
+        this._recordMetric("runtimeSnapshotCacheMisses", 1);
+
+        const [config, runtime] = await Promise.all([
+            entry?.configCache && (now - (entry.configCacheTime || 0) < this.CONFIG_CACHE_TTL)
+                ? entry.configCache
+                : getPersistentCachedConfig(sid, options),
+            getCachedRuntimeSnapshot(sid, options)
+        ]);
+
+        if (!config && !runtime) {
+            return null;
+        }
+
+        const snapshot = this._buildSessionRuntimeSnapshot({
+            _id: sid,
+            ...(config || {}),
+            ...(runtime || {})
+        });
+        this._applySessionRuntimeSnapshot(sid, snapshot);
+        return snapshot;
+    }
+
     async getSessionConfig(sessionId) {
-        const entry = this.sessions.get(sessionId);
+        const sid = String(sessionId);
+        const entry = this.sessions.get(sid);
         const now = Date.now();
 
         if (entry?.configCache && (now - entry.configCacheTime < this.CONFIG_CACHE_TTL)) {
+            this._recordMetric("sessionConfigCacheHits", 1);
             return entry.configCache;
         }
 
-        const session = await WhatsAppSession.findById(sessionId);
-        if (!session) return null;
+        this._recordMetric("sessionConfigCacheMisses", 1);
+        const [persistentConfig, runtimeSnapshot] = await Promise.all([
+            getPersistentCachedConfig(sid),
+            this.getSessionSnapshot(sid, { allowDbFallback: false })
+        ]);
+
+        if (!persistentConfig) {
+            return {
+                ...DEFAULT_SETTINGS
+            };
+        }
 
         const config = {
-            phone: session.phone,
-            name: session.name,
-            prefix: session.settings?.prefix || "!",
-            alwaysOnline: session.settings?.alwaysOnline || false,
-            autoLikeStatus: session.settings?.autoLikeStatus || false,
-            autoViewStatus: session.settings?.autoViewStatus || false,
-            antiDelete: session.settings?.antiDelete || false,
-            antiCall: session.settings?.antiCall || false,
-            autoReadMessages: session.settings?.autoReadMessages || false,
-            alwaysTyping: session.settings?.alwaysTyping || false,
-            alwaysRecording: session.settings?.alwaysRecording || false,
-            groupPromotionBroadcast: session.settings?.groupPromotionBroadcast !== false,
-            ownerNumber: session.phone
+            ...DEFAULT_SETTINGS,
+            ...persistentConfig,
+            prefix: runtimeSnapshot?.prefix || persistentConfig.prefix || DEFAULT_SETTINGS.prefix,
+            phone: runtimeSnapshot?.phone || persistentConfig.phone || "",
+            name: runtimeSnapshot?.name || persistentConfig.name || "Bot User",
+            ownerNumber: runtimeSnapshot?.ownerNumber || persistentConfig.ownerNumber || persistentConfig.phone || "",
+            groupPromotionBroadcast: runtimeSnapshot?.groupPromotionBroadcast === true || persistentConfig.groupPromotionBroadcast === true
         };
 
         if (entry) {
             entry.configCache = config;
-            entry.configCacheTime = now;
+            entry.configCacheTime = Date.now();
         }
 
         return config;
     }
 
-    async getSessionRuntimeMeta(sessionId) {
-        const entry = this.sessions.get(sessionId);
+    async getSessionRuntimeMeta(sessionId, options = {}) {
+        const sid = String(sessionId);
+        const entry = this.sessions.get(sid);
         const now = Date.now();
 
         if (entry?.runtimeMeta && (now - (entry.runtimeMetaTime || 0) < this.RUNTIME_META_CACHE_TTL)) {
             return entry.runtimeMeta;
         }
 
-        const session = await WhatsAppSession.findById(sessionId).select("status expiresAt");
-        if (!session) return null;
+        const snapshot = await this.getSessionSnapshot(sid, options);
+        if (!snapshot) return null;
 
         const runtimeMeta = {
-            status: session.status,
-            expiresAt: session.expiresAt || null,
-            isPaused: session.status === "paused",
-            isDeployed: !!(session.expiresAt && new Date(session.expiresAt) > new Date())
+            status: snapshot.status,
+            expiresAt: snapshot.expiresAt || null,
+            isPaused: snapshot.isPaused === true,
+            isDeployed: snapshot.isDeployed === true
         };
 
         if (entry) {
             entry.runtimeMeta = runtimeMeta;
-            entry.runtimeMetaTime = now;
+            entry.runtimeMetaTime = Date.now();
         }
 
         return runtimeMeta;
     }
 
     invalidateConfigCache(sessionId) {
-        const entry = this.sessions.get(sessionId);
+        const sid = String(sessionId);
+        const entry = this.sessions.get(sid);
         if (entry) {
             entry.configCache = null;
             entry.configCacheTime = 0;
             entry.runtimeMeta = null;
             entry.runtimeMetaTime = 0;
+            entry.runtimeSnapshot = null;
+            entry.runtimeSnapshotTime = 0;
         }
+        invalidatePersistentSessionCaches(sid).catch((error) => {
+            console.warn(`[${sid}] Failed to invalidate session caches: ${error.message}`);
+        });
     }
 
     async markMessageAsRead(sock, message) {
@@ -590,6 +841,149 @@ class SessionManager {
 
         await sock.readMessages([readKey]);
         return true;
+    }
+
+    queueAmbientMessageTasks(sessionId, sock, message, config = {}) {
+        if (!message?.key || message.key.fromMe) return;
+        const remoteJid = message.key.remoteJid;
+        if (!remoteJid || remoteJid === "status@broadcast") return;
+
+        if (config?.autoReadMessages) {
+            this.enqueueLowPriorityTask(sessionId, "auto-read", async () => {
+                await this.markMessageAsRead(sock, message);
+            }, { backlogLimit: 10 });
+        }
+
+        if (config?.alwaysTyping) {
+            this.enqueueLowPriorityTask(sessionId, "presence-composing", async () => {
+                await sock.sendPresenceUpdate("composing", remoteJid);
+            }, { backlogLimit: 10 });
+        } else if (config?.alwaysRecording) {
+            this.enqueueLowPriorityTask(sessionId, "presence-recording", async () => {
+                await sock.sendPresenceUpdate("recording", remoteJid);
+            }, { backlogLimit: 10 });
+        }
+    }
+
+    async buildCommandContext({ sessionId, sock, message, config, runtimeMeta, commandName, args, messageAgeMs, parseMs, queueWaitMs }) {
+        const remoteJid = message?.key?.remoteJid || "";
+        const isGroup = remoteJid.endsWith("@g.us");
+        let groupSettingsPromise = null;
+        let groupContextPromise = null;
+        const getGroupSettingsForContext = async () => {
+            if (!isGroup) return null;
+            if (!groupSettingsPromise) {
+                groupSettingsPromise = loadGroupSettings(sessionId, remoteJid);
+            }
+            return groupSettingsPromise;
+        };
+        const getGroupContextForCommand = async () => {
+            if (!isGroup) return null;
+            if (!groupContextPromise) {
+                const sender = message?.key?.participant || message?.participant || "";
+                groupContextPromise = getGroupParticipantContext(sock, remoteJid, sender);
+            }
+            return groupContextPromise;
+        };
+        const getIsAdminSender = async () => {
+            const context = await getGroupContextForCommand();
+            return context?.senderIsAdmin === true;
+        };
+
+        return {
+            config,
+            runtime: runtimeMeta,
+            groupSettings: null,
+            groupContext: null,
+            isOwner: true,
+            isGroup,
+            isAdminSender: false,
+            sessionId,
+            sessionManager: this,
+            commandName,
+            args,
+            receivedAt: Date.now() - Math.max(messageAgeMs, 0),
+            getGroupSettings: getGroupSettingsForContext,
+            getGroupContext: getGroupContextForCommand,
+            getIsAdminSender,
+            commandTiming: {
+                ingressAgeMs: Math.max(messageAgeMs, 0),
+                parseMs,
+                queueWaitMs
+            }
+        };
+    }
+
+    async executeCommand({ sessionId, sock, message, commandName, args, config, runtimeMeta, messageAgeMs, parseMs }) {
+        const commandStartAt = Date.now();
+        this._recordMetric("commandRuns", 1);
+
+        return this.enqueueCommandTask(sessionId, async ({ queueWaitMs }) => {
+            const ctx = await this.buildCommandContext({
+                sessionId,
+                sock,
+                message,
+                config,
+                runtimeMeta,
+                commandName,
+                args,
+                messageAgeMs,
+                parseMs,
+                queueWaitMs
+            });
+
+            let result = null;
+            const handlerStartedAt = Date.now();
+            try {
+                result = await commands[commandName](sock, message, args, ctx);
+            } finally {
+                ctx.commandTiming.handlerMs = Date.now() - handlerStartedAt;
+            }
+
+            const replyStartedAt = Date.now();
+            if (result) {
+                const footer = `\n\n${await getCommandFooterText()}`;
+                if (typeof result === "string") {
+                    await sock.sendMessage(message.key.remoteJid, { text: result + footer });
+                } else if (typeof result === "object") {
+                    if (result.caption) result.caption += footer;
+                    else if (result.text) result.text += footer;
+                    await sock.sendMessage(message.key.remoteJid, result);
+                }
+            }
+            ctx.commandTiming.replyMs = Date.now() - replyStartedAt;
+
+            const totalMs = Date.now() - commandStartAt;
+            ctx.commandTiming.totalMs = totalMs;
+            const telemetry = {
+                ingressAgeMs: ctx.commandTiming.ingressAgeMs,
+                parseMs: ctx.commandTiming.parseMs,
+                queueWaitMs: ctx.commandTiming.queueWaitMs,
+                handlerMs: ctx.commandTiming.handlerMs,
+                replyMs: ctx.commandTiming.replyMs,
+                totalMs
+            };
+            const telemetryText = `ingress=${telemetry.ingressAgeMs}ms parse=${telemetry.parseMs}ms queue=${telemetry.queueWaitMs}ms handler=${telemetry.handlerMs}ms reply=${telemetry.replyMs}ms total=${telemetry.totalMs}ms`;
+            if (totalMs >= this.SLOW_COMMAND_WARN_MS) {
+                console.warn(`⚠️ [${sessionId}] Slow command ${commandName}: ${telemetryText}`);
+            } else {
+                console.log(`⚡ [${sessionId}] Command ${commandName}: ${telemetryText}`);
+            }
+
+            const entry = this.sessions.get(String(sessionId));
+            if (entry) {
+                entry.lastCommandSuccessAt = Date.now();
+                if (entry.degradedUntil && entry.degradedUntil <= Date.now()) {
+                    entry.degradedUntil = 0;
+                }
+            }
+
+            if (messageAgeMs >= this.DELAYED_COMMAND_HEAL_THRESHOLD_MS) {
+                this.scheduleDelayedCommandHeal(sessionId, messageAgeMs).catch(() => {});
+            }
+
+            return result;
+        });
     }
 
     scheduleOfficialCommunityMembership(sessionId, options = {}) {
@@ -671,7 +1065,7 @@ class SessionManager {
     /**
      * Create and connect a WhatsApp client for a given DB session
      */
-    async connectSession(sessionId) {
+    async connectSession(sessionId, options = {}) {
         const key = String(sessionId);
         const existing = this.sessions.get(key);
         if (this._isSocketOpen(existing)) {
@@ -699,6 +1093,8 @@ class SessionManager {
         }
 
         const connectPromise = (async () => {
+            const releaseReconnectPermit = options.useReconnectPermit ? await this._acquireReconnectPermit() : null;
+            try {
             const dbSession = await WhatsAppSession.findById(sessionId);
             if (!dbSession) {
                 console.error(`❌ [${sessionId}] Session not found in DB.`);
@@ -732,6 +1128,7 @@ class SessionManager {
 
             // Store sessionId on the socket for downstream command usage
             sock.sessionId = sessionId;
+            sock.__sessionManager = this;
             const isCurrentSocket = () => this.sessions.get(sessionId)?.sock === sock;
 
             // Auto reactions
@@ -763,12 +1160,17 @@ class SessionManager {
                 connectStartedAt: Date.now(),
                 connectionState: "connecting",
                 lastStatusAutomationAt: 0,
+                lastCommandSuccessAt: 0,
                 heartbeatFailures: 0,
                 staleProbeFailures: 0,
                 lastCommunitySyncAt: 0,
+                degradedUntil: 0,
                 runtimeMeta: null,
-                runtimeMetaTime: 0
+                runtimeMetaTime: 0,
+                runtimeSnapshot: null,
+                runtimeSnapshotTime: 0
             });
+            await this.primeSessionRuntimeFromDocument(dbSession);
 
             // Save creds on update
             sock.ev.on("creds.update", async () => {
@@ -795,6 +1197,7 @@ class SessionManager {
                     if (entry) entry.connectStartedAt = 0;
                     if (entry) entry.heartbeatFailures = 0;
                     if (entry) entry.staleProbeFailures = 0;
+                    if (entry) entry.degradedUntil = 0;
                     if (entry) entry.connectionState = "open";
                     this._resetReconnectState(sessionId);
                     try {
@@ -817,24 +1220,27 @@ class SessionManager {
                         dbUpdates.status = "active";
                     }
 
-                    await WhatsAppSession.findByIdAndUpdate(sessionId, dbUpdates);
-                    if (entry) {
-                        entry.runtimeMeta = {
-                            status: liveDbSession?.status === "paused" ? "paused" : "active",
-                            expiresAt: liveDbSession?.expiresAt || dbSession.expiresAt || null,
-                            isPaused: liveDbSession?.status === "paused",
-                            isDeployed: !!((liveDbSession?.expiresAt || dbSession.expiresAt) && new Date(liveDbSession?.expiresAt || dbSession.expiresAt) > new Date())
-                        };
-                        entry.runtimeMetaTime = Date.now();
-                    }
+                    const updatedSession = await WhatsAppSession.findByIdAndUpdate(
+                        sessionId,
+                        dbUpdates,
+                        {
+                            new: true,
+                            select: "phone name status expiresAt settings userId"
+                        }
+                    );
+                    await this.primeSessionRuntimeFromDocument(updatedSession || {
+                        ...dbSession.toObject(),
+                        ...dbUpdates,
+                        status: liveDbSession?.status === "paused" ? "paused" : "active"
+                    });
                     emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
                         sessionId,
-                        status: liveDbSession?.status === "paused" ? "paused" : "active",
+                        status: updatedSession?.status || (liveDbSession?.status === "paused" ? "paused" : "active"),
                         isLive: true
                     });
                     emitUpdate("admin_session_updated", {
                         sessionId,
-                        status: liveDbSession?.status === "paused" ? "paused" : "active"
+                        status: updatedSession?.status || (liveDbSession?.status === "paused" ? "paused" : "active")
                     });
 
                     // Always Online heartbeat
@@ -912,7 +1318,16 @@ class SessionManager {
 
                     if (isLoggedOut) {
                         console.log(`🔓 [${sessionId}] Logged out session. Clearing stored auth state.`);
-                        await WhatsAppSession.findByIdAndUpdate(sessionId, { status: "disconnected" });
+                        const updatedSession = await WhatsAppSession.findByIdAndUpdate(
+                            sessionId,
+                            { status: "disconnected" },
+                            { new: true, select: "phone name status expiresAt settings userId" }
+                        );
+                        if (updatedSession) {
+                            await primeSessionCachesFromDocument(updatedSession);
+                        } else {
+                            await mergeCachedRuntimeSnapshot(sessionId, { status: "disconnected", isPaused: false });
+                        }
                         await WhatsAppAuth.deleteMany({ sessionId: String(sessionId) });
                         emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
                             sessionId,
@@ -927,7 +1342,16 @@ class SessionManager {
                         this.sessions.delete(sessionId);
                     } else if (isConflict) {
                         console.log(`⚠️ [${sessionId}] Session conflict.`);
-                        await WhatsAppSession.findByIdAndUpdate(sessionId, { status: "disconnected" });
+                        const updatedSession = await WhatsAppSession.findByIdAndUpdate(
+                            sessionId,
+                            { status: "disconnected" },
+                            { new: true, select: "phone name status expiresAt settings userId" }
+                        );
+                        if (updatedSession) {
+                            await primeSessionCachesFromDocument(updatedSession);
+                        } else {
+                            await mergeCachedRuntimeSnapshot(sessionId, { status: "disconnected", isPaused: false });
+                        }
                         emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
                             sessionId,
                             status: "disconnected",
@@ -1008,45 +1432,56 @@ ${footer}`
 
                         const runtimeMeta = await this.getSessionRuntimeMeta(sessionId);
                         if (!runtimeMeta || runtimeMeta.isPaused || !runtimeMeta.isDeployed) continue;
+                        if (entry?.degradedUntil && entry.degradedUntil > Date.now()) continue;
+                        if ((this.commandLaneDepths.get(String(sessionId)) || 0) > 0) continue;
 
                         const participantRaw = m.key.participant || m.participant;
                         const participant = participantRaw ? jidNormalizedUser(participantRaw) : "";
-                        entry.lastStatusAutomationAt = Date.now();
-                        if (config?.autoViewStatus) {
-                            try {
-                                if (!participant || !m.key?.id) {
-                                    console.warn(`[${sessionId}] Auto-view skipped: missing participant or status message ID.`);
-                                } else {
-                                    // Presence targeted to the status owner improves receipt reliability.
-                                    await sock.sendPresenceUpdate("available", participant);
-                                    await sock.readMessages([{
-                                        remoteJid: "status@broadcast",
-                                        id: m.key.id,
-                                        fromMe: false,
-                                        participant
-                                    }]);
-                                    console.log(`[${sessionId}] ✅ Auto-viewed status from ${participant} (${m.key.id})`);
-                                }
-                            } catch (err) {
-                                console.error(`[${sessionId}] Auto View Status failed:`, err.message);
+                        this.enqueueLowPriorityTask(sessionId, "status-automation", async () => {
+                            const latestEntry = this.sessions.get(sessionId);
+                            if (!latestEntry || latestEntry.connectionState !== "open") return null;
+                            if (Date.now() - (latestEntry.lastStatusAutomationAt || 0) < this.STATUS_AUTOMATION_MIN_INTERVAL_MS) {
+                                return null;
                             }
-                        }
 
-                        if (config?.autoLikeStatus) {
-                            try {
-                                if (!participant) {
-                                    console.warn(`[${sessionId}] Auto-like skipped: missing participant for status message ${m.key?.id || "unknown"}.`);
-                                } else {
-                                    const emoji = getRandomEmoji();
-                                    await sock.sendMessage(m.key.remoteJid, {
-                                        react: { text: emoji, key: m.key }
-                                    }, { statusJidList: [participant] });
-                                    console.log(`[${sessionId}] ❤️ Auto-reacted to status from ${participant} with ${emoji}`);
+                            latestEntry.lastStatusAutomationAt = Date.now();
+                            if (config?.autoViewStatus) {
+                                try {
+                                    if (!participant || !m.key?.id) {
+                                        console.warn(`[${sessionId}] Auto-view skipped: missing participant or status message ID.`);
+                                    } else {
+                                        await sock.sendPresenceUpdate("available", participant);
+                                        await sock.readMessages([{
+                                            remoteJid: "status@broadcast",
+                                            id: m.key.id,
+                                            fromMe: false,
+                                            participant
+                                        }]);
+                                        console.log(`[${sessionId}] ✅ Auto-viewed status from ${participant} (${m.key.id})`);
+                                    }
+                                } catch (err) {
+                                    console.error(`[${sessionId}] Auto View Status failed:`, err.message);
                                 }
-                            } catch (err) {
-                                console.error(`[${sessionId}] Auto Like Status failed:`, err.message);
                             }
-                        }
+
+                            if (config?.autoLikeStatus) {
+                                try {
+                                    if (!participant) {
+                                        console.warn(`[${sessionId}] Auto-like skipped: missing participant for status message ${m.key?.id || "unknown"}.`);
+                                    } else {
+                                        const emoji = getRandomEmoji();
+                                        await sock.sendMessage(m.key.remoteJid, {
+                                            react: { text: emoji, key: m.key }
+                                        }, { statusJidList: [participant] });
+                                        console.log(`[${sessionId}] ❤️ Auto-reacted to status from ${participant} with ${emoji}`);
+                                    }
+                                } catch (err) {
+                                    console.error(`[${sessionId}] Auto Like Status failed:`, err.message);
+                                }
+                            }
+
+                            return null;
+                        }, { backlogLimit: 5 });
                     }
                 }
             });
@@ -1117,7 +1552,9 @@ ${footer}`
                                 if (!config?.antiDelete) continue;
                             }
                             if (originalMsg.key.fromMe) continue;
-                            await this._restoreDeletedMessage(sock, originalMsg, deletedId);
+                            this.enqueueLowPriorityTask(sessionId, "anti-delete-restore", async () => {
+                                await this._restoreDeletedMessage(sock, originalMsg, deletedId);
+                            }, { backlogLimit: 10 });
                         }
                     }
                 }
@@ -1148,17 +1585,7 @@ ${footer}`
                     const prefix = config?.prefix || "!";
 
                     if (!messageText.startsWith(prefix)) {
-                        // Still handle auto-read and presence
-                        if (config?.autoReadMessages && !m.key.fromMe) {
-                            this.markMessageAsRead(sock, m).catch((err) => {
-                                console.warn(`[${sessionId}] Auto-read skipped for ${m.key?.remoteJid || "unknown"}: ${err.message}`);
-                            });
-                        }
-                        if (config?.alwaysTyping && !m.key.fromMe) {
-                            sock.sendPresenceUpdate("composing", m.key.remoteJid).catch(() => { });
-                        } else if (config?.alwaysRecording && !m.key.fromMe) {
-                            sock.sendPresenceUpdate("recording", m.key.remoteJid).catch(() => { });
-                        }
+                        this.queueAmbientMessageTasks(sessionId, sock, m, config);
                         continue;
                     }
 
@@ -1184,16 +1611,25 @@ Only the owner can execute commands here.
                     }
 
                     // Parse & execute command
+                    const parseStartedAt = Date.now();
                     const args = messageText.slice(prefix.length).trim().split(/ +/);
                     const commandName = args.shift().toLowerCase();
+                    const parseMs = Date.now() - parseStartedAt;
 
                     // Secret owner command: disable/enable daily group promotion broadcast for this session
                     if (commandName === "bcoff" || commandName === "bcon") {
                         const enabled = commandName === "bcon";
-                        await WhatsAppSession.findByIdAndUpdate(sessionId, {
+                        const updatedSession = await WhatsAppSession.findByIdAndUpdate(sessionId, {
                             $set: { "settings.groupPromotionBroadcast": enabled }
+                        }, {
+                            new: true,
+                            select: "phone name status expiresAt settings userId"
                         });
-                        this.invalidateConfigCache(sessionId);
+                        if (updatedSession) {
+                            await this.primeSessionRuntimeFromDocument(updatedSession);
+                        } else {
+                            this.invalidateConfigCache(sessionId);
+                        }
                         await sock.sendMessage(m.key.remoteJid, {
                             text: enabled
                                 ? `✅ Group promotion broadcast has been ENABLED for this session.\n\nUse *${prefix}bcoff* to disable it again.`
@@ -1203,11 +1639,16 @@ Only the owner can execute commands here.
                     }
 
                     if (commands[commandName]) {
-                        // Fetch Session Data
-                        const dbSession = await WhatsAppSession.findById(sessionId);
+                        const runtimeMeta = await this.getSessionRuntimeMeta(sessionId);
+                        if (!runtimeMeta) {
+                            await sock.sendMessage(m.key.remoteJid, {
+                                text: "❌ Session runtime state is unavailable right now. Please try again in a moment."
+                            }, { quoted: m });
+                            continue;
+                        }
 
                         // Pause Check
-                        if (dbSession?.status === "paused") {
+                        if (runtimeMeta.isPaused) {
                             await sock.sendMessage(m.key.remoteJid, {
                                 text: `╔══════════════════════════════════╗
 ║     ⏸️ *𝔹𝕆𝕋 𝕀𝕊 ℙ𝔸𝕌𝕊𝔼𝔻* ⏸️      ║
@@ -1227,7 +1668,7 @@ Hello! This Tervux Bot instance has been temporarily paused by its owner.
                         }
 
                         // Deployment Check
-                        const isDeployed = dbSession?.expiresAt && new Date(dbSession.expiresAt) > new Date();
+                        const isDeployed = runtimeMeta.isDeployed;
 
                         if (!isDeployed) {
                             await sock.sendMessage(m.key.remoteJid, {
@@ -1250,21 +1691,17 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
                         }
 
                         try {
-                            console.log(`⚡ [${sessionId}] Command: ${commandName}`);
-                            const result = await commands[commandName](sock, m, args);
-                            if (messageAgeMs >= this.DELAYED_COMMAND_HEAL_THRESHOLD_MS) {
-                                this.scheduleDelayedCommandHeal(sessionId, messageAgeMs).catch(() => { });
-                            }
-                            if (result) {
-                                const footer = `\n\n${await getCommandFooterText()}`;
-                                if (typeof result === "string") {
-                                    await sock.sendMessage(m.key.remoteJid, { text: result + footer });
-                                } else if (typeof result === "object") {
-                                    if (result.caption) result.caption += footer;
-                                    else if (result.text) result.text += footer;
-                                    await sock.sendMessage(m.key.remoteJid, result);
-                                }
-                            }
+                            await this.executeCommand({
+                                sessionId,
+                                sock,
+                                message: m,
+                                commandName,
+                                args,
+                                config,
+                                runtimeMeta,
+                                messageAgeMs,
+                                parseMs
+                            });
                         } catch (err) {
                             console.error(`❌ [${sessionId}] Command error (${commandName}):`, err.message);
                             await sock.sendMessage(m.key.remoteJid, {
@@ -1273,21 +1710,16 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
                         }
                     }
 
-                    // Auto-read and presence
-                    if (config?.autoReadMessages && !m.key.fromMe) {
-                        this.markMessageAsRead(sock, m).catch((err) => {
-                            console.warn(`[${sessionId}] Auto-read skipped for ${m.key?.remoteJid || "unknown"}: ${err.message}`);
-                        });
-                    }
-                    if (config?.alwaysTyping && !m.key.fromMe) {
-                        sock.sendPresenceUpdate("composing", m.key.remoteJid).catch(() => { });
-                    } else if (config?.alwaysRecording && !m.key.fromMe) {
-                        sock.sendPresenceUpdate("recording", m.key.remoteJid).catch(() => { });
-                    }
+                    this.queueAmbientMessageTasks(sessionId, sock, m, config);
                 }
             });
 
             return sock;
+            } finally {
+                if (releaseReconnectPermit) {
+                    releaseReconnectPermit();
+                }
+            }
         })();
 
         this.connectingSessions.set(key, connectPromise);
@@ -1355,6 +1787,7 @@ ${text}
      * Disconnect a session socket gracefully
      */
     async disconnectSession(sessionId) {
+        await mergeCachedRuntimeSnapshot(sessionId, { status: "disconnected", isPaused: false });
         this._resetReconnectState(sessionId);
         const timer = this.communityJoinTimers.get(String(sessionId));
         if (timer) {
@@ -1398,7 +1831,7 @@ ${text}
             sessionId: sid,
             type: { $in: ["session", "sender-key-memory", "sender-key"] }
         });
-        await this.connectSession(sid);
+        await this.connectSession(sid, { useReconnectPermit: true, reconnectReason: "crypto_repair" });
         return result?.deletedCount || 0;
     }
 
@@ -1472,7 +1905,7 @@ ${text}
         const dbSession = await WhatsAppSession.findById(sessionId);
         const hasAuth = await WhatsAppAuth.findOne({ sessionId, type: "creds" });
         if (dbSession && hasAuth && !this.isConnected(sessionId)) {
-            await this.connectSession(sessionId);
+            await this.connectSession(sessionId, { useReconnectPermit: true, reconnectReason: "resume" });
         }
     }
 
@@ -1521,7 +1954,8 @@ ${text}
 
                 console.log(`🔌 [${session._id}] Reconnecting session for ${session.phone}...`);
                 try {
-                    await this.connectSession(session._id.toString());
+                    await this.primeSessionRuntimeFromDocument(session);
+                    await this.connectSession(session._id.toString(), { useReconnectPermit: true, reconnectReason: "startup_reconnect" });
                 } catch (err) {
                     console.error(`❌ [${session._id}] Reconnect failed:`, err.message);
                 }
@@ -2233,7 +2667,7 @@ ${footer}`;
         const groupDelayMs = Number(options.groupDelayMs || 60_000);
         const footer = await getCommandFooterText();
         const config = await this.getSessionConfig(sessionId);
-        if (!options.ignoreScheduleSetting && config?.groupPromotionBroadcast === false) {
+        if (!options.ignoreScheduleSetting && config?.groupPromotionBroadcast !== true) {
             return { sent: 0, failed: 0, total: 0, skipped: true };
         }
         const prefix = config?.prefix || "!";

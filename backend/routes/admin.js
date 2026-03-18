@@ -700,6 +700,7 @@ router.post("/sessions/:id/disconnect", authenticate, requireAdmin, async (req, 
         await sessionManager.disconnectSession(session._id.toString());
         session.status = "disconnected";
         await session.save();
+        await sessionManager.primeSessionRuntimeFromDocument(session);
 
         emitUpdate("admin_session_updated", {
             sessionId: session._id.toString(),
@@ -756,7 +757,7 @@ router.put("/sessions/:id", authenticate, requireAdmin, async (req, res) => {
                 if (sessionManager?.isConnected(session._id.toString())) {
                     await sessionManager.resumeSession(session._id.toString());
                 } else {
-                    sessionManager.connectSession(session._id.toString());
+                    sessionManager.connectSession(session._id.toString(), { useReconnectPermit: true, reconnectReason: "admin_activate" });
                 }
             }
         }
@@ -767,10 +768,10 @@ router.put("/sessions/:id", authenticate, requireAdmin, async (req, res) => {
                     session.settings[key] = settings[key];
                 }
             }
-            sessionManager.invalidateConfigCache(session._id.toString());
         }
 
         await session.save();
+        await sessionManager.primeSessionRuntimeFromDocument(session);
 
         emitToUser(session.userId.toString(), "session_update", {
             sessionId: session._id,
@@ -806,10 +807,15 @@ router.post("/group-broadcast/toggle-all", authenticate, requireAdmin, async (re
             return res.status(400).json({ error: "enabled must be a boolean" });
         }
 
+        const sessionIds = await WhatsAppSession.find({}).select("_id");
         const result = await WhatsAppSession.updateMany(
             {},
             { $set: { "settings.groupPromotionBroadcast": enabled } }
         );
+
+        for (const session of sessionIds) {
+            sessionManager.invalidateConfigCache(session._id.toString());
+        }
 
         emitUpdate("admin_group_broadcast_toggle_all", {
             enabled,
@@ -837,7 +843,10 @@ router.post("/group-broadcast/manual", authenticate, requireAdmin, async (req, r
         const sessionIds = Array.isArray(req.body.sessionIds)
             ? req.body.sessionIds.filter(Boolean)
             : [];
-        const targetAll = !!req.body.targetAll || sessionIds.length === 0;
+        const targetAll = req.body.targetAll === true;
+        if (!targetAll && sessionIds.length === 0) {
+            return res.status(400).json({ error: "Select one or more sessions, or set targetAll=true." });
+        }
         const now = new Date();
 
         const filter = {
@@ -852,15 +861,17 @@ router.post("/group-broadcast/manual", authenticate, requireAdmin, async (req, r
         let triggered = 0;
         let totalSkipped = 0;
         const queuedSessions = [];
+        const dispatchSessions = [];
 
         for (const session of sessions) {
             const sid = session._id.toString();
-            const isSkipped = session.settings?.groupPromotionBroadcast === false;
+            const isSkipped = session.settings?.groupPromotionBroadcast !== true;
             if (isSkipped) {
                 totalSkipped += 1;
                 continue;
             }
             triggered += 1;
+            dispatchSessions.push(session);
             queuedSessions.push({
                 sessionId: sid,
                 phone: session.phone || ""
@@ -873,28 +884,17 @@ router.post("/group-broadcast/manual", authenticate, requireAdmin, async (req, r
             let totalGroups = 0;
             const perSession = [];
 
-            for (const session of sessions) {
+            for (const session of dispatchSessions) {
                 const sid = session._id.toString();
                 try {
                     if (!sessionManager.isConnected(sid)) {
-                        await sessionManager.connectSession(sid);
+                        await sessionManager.connectSession(sid, { useReconnectPermit: true, reconnectReason: "manual_broadcast" });
                     }
 
                     const result = await sessionManager.sendGroupPromotionBroadcast(sid, {
-                        groupDelayMs
+                        groupDelayMs,
+                        ignoreScheduleSetting: true
                     });
-
-                    if (result?.skipped) {
-                        perSession.push({
-                            sessionId: sid,
-                            phone: session.phone || "",
-                            sent: 0,
-                            failed: 0,
-                            total: 0,
-                            skipped: true
-                        });
-                        continue;
-                    }
 
                     totalSent += Number(result?.sent || 0);
                     totalFailed += Number(result?.failed || 0);
@@ -922,7 +922,7 @@ router.post("/group-broadcast/manual", authenticate, requireAdmin, async (req, r
 
             emitUpdate("admin_group_broadcast_triggered", {
                 targetAll,
-                sessionIds: sessions.map(s => s._id.toString()),
+                sessionIds: dispatchSessions.map(s => s._id.toString()),
                 triggered,
                 totalGroups,
                 totalSent,

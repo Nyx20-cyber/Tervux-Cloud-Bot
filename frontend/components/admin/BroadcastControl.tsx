@@ -113,7 +113,7 @@ export function BroadcastControl() {
         try {
             const payload = scope === "all"
                 ? { targetAll: true }
-                : { sessionIds: selectedIds };
+                : { targetAll: false, sessionIds: selectedIds };
 
             const res = await api.post("/admin/group-broadcast/manual", payload);
             setResult({
@@ -310,11 +310,11 @@ export function BroadcastControl() {
                                         </p>
                                     </div>
                                     <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-lg border ${
-                                        session.settings?.groupPromotionBroadcast !== false
+                                        session.settings?.groupPromotionBroadcast === true
                                             ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
                                             : "border-red-500/20 bg-red-500/10 text-red-300"
                                     }`}>
-                                        {session.settings?.groupPromotionBroadcast !== false ? t.admin_broadcast_on : t.admin_broadcast_off}
+                                        {session.settings?.groupPromotionBroadcast === true ? t.admin_broadcast_on : t.admin_broadcast_off}
                                     </span>
                                 </label>
                             );

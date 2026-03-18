@@ -1,8 +1,8 @@
-import { getCachedConfig, updateConfig, invalidateConfigCache } from "../../services/configService.js";
+import { getCachedConfig, updateConfig } from "../../services/configService.js";
 
 // Helper for toggle commands
-const createToggle = (settingKey, displayName) => async (sock, m, args) => {
-    const config = await getCachedConfig(sock.sessionId);
+const createToggle = (settingKey, displayName) => async (sock, m, args, ctx = {}) => {
+    const config = ctx.config || await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     const value = args[0]?.toLowerCase();
 
@@ -16,8 +16,12 @@ const createToggle = (settingKey, displayName) => async (sock, m, args) => {
     }
 
     const newValue = value === "on";
-    await updateConfig(sock.sessionId, { [settingKey]: newValue });
-    invalidateConfigCache(sock.sessionId);
+    const updatedSession = await updateConfig(sock.sessionId, { [settingKey]: newValue });
+    if (updatedSession && ctx.sessionManager?.primeSessionRuntimeFromDocument) {
+        await ctx.sessionManager.primeSessionRuntimeFromDocument(updatedSession);
+    } else if (ctx.sessionManager?.invalidateConfigCache) {
+        ctx.sessionManager.invalidateConfigCache(sock.sessionId);
+    }
 
     return `╔══════════════════════════════════╗
 ║    ✅ *𝕊𝔼𝕋𝕋𝕀ℕ𝔾 𝕌ℙ𝔻𝔸𝕋𝔼𝔻* ✅      ║

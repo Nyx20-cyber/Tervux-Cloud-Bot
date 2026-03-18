@@ -1,10 +1,10 @@
-import { getCachedConfig, updateConfig, invalidateConfigCache } from "../../services/configService.js";
+import { getCachedConfig, updateConfig } from "../../services/configService.js";
 
 // Allowed prefix symbols - single special characters only
 const ALLOWED_PREFIXES = ["!", ".", "/", "#", "$", "%", "^", "&", "*", "-", "+", "=", "~", "?", ";", ":", ">", "<", "|", "\\"];
 
-export const prefix = async (sock, m, args) => {
-    const config = await getCachedConfig(sock.sessionId);
+export const prefix = async (sock, m, args, ctx = {}) => {
+    const config = ctx.config || await getCachedConfig(sock.sessionId);
     const newPrefix = args[0];
 
     if (!newPrefix) {
@@ -75,10 +75,14 @@ No changes were made.`;
     const oldPrefix = config.prefix || "!";
 
     try {
-        const success = await updateConfig(sock.sessionId, { prefix: newPrefix });
-        invalidateConfigCache(sock.sessionId);
+        const updatedSession = await updateConfig(sock.sessionId, { prefix: newPrefix });
+        if (updatedSession && ctx.sessionManager?.primeSessionRuntimeFromDocument) {
+            await ctx.sessionManager.primeSessionRuntimeFromDocument(updatedSession);
+        } else if (ctx.sessionManager?.invalidateConfigCache) {
+            ctx.sessionManager.invalidateConfigCache(sock.sessionId);
+        }
 
-        if (success) {
+        if (updatedSession) {
             return `╔══════════════════════════════════╗
 ║   ✅ *ℙℝ𝔼𝔽𝕀𝕏 𝕌ℙ𝔻𝔸𝕋𝔼𝔻* ✅          ║
 ╚══════════════════════════════════╝

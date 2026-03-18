@@ -354,6 +354,7 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         session.status = "active";
         session.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
         await session.save();
+        await sessionManager.primeSessionRuntimeFromDocument(session);
 
         emitUpdate("admin_session_updated", {
             sessionId: session._id.toString(),
@@ -362,7 +363,7 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
 
         // Connect session Manager
         if (!sessionManager.isConnected(session._id.toString())) {
-            sessionManager.connectSession(session._id.toString());
+            sessionManager.connectSession(session._id.toString(), { useReconnectPermit: true, reconnectReason: "deploy" });
         }
 
         const deployedSessionId = session._id.toString();
@@ -371,7 +372,7 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         setTimeout(async () => {
             try {
                 if (!sessionManager.isConnected(deployedSessionId)) {
-                    await sessionManager.connectSession(deployedSessionId);
+                    await sessionManager.connectSession(deployedSessionId, { useReconnectPermit: true, reconnectReason: "deployment_message" });
                 }
                 await sessionManager.sendDeploymentSuccessMessage(deployedSessionId, {
                     cost,
@@ -460,10 +461,7 @@ router.put("/:id/settings", authenticate, async (req, res) => {
             return res.status(404).json({ error: "Session not found" });
         }
 
-        // Notify the live session about settings change
-        if (sessionManager?.isConnected(session._id.toString())) {
-            sessionManager.invalidateConfigCache(session._id.toString());
-        }
+        await sessionManager.primeSessionRuntimeFromDocument(session);
 
         res.json({ success: true, settings: session.settings });
 
@@ -495,6 +493,7 @@ router.post("/:id/disconnect", authenticate, async (req, res) => {
 
         session.status = "disconnected";
         await session.save();
+        await sessionManager.primeSessionRuntimeFromDocument(session);
 
         emitUpdate("admin_session_updated", {
             sessionId: session._id.toString(),
@@ -525,6 +524,7 @@ router.post("/:id/pause", authenticate, async (req, res) => {
 
         session.status = "paused";
         await session.save();
+        await sessionManager.primeSessionRuntimeFromDocument(session);
 
         if (sessionManager?.isConnected(session._id.toString())) {
             await sessionManager.pauseSession(session._id.toString());
@@ -569,6 +569,7 @@ router.post("/:id/resume", authenticate, async (req, res) => {
         // Subscription checks out, resume
         session.status = "active";
         await session.save();
+        await sessionManager.primeSessionRuntimeFromDocument(session);
 
         await sessionManager.resumeSession(session._id.toString());
 

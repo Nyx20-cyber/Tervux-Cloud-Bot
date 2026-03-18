@@ -45,6 +45,14 @@ const whatsAppSessionSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    lastGroupPromotionBroadcastAt: {
+        type: Date,
+        default: null
+    },
+    lastGroupPromotionBroadcastDateKey: {
+        type: String,
+        default: ""
+    },
     pairingStartedAt: {
         type: Date,
         default: Date.now

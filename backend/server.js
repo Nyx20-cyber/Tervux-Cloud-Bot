@@ -20,6 +20,8 @@ const httpServer = createServer(app);
 initSocket(httpServer);
 const EAT_TIMEZONE = "Africa/Dar_es_Salaam";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const GROUP_BROADCAST_WINDOW_MINUTES = Number.parseInt(process.env.GROUP_BROADCAST_WINDOW_MINUTES || "30", 10);
+const GROUP_BROADCAST_WINDOW_END_MINUTE = String(Math.max(GROUP_BROADCAST_WINDOW_MINUTES - 1, 0)).padStart(2, "0");
 
 let lastSuppressedNoiseAt = 0;
 const flattenLogArgs = (args = []) =>
@@ -130,9 +132,11 @@ async function runDailySchedulers() {
         const now = getEatClock();
         const minutesOfDay = getEatMinutesOfDay(now);
 
-        // Midnight group broadcast: send once any time after 00:00 EAT for the current date.
+        // Midnight group broadcast: send only within a short midnight window to avoid
+        // random daytime sends after restarts.
         if (
             minutesOfDay >= 0 &&
+            minutesOfDay < GROUP_BROADCAST_WINDOW_MINUTES &&
             lastGroupBroadcastDateKey !== now.dateKey
         ) {
             lastGroupBroadcastDateKey = now.dateKey;
@@ -238,7 +242,7 @@ async function start() {
         }, 60_000);
         // Run one immediate tick on startup so within-window restarts don't miss schedules.
         await runDailySchedulers();
-        console.log(`📣 Daily schedulers active (Group: 00:00 EAT, Reseller: 08:00 EAT, Deploy Reminder: 10:00 EAT, Referral Reminder: 14:00 EAT, Re-engagement: every 5h EAT, tz=${EAT_TIMEZONE}).`);
+        console.log(`📣 Daily schedulers active (Group: 00:00-00:${GROUP_BROADCAST_WINDOW_END_MINUTE} EAT, Reseller: 08:00 EAT, Deploy Reminder: 10:00 EAT, Referral Reminder: 14:00 EAT, Re-engagement: every 5h EAT, tz=${EAT_TIMEZONE}).`);
 
         // 7. Check pending payments every 15 seconds for near-instant user feedback
         setInterval(() => {

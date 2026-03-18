@@ -55,7 +55,7 @@ export function SessionMonitor() {
     const [editPhone, setEditPhone] = useState("");
     const [editStatus, setEditStatus] = useState<SessionRecord["status"]>("disconnected");
     const [editExpiresAt, setEditExpiresAt] = useState("");
-    const [editGroupPromotionBroadcast, setEditGroupPromotionBroadcast] = useState(true);
+    const [editGroupPromotionBroadcast, setEditGroupPromotionBroadcast] = useState(false);
 
     const fetchSessions = useCallback(async (status?: string) => {
         setIsLoading(true);
@@ -183,7 +183,7 @@ export function SessionMonitor() {
                 ? new Date(session.expiresAt).toISOString().slice(0, 16)
                 : ""
         );
-        setEditGroupPromotionBroadcast(session.settings?.groupPromotionBroadcast !== false);
+        setEditGroupPromotionBroadcast(session.settings?.groupPromotionBroadcast === true);
     };
 
     const handleSaveEdit = async () => {
@@ -222,7 +222,7 @@ export function SessionMonitor() {
             s.userId?.email?.toLowerCase().includes(search.toLowerCase()) ||
             s.userId?.name?.toLowerCase().includes(search.toLowerCase());
 
-        const broadcastEnabled = s.settings?.groupPromotionBroadcast !== false;
+        const broadcastEnabled = s.settings?.groupPromotionBroadcast === true;
         const matchesBroadcast =
             broadcastFilter === "all" ||
             (broadcastFilter === "on" && broadcastEnabled) ||
@@ -235,7 +235,7 @@ export function SessionMonitor() {
 
     const liveCount = sessions.filter(s => s.isLive).length;
     const activeCount = sessions.filter(s => s.status === "active").length;
-    const broadcastOnCount = sessions.filter(s => s.settings?.groupPromotionBroadcast !== false).length;
+    const broadcastOnCount = sessions.filter(s => s.settings?.groupPromotionBroadcast === true).length;
     const broadcastOffCount = Math.max(0, sessions.length - broadcastOnCount);
 
     return (
@@ -336,7 +336,7 @@ export function SessionMonitor() {
                     <AnimatePresence>
                         {filteredSessions.map(session => {
                             const st = statusStyles[session.status] || statusStyles.disconnected;
-                            const broadcastEnabled = session.settings?.groupPromotionBroadcast !== false;
+                            const broadcastEnabled = session.settings?.groupPromotionBroadcast === true;
                             return (
                                 <motion.div
                                     key={session._id}

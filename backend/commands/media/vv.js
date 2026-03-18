@@ -2,9 +2,9 @@ import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { sessionManager } from "../../services/whatsappService.js";
 import { getCachedConfig } from "../../services/configService.js";
 
-export const vv = async (sock, m, args) => {
+export const vv = async (sock, m, args, ctx = {}) => {
     try {
-        const config = await getCachedConfig(sock.sessionId);
+        const config = ctx.config || await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
         const quotedMsgId = m.message?.extendedTextMessage?.contextInfo?.stanzaId;
         const quotedMessage = m.message?.extendedTextMessage?.contextInfo?.quotedMessage;

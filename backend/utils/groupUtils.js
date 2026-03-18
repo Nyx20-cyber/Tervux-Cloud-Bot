@@ -1,64 +1,110 @@
+const metadataCache = new Map();
+const GROUP_METADATA_CACHE_TTL_MS = Number(process.env.GROUP_METADATA_CACHE_TTL_MS || 30_000);
+
+const buildMetadataCacheKey = (sessionId, groupJid) => `group_metadata:${sessionId}:${groupJid}`;
+
+const getFreshMetadata = (key) => {
+    const entry = metadataCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > GROUP_METADATA_CACHE_TTL_MS) {
+        metadataCache.delete(key);
+        return null;
+    }
+    return entry.data;
+};
+
+const setFreshMetadata = (key, data) => {
+    metadataCache.set(key, {
+        data,
+        timestamp: Date.now()
+    });
+    return data;
+};
+
+export function invalidateGroupMetadataCache(sessionId, groupJid) {
+    if (!sessionId) return;
+    if (groupJid) {
+        metadataCache.delete(buildMetadataCacheKey(sessionId, groupJid));
+        return;
+    }
+    const prefix = `group_metadata:${sessionId}:`;
+    for (const key of metadataCache.keys()) {
+        if (key.startsWith(prefix)) {
+            metadataCache.delete(key);
+        }
+    }
+}
+
 /**
- * Helper: Get group metadata (cached if possible, but for now direct)
+ * Helper: Get group metadata with short-lived cache.
  */
-export async function getGroupMetadata(sock, groupJid) {
+export async function getGroupMetadata(sock, groupJid, options = {}) {
+    const sessionId = String(sock?.sessionId || "unknown");
+    const cacheKey = buildMetadataCacheKey(sessionId, groupJid);
+
+    if (!options.forceRefresh) {
+        const cached = getFreshMetadata(cacheKey);
+        if (cached) {
+            return cached;
+        }
+    }
+
     try {
-        // console.log(`📡 [GroupMetadata] Fetching for ${groupJid}...`);
         const metadata = await sock.groupMetadata(groupJid);
         if (!metadata) {
             console.error(`❌ [GroupMetadata] Received null/undefined for ${groupJid}`);
+            return null;
         }
-        return metadata;
+        return setFreshMetadata(cacheKey, metadata);
     } catch (e) {
         console.error(`❌ [GroupMetadata] Error fetching ${groupJid}:`, e.message);
         return null;
     }
 }
 
+const cleanJid = (jid) => (jid ? jid.split(":")[0].split("@")[0] : "");
+
+export async function getGroupParticipantContext(sock, groupJid, userJid) {
+    const metadata = await getGroupMetadata(sock, groupJid);
+    if (!metadata) {
+        return {
+            metadata: null,
+            admins: [],
+            senderIsAdmin: false,
+            botIsAdmin: false
+        };
+    }
+
+    const admins = metadata.participants
+        .filter((participant) => participant.admin === "admin" || participant.admin === "superadmin")
+        .map((participant) => participant.id);
+
+    const targetClean = cleanJid(userJid);
+    const botJid = sock.user?.id || "";
+    const botLid = sock.user?.lid || "";
+    const botCandidates = [cleanJid(botJid), cleanJid(botLid)].filter(Boolean);
+
+    const senderIsAdmin = admins.includes(userJid) || admins.some((adminJid) => cleanJid(adminJid) === targetClean);
+    const botIsAdmin = admins.some((adminJid) => {
+        const normalized = cleanJid(adminJid);
+        return botCandidates.includes(normalized);
+    });
+
+    return {
+        metadata,
+        admins,
+        senderIsAdmin,
+        botIsAdmin
+    };
+}
+
 /**
- * Helper: Check if user is group admin
+ * Helper: Check if user is group admin.
  */
 export async function isAdmin(sock, groupJid, userJid) {
     try {
-        const metadata = await getGroupMetadata(sock, groupJid);
-        if (!metadata) {
-            console.error("❌ isAdmin: No metadata found for group", groupJid);
-            return false;
-        }
-
-        // Get the list of admin IDs from participants
-        const admins = metadata.participants
-            .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
-            .map(p => p.id);
-
-        // Helper to normalize JIDs for comparison (strips device/version suffixes)
-        const clean = (jid) => jid ? jid.split(":")[0].split("@")[0] : "";
-
-        const targetClean = clean(userJid);
-
-        // 1. Direct check: Is the target JID (phone or LID) in the admin list?
-        if (admins.includes(userJid)) return true;
-
-        // 2. Normalized check: Do the number/ID parts match?
-        if (admins.some(a => clean(a) === targetClean)) return true;
-
-        // 3. Bot-specific check (Bot often has different Phone vs LID JIDs)
-        const botJid = sock.user?.id || "";
-        const botLid = sock.user?.lid || "";
-
-        if (clean(botJid) === targetClean || (botLid && clean(botLid) === targetClean)) {
-            // Target is the bot. Check if bot's phone OR lid is in admin list.
-            const isBotAdmin = admins.some(a => {
-                const aClean = clean(a);
-                return aClean === clean(botJid) || (botLid && aClean === clean(botLid));
-            });
-            if (isBotAdmin) return true;
-        }
-
-        // 4. Special LID matching for other users (if we have a way to resolve)
-        // For now, these are the most common cases.
-
-        return false;
+        const context = await getGroupParticipantContext(sock, groupJid, userJid);
+        return context.senderIsAdmin;
     } catch (e) {
         console.error("❌ isAdmin Error:", e);
         return false;
@@ -66,14 +112,12 @@ export async function isAdmin(sock, groupJid, userJid) {
 }
 
 /**
- * Helper: Check if bot is group admin
+ * Helper: Check if bot is group admin.
  */
 export async function isBotAdmin(sock, groupJid) {
     try {
-        const botJid = sock.user?.id || "";
-        if (!botJid) return false;
-
-        return await isAdmin(sock, groupJid, botJid);
+        const context = await getGroupParticipantContext(sock, groupJid, sock.user?.id || "");
+        return context.botIsAdmin;
     } catch (e) {
         console.error("❌ isBotAdmin Error:", e);
         return false;

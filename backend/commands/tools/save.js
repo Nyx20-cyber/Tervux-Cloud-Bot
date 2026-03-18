@@ -1,8 +1,8 @@
 import { downloadMediaMessage, jidNormalizedUser } from "@whiskeysockets/baileys";
 import { getCachedConfig } from "../../services/configService.js";
 
-export const save = async (sock, m, args) => {
-    const config = await getCachedConfig(sock.sessionId);
+export const save = async (sock, m, args, ctx = {}) => {
+    const config = ctx.config || await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     
     // Safety check: only the owner can use this (or the bot itself)

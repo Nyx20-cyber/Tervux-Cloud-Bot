@@ -1,16 +1,17 @@
 /**
- * Group Settings Storage - Manages per-group settings like welcome/goodbye messages
- * Refactored to operate 100% on MongoDB for multi-tenant stateless safety.
+ * Group Settings Storage - DB-backed with hot caches.
  */
 
 import GroupSettings from "../models/GroupSettings.js";
+import { delKey, getJson, setJson } from "../lib/redis.js";
 
-/**
- * Deep merge helper - merges nested objects instead of overwriting them
- */
+const groupSettingsCache = new Map();
+const GROUP_SETTINGS_CACHE_TTL_MS = Number(process.env.GROUP_SETTINGS_CACHE_TTL_MS || 30_000);
+const GROUP_SETTINGS_REDIS_TTL_SECONDS = Number(process.env.GROUP_SETTINGS_CACHE_TTL_SECONDS || 30);
+
 function deepMerge(target, source) {
     const result = { ...target };
-    for (const key of Object.keys(source)) {
+    for (const key of Object.keys(source || {})) {
         if (
             source[key] &&
             typeof source[key] === "object" &&
@@ -27,9 +28,6 @@ function deepMerge(target, source) {
     return result;
 }
 
-/**
- * Default group settings mapping for new records
- */
 const DEFAULT_GROUP_SETTINGS = {
     welcome: {
         enabled: false,
@@ -54,41 +52,76 @@ const DEFAULT_GROUP_SETTINGS = {
     }
 };
 
-/**
- * Load settings for a group asynchronously from DB
- */
+const buildCacheKey = (sessionId, groupJid) => `group_settings:${sessionId}:${groupJid}`;
+
+const getFreshCacheValue = (key) => {
+    const entry = groupSettingsCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > GROUP_SETTINGS_CACHE_TTL_MS) {
+        groupSettingsCache.delete(key);
+        return null;
+    }
+    return entry.data;
+};
+
+const setFreshCacheValue = (key, data) => {
+    groupSettingsCache.set(key, {
+        data,
+        timestamp: Date.now()
+    });
+    return data;
+};
+
+const normalizeGroupSettings = (doc, sessionId, groupJid) => deepMerge(DEFAULT_GROUP_SETTINGS, {
+    sessionId,
+    groupJid,
+    ...(doc?.toObject?.() || doc || {})
+});
+
+export async function invalidateGroupSettingsCache(sessionId, groupJid) {
+    if (!sessionId || !groupJid) return;
+    const key = buildCacheKey(sessionId, groupJid);
+    groupSettingsCache.delete(key);
+    await delKey(key);
+}
+
+export async function primeGroupSettingsCache(sessionId, groupJid, settings) {
+    if (!sessionId || !groupJid) return null;
+    const key = buildCacheKey(sessionId, groupJid);
+    const normalized = normalizeGroupSettings(settings, sessionId, groupJid);
+    setFreshCacheValue(key, normalized);
+    await setJson(key, normalized, GROUP_SETTINGS_REDIS_TTL_SECONDS);
+    return normalized;
+}
+
 export async function loadGroupSettings(sessionId, groupJid) {
     if (!sessionId) {
         console.error("❌ Need sessionId in loadGroupSettings");
         return deepMerge({}, DEFAULT_GROUP_SETTINGS);
     }
 
+    const key = buildCacheKey(sessionId, groupJid);
+    const memoryValue = getFreshCacheValue(key);
+    if (memoryValue) {
+        return memoryValue;
+    }
+
+    const redisValue = await getJson(key);
+    if (redisValue) {
+        return setFreshCacheValue(key, normalizeGroupSettings(redisValue, sessionId, groupJid));
+    }
+
     try {
-        const doc = await GroupSettings.findOneAndUpdate(
-            { sessionId, groupJid },
-            {
-                $setOnInsert: {
-                    sessionId,
-                    groupJid,
-                    ...DEFAULT_GROUP_SETTINGS
-                }
-            },
-            {
-                upsert: true,
-                returnDocument: "after"
-            }
-        );
-        // Deep merge standard defaults over existing objects to prevent partial undefined values if schema changed
-        return deepMerge(DEFAULT_GROUP_SETTINGS, doc.toObject());
+        const doc = await GroupSettings.findOne({ sessionId, groupJid });
+        const normalized = normalizeGroupSettings(doc, sessionId, groupJid);
+        await primeGroupSettingsCache(sessionId, groupJid, normalized);
+        return normalized;
     } catch (err) {
         console.error(`❌ Failed to load group settings for ${groupJid}:`, err.message);
-        return deepMerge({}, DEFAULT_GROUP_SETTINGS);
+        return normalizeGroupSettings(null, sessionId, groupJid);
     }
 }
 
-/**
- * Save settings for a group asynchronously to DB
- */
 export async function saveGroupSettings(sessionId, groupJid, settings) {
     if (!sessionId) return false;
     try {
@@ -97,6 +130,7 @@ export async function saveGroupSettings(sessionId, groupJid, settings) {
             { $set: settings },
             { upsert: true }
         );
+        await primeGroupSettingsCache(sessionId, groupJid, settings);
         return true;
     } catch (err) {
         console.error(`❌ Failed to save group settings for ${groupJid}:`, err.message);
@@ -104,34 +138,22 @@ export async function saveGroupSettings(sessionId, groupJid, settings) {
     }
 }
 
-/**
- * Update specific group settings asynchronously
- */
 export async function updateGroupSettings(sessionId, groupJid, updates) {
     const settings = await loadGroupSettings(sessionId, groupJid);
     const newSettings = deepMerge(settings, updates);
     return await saveGroupSettings(sessionId, groupJid, newSettings);
 }
 
-/**
- * Get welcome message for a group
- */
 export async function getWelcomeMessage(sessionId, groupJid) {
     const settings = await loadGroupSettings(sessionId, groupJid);
     return settings.welcome;
 }
 
-/**
- * Get goodbye message for a group
- */
 export async function getGoodbyeMessage(sessionId, groupJid) {
     const settings = await loadGroupSettings(sessionId, groupJid);
     return settings.goodbye;
 }
 
-/**
- * Save invite code for a group
- */
 export async function saveInviteCode(sessionId, groupJid, code) {
     const settings = await loadGroupSettings(sessionId, groupJid);
     settings.inviteCode = code;
@@ -140,26 +162,17 @@ export async function saveInviteCode(sessionId, groupJid, code) {
     return await saveGroupSettings(sessionId, groupJid, settings);
 }
 
-/**
- * Get invite code for a group
- */
 export async function getInviteCode(sessionId, groupJid) {
     const settings = await loadGroupSettings(sessionId, groupJid);
     return settings.inviteCode;
 }
 
-/**
- * Update last known group name
- */
 export async function updateGroupName(sessionId, groupJid, name) {
     const settings = await loadGroupSettings(sessionId, groupJid);
     settings.lastKnownName = name;
     return await saveGroupSettings(sessionId, groupJid, settings);
 }
 
-/**
- * List all groups with saved invite codes mapping to the active session
- */
 export async function getGroupsWithInviteCodes(sessionId) {
     if (!sessionId) return [];
     try {
@@ -167,7 +180,7 @@ export async function getGroupsWithInviteCodes(sessionId) {
             sessionId,
             inviteCode: { $exists: true, $ne: "" }
         });
-    } catch (err) {
+    } catch {
         return [];
     }
 }

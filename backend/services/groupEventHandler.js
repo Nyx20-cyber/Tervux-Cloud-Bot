@@ -1,9 +1,21 @@
 import { loadGroupSettings, saveGroupSettings } from "./groupSettingsService.js";
-import { isAdmin, isBotAdmin, getGroupMetadata } from "../utils/groupUtils.js";
+import { getGroupMetadata, getGroupParticipantContext, invalidateGroupMetadataCache } from "../utils/groupUtils.js";
 import { getCachedConfig } from "./configService.js";
 import GroupMemberStats from "../models/GroupMemberStats.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { sticker } from "../commands/tools/sticker.js";
+
+const enqueueLowPriority = (sock, label, fn) => {
+    const manager = sock?.__sessionManager;
+    if (manager?.enqueueLowPriorityTask) {
+        manager.enqueueLowPriorityTask(sock.sessionId, label, fn);
+        return;
+    }
+
+    Promise.resolve()
+        .then(fn)
+        .catch((error) => console.error(`[GroupLowPriority] ${label} failed:`, error.message));
+};
 
 /**
  * Handle Group Participants Update (Welcome/Goodbye)
@@ -20,14 +32,17 @@ export async function handleGroupParticipantsUpdate(sock, update) {
     console.log(`👥 [GroupEvent] Participants update: action=${action}, group=${id}, participants=${normalizedParticipants.join(", ")}`);
 
     try {
+        invalidateGroupMetadataCache(sock.sessionId, id);
         const settings = await loadGroupSettings(sock.sessionId, id);
         console.log(`📋 [GroupEvent] Settings loaded: welcome.enabled=${settings.welcome?.enabled}, goodbye.enabled=${settings.goodbye?.enabled}`);
 
-        const metadata = await getGroupMetadata(sock, id);
+        const metadata = await getGroupMetadata(sock, id, { forceRefresh: true });
         if (!metadata) {
             console.error(`❌ [GroupEvent] Failed to get group metadata for ${id}`);
             return;
         }
+
+        const botContext = await getGroupParticipantContext(sock, id, sock.user?.id || "");
 
         const groupName = metadata?.subject || "Group";
         const desc = metadata?.desc?.toString() || "";
@@ -72,8 +87,7 @@ export async function handleGroupParticipantsUpdate(sock, update) {
                 const isLocal = participant.startsWith("255");
                 if (!isLocal) {
                     console.log(`🛡️ [Antifake] Kicking non-255 number: ${participant} from ${id}`);
-                    const botIsAdmin = await isBotAdmin(sock, id);
-                    if (botIsAdmin) {
+                    if (botContext.botIsAdmin) {
                         await sock.groupParticipantsUpdate(id, [participant], "remove");
                         await sock.sendMessage(id, {
                             text: `🛡️ *𝕋𝔼ℝ𝕍𝕌𝕏 𝔸ℕ𝕋𝕀𝔽𝔸𝕂𝔼* 🛡️\n\n@${participant.split("@")[0]} has been kicked. Only local (+255) numbers are allowed in this group!`,
@@ -104,6 +118,9 @@ export async function handleGroupMessage(sock, m) {
     if (sender.split(":")[0].split("@")[0] === botJid.split("@")[0]) return false;
 
     const settings = await loadGroupSettings(sock.sessionId, remoteJid);
+    const groupContext = await getGroupParticipantContext(sock, remoteJid, sender);
+    const senderIsAdmin = groupContext.senderIsAdmin;
+    const botIsAdmin = groupContext.botIsAdmin;
 
     // Check if bot is disabled for this group
     if (settings.botEnabled === false) {
@@ -154,14 +171,9 @@ export async function handleGroupMessage(sock, m) {
                 return false;
             }
 
-            // Check if sender is admin (exempt)
-            const senderIsAdmin = await isAdmin(sock, remoteJid, sender);
-
             if (!senderIsAdmin) {
                 console.log(`🛡️ Antilink triggered for ${sender} in ${remoteJid}`);
 
-                // Check if bot is admin before trying to delete/kick
-                const botIsAdmin = await isBotAdmin(sock, remoteJid);
                 if (!botIsAdmin) {
                     await sock.sendMessage(remoteJid, {
                         text: `🚫 *Link Detected!* I need admin privileges to manage antilink.`
@@ -192,22 +204,22 @@ export async function handleGroupMessage(sock, m) {
     }
 
     // --- 🚀 ACTIVITY TRACKING ---
-    try {
-        await GroupMemberStats.findOneAndUpdate(
-            { sessionId: sock.sessionId, groupJid: remoteJid, userJid: sender },
-            { $inc: { messageCount: 1 }, $set: { lastMessageAt: new Date() } },
-            { upsert: true }
-        );
-    } catch (e) {
-        console.error("Stats update error:", e.message);
-    }
+    enqueueLowPriority(sock, "group_member_stats", async () => {
+        try {
+            await GroupMemberStats.findOneAndUpdate(
+                { sessionId: sock.sessionId, groupJid: remoteJid, userJid: sender },
+                { $inc: { messageCount: 1 }, $set: { lastMessageAt: new Date() } },
+                { upsert: true }
+            );
+        } catch (e) {
+            console.error("Stats update error:", e.message);
+        }
+    });
 
     // --- 🚀 GROUPLOCK CHECK ---
     if (settings.grouplock?.until && new Date(settings.grouplock.until) > new Date()) {
-        const senderIsAdmin = await isAdmin(sock, remoteJid, sender);
         if (!senderIsAdmin) {
             console.log(`🛡️ [Grouplock] Deleting message from non-admin during lock in ${remoteJid}`);
-            const botIsAdmin = await isBotAdmin(sock, remoteJid);
             if (botIsAdmin) {
                 await sock.sendMessage(remoteJid, { delete: m.key });
                 return true;
@@ -227,10 +239,8 @@ export async function handleGroupMessage(sock, m) {
 
         const hasBadWord = settings.badwords.some(word => msgText.includes(word.toLowerCase()));
         if (hasBadWord) {
-            const senderIsAdmin = await isAdmin(sock, remoteJid, sender);
             if (!senderIsAdmin) {
                 console.log(`🛡️ [Badword] Filtered message in ${remoteJid}`);
-                const botIsAdmin = await isBotAdmin(sock, remoteJid);
                 if (botIsAdmin) {
                     await sock.sendMessage(remoteJid, { delete: m.key });
                     await sock.sendMessage(remoteJid, {
@@ -247,7 +257,6 @@ export async function handleGroupMessage(sock, m) {
     if (settings.autosticker?.enabled) {
         const isImage = !!m.message.imageMessage;
         if (isImage) {
-            const botIsAdmin = await isBotAdmin(sock, remoteJid);
             if (botIsAdmin) {
                 console.log(`🛡️ [Autosticker] Generating sticker for ${remoteJid}`);
                 // Simple trick: We call the sticker function directly with the message
@@ -300,4 +309,3 @@ export async function handleGroupMessage(sock, m) {
 
     return false; // Continue processing
 }
-
