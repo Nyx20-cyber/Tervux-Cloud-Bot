@@ -119,13 +119,13 @@ function SessionCard({ session }: { session: any }) {
     const handleDeploy = async () => {
         setIsDeploying(true);
         try {
-            await deploySession(session._id);
+            const result = await deploySession(session._id);
+            if (typeof result?.coins === "number") {
+                updateCoins(result.coins);
+            }
             toast.success(t.bot_deployed_success);
             // Refresh sessions to get new status
             fetchSessions();
-            // Refresh user for updated coin balance
-            const res = await api.get("/auth/me");
-            updateCoins(res.data.user.coins);
             setIsDeployDialogOpen(false);
         } catch (error: any) {
             const rawMsg = String(error?.response?.data?.error || error?.message || "");

@@ -10,7 +10,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 export function WhatsAppFloat() {
     const [config, setConfig] = useState<{ supportPhone: string } | null>(null);
     const [isVisible, setIsVisible] = useState(false);
-    const { token } = useAuthStore();
+    const { token, authReady, isAuthenticated } = useAuthStore();
 
     useEffect(() => {
         const fetchConfig = async () => {
@@ -29,6 +29,7 @@ export function WhatsAppFloat() {
     }, []);
 
     useEffect(() => {
+        if (!authReady || !isAuthenticated || !token) return;
         const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
         const socket = io(backendUrl, {
             transports: ["websocket", "polling"],
@@ -44,7 +45,7 @@ export function WhatsAppFloat() {
         return () => {
             socket.disconnect();
         };
-    }, [token]);
+    }, [token, authReady, isAuthenticated]);
 
     const handleWhatsAppClick = () => {
         if (!config?.supportPhone) return;

@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api, useAuthStore } from "@/store/useAuthStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ShieldCheck, Loader2, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
 import { motion } from "framer-motion";
@@ -27,6 +27,10 @@ export default function LoginPage() {
     const { language, setLanguage } = useLocaleStore();
     const t = translations[language];
     const router = useRouter();
+
+    useEffect(() => {
+        router.prefetch("/dashboard");
+    }, [router]);
 
     useEffect(() => {
         const fetchConfig = async () => {
@@ -61,7 +65,7 @@ export default function LoginPage() {
         setIsLoading(true);
         try {
             const res = await api.post("/auth/login", { email, password });
-            login(res.data.token, res.data.user);
+            login(res.data.token, res.data.user, res.data.refreshTokenExpiresAt ?? null);
             toast.success(t.successful_login);
             router.push("/dashboard");
         } catch (error: any) {

@@ -114,6 +114,8 @@ const getEatClock = () => {
     };
 };
 
+const getEatMinutesOfDay = (clock) => (clock.hour * 60) + clock.minute;
+
 let lastGroupBroadcastDateKey = null;
 let lastResellerNudgeDateKey = null;
 let lastDeployReminderDateKey = null;
@@ -126,11 +128,11 @@ async function runDailySchedulers() {
     schedulerTickRunning = true;
     try {
         const now = getEatClock();
+        const minutesOfDay = getEatMinutesOfDay(now);
 
-        // Midnight group broadcast window (00:00-00:14 EAT), once per date.
+        // Midnight group broadcast: send once any time after 00:00 EAT for the current date.
         if (
-            now.hour === 0 &&
-            now.minute < 15 &&
+            minutesOfDay >= 0 &&
             lastGroupBroadcastDateKey !== now.dateKey
         ) {
             lastGroupBroadcastDateKey = now.dateKey;
@@ -138,10 +140,9 @@ async function runDailySchedulers() {
             await runGroupPromotionBroadcast();
         }
 
-        // 08:00 reseller nudge window (08:00-08:29 EAT), once per date.
+        // 08:00 reseller nudge: send once any time after 08:00 EAT for the current date.
         if (
-            now.hour === 8 &&
-            now.minute < 30 &&
+            minutesOfDay >= (8 * 60) &&
             lastResellerNudgeDateKey !== now.dateKey
         ) {
             lastResellerNudgeDateKey = now.dateKey;
@@ -150,8 +151,7 @@ async function runDailySchedulers() {
         }
 
         if (
-            now.hour === 10 &&
-            now.minute < 30 &&
+            minutesOfDay >= (10 * 60) &&
             lastDeployReminderDateKey !== now.dateKey
         ) {
             lastDeployReminderDateKey = now.dateKey;
@@ -159,21 +159,21 @@ async function runDailySchedulers() {
             await runDeployReminderPush();
         }
 
-        if (
-            [1, 6, 11, 16, 21].includes(now.hour) &&
-            now.minute < 15
-        ) {
-            const slotKey = `${now.dateKey}-${String(now.hour).padStart(2, "0")}`;
+        {
+            const slotHours = [1, 6, 11, 16, 21];
+            const currentSlotHour = [...slotHours].reverse().find((hour) => minutesOfDay >= (hour * 60));
+            if (currentSlotHour !== undefined) {
+                const slotKey = `${now.dateKey}-${String(currentSlotHour).padStart(2, "0")}`;
             if (lastReengagementSlotKey !== slotKey) {
                 lastReengagementSlotKey = slotKey;
                 console.log(`🔔 [Scheduler] Triggering 5-hour re-engagement push for ${slotKey} (${EAT_TIMEZONE}).`);
                 await runReengagementPush();
             }
         }
+        }
 
         if (
-            now.hour === 14 &&
-            now.minute < 15 &&
+            minutesOfDay >= (14 * 60) &&
             lastReferralReminderDateKey !== now.dateKey
         ) {
             lastReferralReminderDateKey = now.dateKey;

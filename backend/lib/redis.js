@@ -1,16 +1,28 @@
 let redisClient = null;
 let redisReady = false;
 let warnedMissingRedisPkg = false;
+let warnedRedisDisabled = false;
+let warnedRedisUnavailable = false;
+let redisDisabledReason = "";
 
-const REDIS_URL = process.env.REDIS_URL || "";
+const getRedisUrl = () => String(process.env.REDIS_URL || "").trim();
 
 export const isRedisReady = () => redisReady && !!redisClient;
 
 export const getRedisClient = () => (isRedisReady() ? redisClient : null);
 
 export const initRedis = async () => {
+    const REDIS_URL = getRedisUrl();
+
     if (!REDIS_URL) {
-        console.warn("🟡 Redis disabled: REDIS_URL not set.");
+        if (!warnedRedisDisabled) {
+            warnedRedisDisabled = true;
+            console.warn("🟡 Redis disabled: REDIS_URL not set.");
+        }
+        return null;
+    }
+
+    if (redisDisabledReason) {
         return null;
     }
 
@@ -18,11 +30,24 @@ export const initRedis = async () => {
 
     try {
         const redisMod = await import("redis");
-        const client = redisMod.createClient({ url: REDIS_URL });
+        const client = redisMod.createClient({
+            url: REDIS_URL,
+            socket: {
+                connectTimeout: 5000,
+                reconnectStrategy: false
+            }
+        });
 
         client.on("error", (err) => {
             redisReady = false;
-            console.error("❌ Redis error:", err?.message || err);
+            const message = err?.message || String(err);
+            if (!warnedRedisUnavailable) {
+                warnedRedisUnavailable = true;
+                console.warn("🟡 Redis unavailable, app will continue without cache:", message);
+            }
+            if (err?.code === "ENOTFOUND" || String(message).includes("ENOTFOUND")) {
+                redisDisabledReason = message;
+            }
         });
 
         client.on("ready", () => {
@@ -43,7 +68,14 @@ export const initRedis = async () => {
             warnedMissingRedisPkg = true;
             console.warn("🟡 Redis package not installed. Run: npm i redis");
         } else {
-            console.warn("🟡 Redis unavailable, app will continue without cache:", error?.message || error);
+            const message = error?.message || String(error);
+            if (!warnedRedisUnavailable) {
+                warnedRedisUnavailable = true;
+                console.warn("🟡 Redis unavailable, app will continue without cache:", message);
+            }
+            if (error?.code === "ENOTFOUND" || String(message).includes("ENOTFOUND")) {
+                redisDisabledReason = message;
+            }
         }
         redisClient = null;
         redisReady = false;

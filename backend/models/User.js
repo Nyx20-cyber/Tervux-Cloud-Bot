@@ -105,6 +105,28 @@ const userSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    refreshTokens: {
+        type: [{
+            tokenHash: { type: String, required: true },
+            userAgent: {
+                type: String,
+                default: ""
+            },
+            createdAt: {
+                type: Date,
+                default: Date.now
+            },
+            expiresAt: {
+                type: Date,
+                required: true
+            },
+            lastUsedAt: {
+                type: Date,
+                default: Date.now
+            }
+        }],
+        default: []
+    },
     pushSubscriptions: {
         type: [{
             endpoint: { type: String, required: true },
@@ -158,6 +180,7 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 userSchema.methods.toJSON = function () {
     const obj = this.toObject();
     delete obj.password;
+    delete obj.refreshTokens;
     delete obj.pushSubscriptions;
     return obj;
 };

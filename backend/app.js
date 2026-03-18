@@ -1,3 +1,4 @@
+import "./env.js";
 import express from "express";
 import cors from "cors";
 import jwt from "jsonwebtoken";
@@ -43,6 +44,8 @@ app.use(async (req, res, next) => {
             const isAllowedDuringMaintenance =
                 req.path.startsWith("/api/admin") ||
                 req.path.startsWith("/api/auth/login") ||
+                req.path.startsWith("/api/auth/refresh") ||
+                req.path.startsWith("/api/auth/logout") ||
                 req.path.startsWith("/api/auth/me") ||
                 req.path.startsWith("/api/config") ||
                 req.path.startsWith("/webhook") ||

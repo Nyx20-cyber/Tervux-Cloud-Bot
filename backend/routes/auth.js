@@ -2,7 +2,17 @@ import { Router } from "express";
 import User from "../models/User.js";
 import Notification from "../models/Notification.js";
 import { getCachedPublicSettings } from "../models/SystemSettings.js";
-import { generateToken, authenticate } from "../middleware/auth.js";
+import {
+    generateToken,
+    generateRefreshToken,
+    hashRefreshToken,
+    parseCookies,
+    setRefreshTokenCookie,
+    clearRefreshTokenCookie,
+    REFRESH_COOKIE_NAME,
+    REFRESH_TOKEN_TTL_MS,
+    authenticate
+} from "../middleware/auth.js";
 import { emitToUser } from "../services/socketService.js";
 import { authLimiter } from "../middleware/rateLimiter.js";
 import validator from "validator";
@@ -11,6 +21,44 @@ import { syncVipFlagOnUser } from "../services/gamificationService.js";
 
 const sanitize = (str) => sanitizeHtml(str, { allowedTags: [], allowedAttributes: {} }).trim();
 const EAT_OFFSET_MS = 3 * 60 * 60 * 1000; // Africa/Dar_es_Salaam (UTC+3)
+const MAX_REFRESH_TOKENS_PER_USER = 5;
+const AUTH_TRACE = process.env.AUTH_TRACE === "true" || process.env.NODE_ENV !== "production";
+
+const traceAuth = (message, details = {}) => {
+    if (!AUTH_TRACE) return;
+    console.info(`[AuthTrace][Routes] ${message}`, details);
+};
+
+const buildRefreshTokenRecord = (rawToken, userAgent = "") => ({
+    tokenHash: hashRefreshToken(rawToken),
+    userAgent,
+    createdAt: new Date(),
+    lastUsedAt: new Date(),
+    expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
+});
+
+const pruneRefreshTokens = (tokens = []) => {
+    const now = Date.now();
+    return tokens
+        .filter((entry) => entry?.tokenHash && new Date(entry.expiresAt).getTime() > now)
+        .sort((a, b) => new Date(b.lastUsedAt || b.createdAt).getTime() - new Date(a.lastUsedAt || a.createdAt).getTime())
+        .slice(0, MAX_REFRESH_TOKENS_PER_USER);
+};
+
+const attachRefreshSession = async (user, req, res) => {
+    const refreshToken = generateRefreshToken();
+    const userAgent = String(req.headers["user-agent"] || "").slice(0, 500);
+    const tokenRecord = buildRefreshTokenRecord(refreshToken, userAgent);
+    user.refreshTokens = pruneRefreshTokens([...(user.refreshTokens || []), tokenRecord]);
+    await user.save();
+    setRefreshTokenCookie(res, refreshToken);
+    traceAuth("Attached refresh session.", {
+        userId: String(user._id),
+        refreshSessionCount: user.refreshTokens.length,
+        expiresAt: tokenRecord.expiresAt
+    });
+    return tokenRecord.expiresAt;
+};
 
 const getCurrentDailyClaimWindowStart = (now = new Date()) => {
     const eatNow = new Date(now.getTime() + EAT_OFFSET_MS);
@@ -102,10 +150,12 @@ router.post("/register", authLimiter, async (req, res) => {
         }
 
         const token = generateToken(user._id);
+        const refreshTokenExpiresAt = await attachRefreshSession(user, req, res);
 
         res.status(201).json({
             success: true,
             token,
+            refreshTokenExpiresAt,
             user: user.toJSON()
         });
     } catch (error) {
@@ -121,6 +171,11 @@ router.post("/register", authLimiter, async (req, res) => {
 router.post("/login", authLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
+        traceAuth("Login requested.", {
+            email: String(email || "").toLowerCase(),
+            hasPassword: Boolean(password),
+            cookieHeaderPresent: Boolean(req.headers.cookie)
+        });
 
         if (!email || !password) {
             return res.status(400).json({ error: "Email and password are required" });
@@ -145,10 +200,17 @@ router.post("/login", authLimiter, async (req, res) => {
         }
 
         const token = generateToken(user._id);
+        const refreshTokenExpiresAt = await attachRefreshSession(user, req, res);
+        traceAuth("Login succeeded.", {
+            userId: String(user._id),
+            role: user.role,
+            refreshTokenExpiresAt
+        });
 
         res.json({
             success: true,
             token,
+            refreshTokenExpiresAt,
             user: user.toJSON()
         });
     } catch (error) {
@@ -275,7 +337,9 @@ router.put("/account/password", authenticate, async (req, res) => {
         }
 
         user.password = String(newPassword);
+        user.refreshTokens = [];
         await user.save();
+        clearRefreshTokenCookie(res);
 
         res.json({ success: true, message: "Password updated successfully" });
     } catch (error) {
@@ -290,10 +354,19 @@ router.put("/account/password", authenticate, async (req, res) => {
  */
 router.get("/me", authenticate, async (req, res) => {
     try {
+        traceAuth("Profile requested.", {
+            userId: String(req.user._id),
+            hasAuthHeader: Boolean(req.headers.authorization),
+            cookieHeaderPresent: Boolean(req.headers.cookie)
+        });
         const user = await User.findById(req.user._id);
         if (syncVipFlagOnUser(user)) {
             await user.save();
         }
+        traceAuth("Profile returned.", {
+            userId: String(user._id),
+            role: user.role
+        });
         res.json({ user: user.toJSON() });
     } catch (error) {
         console.error("Profile error:", error);
@@ -402,12 +475,107 @@ router.post("/daily-claim", authenticate, async (req, res) => {
 });
 
 /**
- * POST /api/auth/logout
- * Invalidate session on client (stateless — clears token expectation)
+ * POST /api/auth/refresh
+ * Rotate refresh token and issue a new access token
  */
-router.post("/logout", authenticate, (req, res) => {
-    // With stateless JWT, logout is handled client-side by removing the token.
-    // This endpoint exists so clients have a standard endpoint to call.
+router.post("/refresh", async (req, res) => {
+    try {
+        const cookies = parseCookies(req);
+        const refreshToken = cookies[REFRESH_COOKIE_NAME];
+        traceAuth("Refresh requested.", {
+            hasRefreshCookie: Boolean(refreshToken),
+            cookieNames: Object.keys(cookies || {})
+        });
+        if (!refreshToken) {
+            clearRefreshTokenCookie(res);
+            return res.status(401).json({ error: "Refresh token required" });
+        }
+
+        const refreshHash = hashRefreshToken(refreshToken);
+        const user = await User.findOne({ "refreshTokens.tokenHash": refreshHash });
+        if (!user) {
+            traceAuth("Refresh failed: token not found.", {});
+            clearRefreshTokenCookie(res);
+            return res.status(401).json({ error: "Invalid refresh token" });
+        }
+
+        const matchingToken = (user.refreshTokens || []).find((entry) => entry.tokenHash === refreshHash);
+        if (!matchingToken || new Date(matchingToken.expiresAt).getTime() <= Date.now()) {
+            traceAuth("Refresh failed: token expired.", {
+                userId: String(user._id)
+            });
+            user.refreshTokens = pruneRefreshTokens((user.refreshTokens || []).filter((entry) => entry.tokenHash !== refreshHash));
+            await user.save();
+            clearRefreshTokenCookie(res);
+            return res.status(401).json({ error: "Refresh token expired" });
+        }
+
+        if (user.isBanned) {
+            traceAuth("Refresh blocked for banned user.", {
+                userId: String(user._id)
+            });
+            user.refreshTokens = pruneRefreshTokens((user.refreshTokens || []).filter((entry) => entry.tokenHash !== refreshHash));
+            await user.save();
+            clearRefreshTokenCookie(res);
+            return res.status(403).json({ error: "Your account is suspended by administrator. Please contact support." });
+        }
+
+        if (syncVipFlagOnUser(user)) {
+            await user.save();
+        }
+
+        const nextRefreshToken = generateRefreshToken();
+        const userAgent = String(req.headers["user-agent"] || "").slice(0, 500);
+        const nextTokenRecord = buildRefreshTokenRecord(nextRefreshToken, userAgent);
+        user.refreshTokens = pruneRefreshTokens([
+            ...(user.refreshTokens || []).filter((entry) => entry.tokenHash !== refreshHash),
+            nextTokenRecord
+        ]);
+        await user.save();
+
+        setRefreshTokenCookie(res, nextRefreshToken);
+        traceAuth("Refresh succeeded.", {
+            userId: String(user._id),
+            refreshSessionCount: user.refreshTokens.length,
+            nextExpiresAt: nextTokenRecord.expiresAt
+        });
+
+        return res.json({
+            success: true,
+            token: generateToken(user._id),
+            refreshTokenExpiresAt: nextTokenRecord.expiresAt,
+            user: user.toJSON()
+        });
+    } catch (error) {
+        console.error("Refresh token error:", error);
+        clearRefreshTokenCookie(res);
+        return res.status(500).json({ error: "Failed to refresh session" });
+    }
+});
+
+/**
+ * POST /api/auth/logout
+ * Revoke current refresh session and clear cookies
+ */
+router.post("/logout", async (req, res) => {
+    try {
+        const cookies = parseCookies(req);
+        const refreshToken = cookies[REFRESH_COOKIE_NAME];
+        traceAuth("Logout requested.", {
+            hasRefreshCookie: Boolean(refreshToken)
+        });
+        if (refreshToken) {
+            const refreshHash = hashRefreshToken(refreshToken);
+            await User.updateOne(
+                { "refreshTokens.tokenHash": refreshHash },
+                { $pull: { refreshTokens: { tokenHash: refreshHash } } }
+            );
+        }
+    } catch (error) {
+        console.error("Logout cleanup error:", error);
+    }
+
+    clearRefreshTokenCookie(res);
     res.json({ success: true, message: "Logged out successfully" });
 });
 

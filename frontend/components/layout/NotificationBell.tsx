@@ -32,30 +32,28 @@ interface Notification {
 export function NotificationBell() {
     const { language } = useLocaleStore();
     const token = useAuthStore((s) => s.token);
-    const forceLocalLogout = useAuthStore((s) => s.forceLocalLogout);
+    const authReady = useAuthStore((s) => s.authReady);
+    const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
     const t = translations[language];
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
 
     const fetchNotifications = useCallback(async () => {
-        if (!token) return;
+        if (!authReady || !isAuthenticated || !token) return;
         try {
             const res = await api.get("/notifications");
             setNotifications(res.data.notifications);
             setUnreadCount(res.data.notifications.filter((n: Notification) => !n.isRead).length);
         } catch (error: any) {
-            if (error?.response?.status === 401) {
-                forceLocalLogout();
-                return;
-            }
+            if (error?.authHandled) return;
             if (!(error?.response?.status === 503 && error?.response?.data?.maintenance)) {
                 // keep silent for transient auth/route transitions
             }
         }
-    }, [token, forceLocalLogout]);
+    }, [token, authReady, isAuthenticated]);
 
     useEffect(() => {
-        if (!token) return;
+        if (!authReady || !isAuthenticated || !token) return;
 
         queueMicrotask(() => {
             fetchNotifications();
@@ -77,7 +75,7 @@ export function NotificationBell() {
         return () => {
             socket.disconnect();
         };
-    }, [fetchNotifications, token]);
+    }, [fetchNotifications, token, authReady, isAuthenticated]);
 
     const markAsRead = async (id: string) => {
         try {

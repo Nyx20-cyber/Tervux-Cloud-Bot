@@ -34,7 +34,7 @@ interface DashboardStats {
 
 export default function DashboardPage() {
     const { sessions, isLoading, fetchSessions, updateSessionLocally } = useSessionStore();
-    const { user, token, forceLocalLogout } = useAuthStore();
+    const { user, token, authReady, isAuthenticated } = useAuthStore();
     const { language } = useLocaleStore();
     const t = translations[language];
     const tr = (key: keyof typeof translations.en, vars?: Record<string, string | number>) => {
@@ -47,10 +47,16 @@ export default function DashboardPage() {
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [isStatsLoading, setIsStatsLoading] = useState(true);
     const isMaintenanceError = (err: any) => err?.response?.status === 503 && err?.response?.data?.maintenance;
-    const isAuthError = (err: any) => err?.response?.status === 401;
 
     useEffect(() => {
-        if (!token || !user) return;
+        if (!authReady || !isAuthenticated || !token || !user) return;
+
+        if (process.env.NODE_ENV !== "production") {
+            console.info("[Auth][Dashboard] Starting protected dashboard fetches.", {
+                hasToken: Boolean(token),
+                userId: user?._id || null,
+            });
+        }
 
         fetchSessions();
 
@@ -59,10 +65,7 @@ export default function DashboardPage() {
                 const res = await api.get("/announcements");
                 setAnnouncements(res.data.announcements);
             } catch (err) {
-                if (isAuthError(err)) {
-                    forceLocalLogout();
-                    return;
-                }
+                if ((err as any)?.authHandled) return;
                 if (!isMaintenanceError(err)) {
                     console.error("Failed to fetch announcements:", err);
                 }
@@ -75,10 +78,7 @@ export default function DashboardPage() {
                 const res = await api.get("/referral");
                 setReferralBonus(res.data.referralBonus || 10);
             } catch (err) {
-                if (isAuthError(err)) {
-                    forceLocalLogout();
-                    return;
-                }
+                if ((err as any)?.authHandled) return;
                 if (!isMaintenanceError(err)) {
                     console.error("Failed to fetch referral info:", err);
                 }
@@ -91,10 +91,7 @@ export default function DashboardPage() {
                 const res = await api.get("/dashboard/stats");
                 setStats(res.data);
             } catch (err) {
-                if (isAuthError(err)) {
-                    forceLocalLogout();
-                    return;
-                }
+                if ((err as any)?.authHandled) return;
                 if (!isMaintenanceError(err)) {
                     console.error("Failed to fetch dashboard stats:", err);
                 }
@@ -125,7 +122,7 @@ export default function DashboardPage() {
         return () => {
             socket.disconnect();
         };
-    }, [fetchSessions, updateSessionLocally, token, user, forceLocalLogout]);
+    }, [fetchSessions, updateSessionLocally, token, user, authReady, isAuthenticated]);
 
     const activeSessionsCount = sessions.filter(s => s.status === "active").length;
 

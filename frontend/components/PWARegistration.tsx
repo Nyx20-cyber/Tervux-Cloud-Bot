@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { BellRing, CheckCircle2, Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import { usePWAStore } from "@/store/usePWAStore";
@@ -39,11 +40,14 @@ const IS_DEV = process.env.NODE_ENV !== "production";
 
 export default function PWARegistration() {
   const setDeferredPrompt = usePWAStore((state) => state.setDeferredPrompt);
+  const pathname = usePathname();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const hasHydrated = useAuthStore((state) => state.hasHydrated);
+  const authReady = useAuthStore((state) => state.authReady);
   const user = useAuthStore((state) => state.user);
   const setUser = useAuthStore((state) => state.setUser);
   const language = useLocaleStore((state) => state.language);
+  const isGuestRoute = pathname === "/login" || pathname === "/register";
 
   const [permissionState, setPermissionState] = useState<PermissionState>("unknown");
   const [showPushModal, setShowPushModal] = useState(false);
@@ -125,10 +129,13 @@ export default function PWARegistration() {
   }, [setDeferredPrompt]);
 
   useEffect(() => {
-    if (!hasHydrated || !isAuthenticated || !user?._id) {
+    if (isGuestRoute || !hasHydrated || !authReady || !isAuthenticated || !user?._id) {
       if (IS_DEV) {
         console.info("[Push][PWA] Waiting for authenticated user.", {
+          pathname,
+          isGuestRoute,
           hasHydrated,
+          authReady,
           isAuthenticated,
           userId: user?._id || null,
         });
@@ -157,11 +164,11 @@ export default function PWARegistration() {
     }
     setPermissionState(currentPermission);
     setShowPushModal(currentPermission !== "granted");
-  }, [isAuthenticated, hasHydrated, user?._id]);
+  }, [isGuestRoute, pathname, isAuthenticated, hasHydrated, authReady, user?._id]);
 
   useEffect(() => {
     if (!IS_DEV) return;
-    if (!hasHydrated || !isAuthenticated || !user?._id) return;
+    if (isGuestRoute || !hasHydrated || !authReady || !isAuthenticated || !user?._id) return;
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return;
 
@@ -190,10 +197,10 @@ export default function PWARegistration() {
     return () => {
       cancelled = true;
     };
-  }, [hasHydrated, isAuthenticated, user?._id]);
+  }, [isGuestRoute, hasHydrated, authReady, isAuthenticated, user?._id]);
 
   useEffect(() => {
-    if (!hasHydrated || !isAuthenticated) return;
+    if (isGuestRoute || !hasHydrated || !authReady || !isAuthenticated) return;
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return;
     if (permissionState !== "granted") return;
@@ -242,6 +249,11 @@ export default function PWARegistration() {
             console.info("[Push][PWA] Subscription saved on backend.", subscribeRes.data);
           }
 
+          const subscriptionChanged = Boolean(subscribeRes.data?.subscriptionChanged);
+          if (!subscriptionChanged) {
+            return;
+          }
+
           const testResult = subscribeRes.data?.testResult;
           if ((testResult?.sent || 0) === 0 && !cancelled) {
             await subscription.unsubscribe();
@@ -253,6 +265,11 @@ export default function PWARegistration() {
             subscribeRes = await api.post("/notifications/push/subscribe", {
               subscription: subscription.toJSON()
             });
+          }
+
+          const finalSubscriptionChanged = Boolean(subscribeRes.data?.subscriptionChanged);
+          if (!finalSubscriptionChanged) {
+            return;
           }
 
           const finalResult = subscribeRes.data?.testResult;
@@ -282,10 +299,10 @@ export default function PWARegistration() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, hasHydrated, permissionState, copy.enabledToast, copy.delayedToast, copy.failedToast]);
+  }, [isGuestRoute, isAuthenticated, hasHydrated, authReady, permissionState, copy.enabledToast, copy.delayedToast, copy.failedToast]);
 
   useEffect(() => {
-    if (!hasHydrated || !isAuthenticated || !user?._id) return;
+    if (isGuestRoute || !hasHydrated || !authReady || !isAuthenticated || !user?._id) return;
     if (user.preferredLanguage === language) return;
 
     let cancelled = false;
@@ -306,7 +323,7 @@ export default function PWARegistration() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, hasHydrated, user?._id, user?.preferredLanguage, language, setUser]);
+  }, [isGuestRoute, isAuthenticated, hasHydrated, authReady, user?._id, user?.preferredLanguage, language, setUser]);
 
   const handleEnableNotifications = async () => {
     if (typeof window === "undefined" || !("Notification" in window)) return;
@@ -345,7 +362,7 @@ export default function PWARegistration() {
     setShowPushModal(false);
   };
 
-  if (!isAuthenticated || !hasHydrated || permissionState === "unsupported") {
+  if (isGuestRoute || !authReady || !isAuthenticated || !hasHydrated || permissionState === "unsupported") {
     return null;
   }
 
@@ -354,7 +371,7 @@ export default function PWARegistration() {
       <Dialog open={showPushModal} onOpenChange={() => {}}>
         <DialogContent
           showCloseButton={false}
-          className="w-[calc(100vw-1rem)] max-w-md max-h-[90vh] rounded-[1.75rem] sm:rounded-[2rem] border-white/10 bg-[#0d1117]/95 text-white backdrop-blur-3xl p-0 overflow-hidden shadow-2xl shadow-black/40"
+          className="w-[calc(100vw-1rem)] max-w-md sm:max-w-lg max-h-[90vh] rounded-[1.75rem] sm:rounded-[2rem] border-white/10 bg-[#0d1117]/95 text-white backdrop-blur-3xl p-0 overflow-hidden shadow-2xl shadow-black/40"
         >
           <div className="relative">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.08),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(26,115,232,0.16),_transparent_42%)]" />
@@ -393,12 +410,12 @@ export default function PWARegistration() {
                 </div>
               </div>
 
-              <div className="mt-4 sm:mt-5 flex flex-col-reverse sm:flex-row gap-3">
+              <div className="mt-4 sm:mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Button
                   type="button"
                   variant="ghost"
                   onClick={handleDismissForNow}
-                  className="h-11 sm:h-12 w-full rounded-2xl border border-white/10 bg-white/5 text-gray-200 hover:bg-white/10 hover:text-white text-xs sm:text-sm font-black uppercase tracking-[0.16em] sm:tracking-widest"
+                  className="min-h-11 sm:min-h-12 h-auto w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-center text-xs sm:text-sm font-black uppercase tracking-[0.16em] sm:tracking-widest text-gray-200 whitespace-normal leading-snug hover:bg-white/10 hover:text-white"
                 >
                   {copy.cancel}
                 </Button>
@@ -406,7 +423,7 @@ export default function PWARegistration() {
                   type="button"
                   onClick={permissionState === "denied" ? handleCheckPermissionAgain : handleEnableNotifications}
                   disabled={isSubscribing}
-                  className="h-11 sm:h-12 w-full rounded-2xl bg-primary text-black hover:bg-primary/90 text-xs sm:text-sm font-black uppercase tracking-[0.16em] sm:tracking-widest shadow-[0_0_35px_rgba(26,115,232,0.18)]"
+                  className="min-h-11 sm:min-h-12 h-auto w-full rounded-2xl bg-primary px-4 py-3 text-center text-xs sm:text-sm font-black uppercase tracking-[0.16em] sm:tracking-widest text-black whitespace-normal leading-snug shadow-[0_0_35px_rgba(26,115,232,0.18)] hover:bg-primary/90"
                 >
                   {isSubscribing
                     ? copy.checking

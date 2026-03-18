@@ -20,22 +20,43 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     const [banDialogOpen, setBanDialogOpen] = useState(false);
     const [banMessage, setBanMessage] = useState("");
     const [maintenanceChecked, setMaintenanceChecked] = useState(false);
-    const { token, isAuthenticated, logout, setUser, updateCoins, user } = useAuthStore();
+    const { token, isAuthenticated, authReady, logout, setUser, updateCoins, user } = useAuthStore();
     const { language } = useLocaleStore();
     const t = translations[language];
     const router = useRouter();
 
     useEffect(() => {
+        if (!authReady) {
+            if (process.env.NODE_ENV !== "production") {
+                console.info("[Auth][DashboardLayout] Waiting for auth readiness.");
+            }
+            setMaintenanceChecked(false);
+            return;
+        }
         if (!token) {
+            if (process.env.NODE_ENV !== "production") {
+                console.info("[Auth][DashboardLayout] No token present; allowing maintenance check to settle.");
+            }
             setMaintenanceChecked(true);
             return;
         }
         // Wait until auth profile is hydrated before rendering dashboard content.
         if (!user) {
+            if (process.env.NODE_ENV !== "production") {
+                console.info("[Auth][DashboardLayout] Waiting for user hydration.", {
+                    hasToken: Boolean(token),
+                    isAuthenticated
+                });
+            }
             setMaintenanceChecked(false);
             return;
         }
         if (!isAuthenticated) {
+            if (process.env.NODE_ENV !== "production") {
+                console.info("[Auth][DashboardLayout] Token exists but session is not authenticated.", {
+                    userId: user?._id || null
+                });
+            }
             setMaintenanceChecked(true);
             return;
         }
@@ -128,7 +149,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         return () => {
             socket.disconnect();
         };
-    }, [token, isAuthenticated, logout, setUser, updateCoins, t.account_suspended_logout_notice, user, router]);
+    }, [token, isAuthenticated, authReady, logout, setUser, updateCoins, t.account_suspended_logout_notice, user, router]);
 
     return (
         <div className="flex h-screen overflow-hidden bg-transparent">
@@ -147,7 +168,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 <Header onMenuClick={() => setMobileMenuOpen(true)} />
                 <main className="flex-1 overflow-y-auto w-full no-scrollbar">
                     <div className="mx-auto max-w-7xl p-3 sm:p-4 lg:p-8 pb-24 sm:pb-28 lg:pb-24 animate-fade-in relative z-10 w-full min-h-full">
-                        {maintenanceChecked ? (
+                        {authReady && maintenanceChecked ? (
                             children
                         ) : (
                             <div className="min-h-[60vh] flex items-center justify-center">

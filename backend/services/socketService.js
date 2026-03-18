@@ -1,3 +1,4 @@
+import "../env.js";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 

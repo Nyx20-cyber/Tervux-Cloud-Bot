@@ -90,11 +90,11 @@ router.delete("/:id", authenticate, async (req, res) => {
     }
 });
 
-router.get("/push/public-key", authenticate, async (req, res) => {
+router.get("/push/public-key", async (req, res) => {
     if (!isWebPushConfigured()) {
         return res.status(503).json({ error: "Web push is not configured" });
     }
-    console.log(`🔔 [Push] Public key requested by user ${req.user._id}`);
+    console.log("🔔 [Push] Public key requested.");
     res.json({ publicKey: getWebPushPublicKey() });
 });
 
@@ -107,7 +107,7 @@ router.post("/push/subscribe", authenticate, async (req, res) => {
         const saveResult = await savePushSubscription(req.user._id, subscription, req.headers["user-agent"] || "");
         let testResult = { sent: 0, failed: 0, skipped: true, reason: "unchanged_subscription" };
 
-        if (saveResult.didChange) {
+        if (saveResult.isNewSubscription) {
             testResult = await sendPushToUser(req.user._id, {
                 title: "Tervux Notifications Enabled",
                 body: "Push notifications are now active on this device.",
@@ -117,7 +117,13 @@ router.post("/push/subscribe", authenticate, async (req, res) => {
         }
 
         console.log(`🔔 [Push] Subscribe route completed for user ${req.user._id}: subscriptions=${saveResult.total}, isNew=${saveResult.isNewSubscription}, changed=${saveResult.didChange}, testSent=${testResult.sent}, testFailed=${testResult.failed}, skipped=${Boolean(testResult.skipped)}`);
-        res.json({ success: true, subscriptions: saveResult.total, subscriptionChanged: saveResult.didChange, testResult });
+        res.json({
+            success: true,
+            subscriptions: saveResult.total,
+            subscriptionChanged: saveResult.didChange,
+            isNewSubscription: saveResult.isNewSubscription,
+            testResult
+        });
     } catch (error) {
         console.error("Save push subscription error:", error);
         res.status(400).json({ error: error.message || "Failed to save push subscription" });

@@ -22,10 +22,14 @@ export default function RegisterPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [configLoading, setConfigLoading] = useState(true);
     const [registrationEnabled, setRegistrationEnabled] = useState(true);
-    const { login } = useAuthStore();
+    const { login, authReady, authPhase, isAuthenticated, user } = useAuthStore();
     const { language, setLanguage } = useLocaleStore();
     const t = translations[language];
     const router = useRouter();
+
+    useEffect(() => {
+        router.prefetch("/dashboard");
+    }, [router]);
 
     useEffect(() => {
         const fetchConfig = async () => {
@@ -62,9 +66,9 @@ export default function RegisterPage() {
         setIsLoading(true);
         try {
             const res = await api.post("/auth/register", { name, email, password, referralCode });
-            login(res.data.token, res.data.user);
+            login(res.data.token, res.data.user, res.data.refreshTokenExpiresAt ?? null);
             toast.success(language === "sw" ? "Akaunti imetengenezwa!" : "Account created successfully!");
-            router.push("/dashboard");
+            router.replace("/dashboard");
         } catch (error: any) {
             toast.error(error.response?.data?.error || (language === "sw" ? "Usajili umeshindwa" : "Registration failed"));
         } finally {

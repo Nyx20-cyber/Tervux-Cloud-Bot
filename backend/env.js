@@ -5,10 +5,19 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 1) Primary local backend env file.
-dotenv.config({ path: path.join(__dirname, ".env") });
-// 2) Fallback for docker/deploy style env location. Existing vars are not overridden.
-dotenv.config({ path: path.join(__dirname, "../deploy/env/backend.env") });
+// 1) Primary local/backend env file.
+dotenv.config({ path: path.join(__dirname, ".env"), quiet: true });
+
+// 2) Docker/deploy fallback should only load for production-like runs.
+// Loading deploy env during local development can leak docker-only hosts like
+// `redis` into a normal machine process and cause noisy connection failures.
+const shouldLoadDeployFallback =
+    process.env.NODE_ENV === "production" ||
+    process.env.LOAD_DEPLOY_ENV === "true";
+
+if (shouldLoadDeployFallback) {
+    dotenv.config({ path: path.join(__dirname, "../deploy/env/backend.env"), quiet: true });
+}
 
 // TLS verification enabled - only disable if you have certificate issues
 // if (process.env.NODE_ENV !== "production") {
