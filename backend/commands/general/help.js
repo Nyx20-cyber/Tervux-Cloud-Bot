@@ -175,7 +175,17 @@ export const help = async (sock, m, args, ctx = {}) => {
 │ 🚪 ➾ *${p}goodbye* on/off
 │ ✏️ ➾ *${p}setgoodbye* <msg>
 │ 🔗 ➾ *${p}antilink* on/kick/off
+│ 🎭 ➾ *${p}antisticker* on/kick/off
+│ ⏱️ ➾ *${p}antispam* on/off
+│ 📣 ➾ *${p}antitagall* on/off
 │ 🛡️ ➾ *${p}antimention* on/off
+│ 🎙️ ➾ *${p}antivoice* on/off
+│ 🖼️ ➾ *${p}antiimage* on/off
+│ 🎬 ➾ *${p}antivideo* on/off
+│ 📄 ➾ *${p}antidocument* on/off
+│ ↪️ ➾ *${p}antiforward* on/off
+│ 📝 ➾ *${p}antilongtext* on/off
+│ 📊 ➾ *${p}antipoll* on/off
 │ 🚩 ➾ *${p}antifake* on/off
 │ 🚫 ➾ *${p}badword* add/remove
 │ 📸 ➾ *${p}autosticker* on/off

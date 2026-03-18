@@ -70,36 +70,50 @@ export async function runReferralReminderPush() {
     }).select("_id preferredLanguage referralCode lastReferralReminderAt");
 
     let sentUsers = 0;
+    let recordedUsers = 0;
+    let failedUsers = 0;
 
     for (const user of users) {
-        const copy = getReferralCopy(user);
-        const result = await sendPushToUser(user._id, {
-            title: copy.title,
-            body: copy.body,
-            url: `${FRONTEND_URL}/dashboard/referrals`,
-            tag: "referral-reminder",
-            renotify: true,
-            data: { type: "referral-reminder" }
-        });
+        try {
+            const copy = getReferralCopy(user);
 
-        if (result.sent > 0) {
-            sentUsers += 1;
             await User.updateOne(
                 { _id: user._id },
                 { $set: { lastReferralReminderAt: now } }
             );
+
             try {
                 await Notification.create({
                     userId: user._id,
                     title: copy.notificationTitle,
                     message: copy.notificationMessage,
-                    type: "info"
+                    type: "info",
+                    link: "/dashboard/referrals",
+                    createdAt: now,
+                    updatedAt: now
                 });
+                recordedUsers += 1;
             } catch (error) {
                 console.error("Failed to create referral reminder notification:", error.message);
             }
+
+            const result = await sendPushToUser(user._id, {
+                title: copy.title,
+                body: copy.body,
+                url: `${FRONTEND_URL}/dashboard/referrals`,
+                tag: "referral-reminder",
+                renotify: true,
+                data: { type: "referral-reminder" }
+            });
+
+            if (result.sent > 0) {
+                sentUsers += 1;
+            }
+        } catch (error) {
+            failedUsers += 1;
+            console.error(`🎁 [ReferralReminder] Failed for user ${user._id}:`, error.message);
         }
     }
 
-    console.log(`🎁 [ReferralReminder] Sent to ${sentUsers}/${users.length} eligible user(s) for window ${windowStart.toISOString()}.`);
+    console.log(`🎁 [ReferralReminder] Recorded ${recordedUsers}/${users.length} eligible user(s) for window ${windowStart.toISOString()} and pushed ${sentUsers} (failed=${failedUsers}).`);
 }

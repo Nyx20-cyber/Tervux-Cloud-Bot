@@ -468,7 +468,7 @@ export function SessionMonitor() {
             )}
 
             <Dialog open={!!confirmDisconnectSessionId} onOpenChange={(open) => !open && setConfirmDisconnectSessionId(null)}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className="max-w-md border-orange-500/20 bg-[#120f09] text-white rounded-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {t.admin_disconnect_session_title}
@@ -500,7 +500,7 @@ export function SessionMonitor() {
             </Dialog>
 
             <Dialog open={!!confirmDeleteSessionId} onOpenChange={(open) => !open && setConfirmDeleteSessionId(null)}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className="max-w-md border-red-500/20 bg-[#12090a] text-white rounded-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {t.admin_delete_session_title}
@@ -532,7 +532,11 @@ export function SessionMonitor() {
             </Dialog>
 
             <Dialog open={!!confirmBroadcastToggle} onOpenChange={(open) => !open && setConfirmBroadcastToggle(null)}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className={`max-w-md text-white rounded-2xl ${
+                    confirmBroadcastToggle?.nextValue
+                        ? "border-emerald-500/20 bg-[#09120d]"
+                        : "border-red-500/20 bg-[#12090a]"
+                }`}>
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {confirmBroadcastToggle?.nextValue ? t.admin_enable_broadcast_title : t.admin_disable_broadcast_title}

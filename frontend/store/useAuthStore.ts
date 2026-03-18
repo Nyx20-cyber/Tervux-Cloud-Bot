@@ -146,6 +146,7 @@ export interface User {
   totalDeployments: number;
   totalReferrals: number;
   totalCoinsSpent: number;
+  tutorialOnboardingSeenAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

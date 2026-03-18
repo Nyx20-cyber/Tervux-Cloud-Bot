@@ -63,38 +63,51 @@ export async function runReengagementPush() {
     }).select("_id preferredLanguage lastReengagementReminderAt");
 
     let sentUsers = 0;
+    let recordedUsers = 0;
+    let failedUsers = 0;
 
     for (const user of users) {
-        const sessionCount = await WhatsAppSession.countDocuments({ userId: user._id });
-        const copy = getLocalizedReminder(user, sessionCount);
+        try {
+            const sessionCount = await WhatsAppSession.countDocuments({ userId: user._id });
+            const copy = getLocalizedReminder(user, sessionCount);
 
-        const result = await sendPushToUser(user._id, {
-            title: copy.title,
-            body: copy.body,
-            url: `${FRONTEND_URL}/dashboard/deployments`,
-            tag: "reengagement-reminder",
-            renotify: true,
-            data: { type: "reengagement-reminder" }
-        });
-
-        if (result.sent > 0) {
-            sentUsers += 1;
             await User.updateOne(
                 { _id: user._id },
                 { $set: { lastReengagementReminderAt: now } }
             );
+
             try {
                 await Notification.create({
                     userId: user._id,
                     title: copy.notificationTitle,
                     message: copy.notificationMessage,
-                    type: "info"
+                    type: "info",
+                    link: "/dashboard/deployments",
+                    createdAt: now,
+                    updatedAt: now
                 });
+                recordedUsers += 1;
             } catch (error) {
                 console.error("Failed to create re-engagement notification:", error.message);
             }
+
+            const result = await sendPushToUser(user._id, {
+                title: copy.title,
+                body: copy.body,
+                url: `${FRONTEND_URL}/dashboard/deployments`,
+                tag: "reengagement-reminder",
+                renotify: true,
+                data: { type: "reengagement-reminder" }
+            });
+
+            if (result.sent > 0) {
+                sentUsers += 1;
+            }
+        } catch (error) {
+            failedUsers += 1;
+            console.error(`🔔 [ReengagementPush] Failed for user ${user._id}:`, error.message);
         }
     }
 
-    console.log(`🔔 [ReengagementPush] Sent to ${sentUsers}/${users.length} eligible user(s) for slot ${slotStart.toISOString()}.`);
+    console.log(`🔔 [ReengagementPush] Recorded ${recordedUsers}/${users.length} eligible user(s) for slot ${slotStart.toISOString()} and pushed ${sentUsers} (failed=${failedUsers}).`);
 }

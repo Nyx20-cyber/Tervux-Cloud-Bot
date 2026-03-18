@@ -21,7 +21,15 @@ initSocket(httpServer);
 const EAT_TIMEZONE = "Africa/Dar_es_Salaam";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const GROUP_BROADCAST_WINDOW_MINUTES = Number.parseInt(process.env.GROUP_BROADCAST_WINDOW_MINUTES || "30", 10);
+const RESELLER_NUDGE_WINDOW_MINUTES = Number.parseInt(process.env.RESELLER_NUDGE_WINDOW_MINUTES || "30", 10);
+const DEPLOY_REMINDER_WINDOW_MINUTES = Number.parseInt(process.env.DEPLOY_REMINDER_WINDOW_MINUTES || "30", 10);
+const REFERRAL_REMINDER_WINDOW_MINUTES = Number.parseInt(process.env.REFERRAL_REMINDER_WINDOW_MINUTES || "30", 10);
+const REENGAGEMENT_WINDOW_MINUTES = Number.parseInt(process.env.REENGAGEMENT_WINDOW_MINUTES || "30", 10);
 const GROUP_BROADCAST_WINDOW_END_MINUTE = String(Math.max(GROUP_BROADCAST_WINDOW_MINUTES - 1, 0)).padStart(2, "0");
+const RESELLER_NUDGE_WINDOW_END_MINUTE = String(Math.max(RESELLER_NUDGE_WINDOW_MINUTES - 1, 0)).padStart(2, "0");
+const DEPLOY_REMINDER_WINDOW_END_MINUTE = String(Math.max(DEPLOY_REMINDER_WINDOW_MINUTES - 1, 0)).padStart(2, "0");
+const REFERRAL_REMINDER_WINDOW_END_MINUTE = String(Math.max(REFERRAL_REMINDER_WINDOW_MINUTES - 1, 0)).padStart(2, "0");
+const REENGAGEMENT_WINDOW_END_MINUTE = String(Math.max(REENGAGEMENT_WINDOW_MINUTES - 1, 0)).padStart(2, "0");
 
 let lastSuppressedNoiseAt = 0;
 const flattenLogArgs = (args = []) =>
@@ -117,6 +125,8 @@ const getEatClock = () => {
 };
 
 const getEatMinutesOfDay = (clock) => (clock.hour * 60) + clock.minute;
+const isWithinScheduleWindow = (minutesOfDay, targetHour, windowMinutes) =>
+    minutesOfDay >= (targetHour * 60) && minutesOfDay < ((targetHour * 60) + windowMinutes);
 
 let lastGroupBroadcastDateKey = null;
 let lastResellerNudgeDateKey = null;
@@ -135,54 +145,53 @@ async function runDailySchedulers() {
         // Midnight group broadcast: send only within a short midnight window to avoid
         // random daytime sends after restarts.
         if (
-            minutesOfDay >= 0 &&
-            minutesOfDay < GROUP_BROADCAST_WINDOW_MINUTES &&
+            isWithinScheduleWindow(minutesOfDay, 0, GROUP_BROADCAST_WINDOW_MINUTES) &&
             lastGroupBroadcastDateKey !== now.dateKey
         ) {
-            lastGroupBroadcastDateKey = now.dateKey;
             console.log(`📣 [Scheduler] Triggering group broadcast for ${now.dateKey} (${EAT_TIMEZONE}).`);
             await runGroupPromotionBroadcast();
+            lastGroupBroadcastDateKey = now.dateKey;
         }
 
         // 08:00 reseller nudge: send once any time after 08:00 EAT for the current date.
         if (
-            minutesOfDay >= (8 * 60) &&
+            isWithinScheduleWindow(minutesOfDay, 8, RESELLER_NUDGE_WINDOW_MINUTES) &&
             lastResellerNudgeDateKey !== now.dateKey
         ) {
-            lastResellerNudgeDateKey = now.dateKey;
             console.log(`📣 [Scheduler] Triggering reseller nudge for ${now.dateKey} (${EAT_TIMEZONE}).`);
             await runResellerNudge();
+            lastResellerNudgeDateKey = now.dateKey;
         }
 
         if (
-            minutesOfDay >= (10 * 60) &&
+            isWithinScheduleWindow(minutesOfDay, 10, DEPLOY_REMINDER_WINDOW_MINUTES) &&
             lastDeployReminderDateKey !== now.dateKey
         ) {
-            lastDeployReminderDateKey = now.dateKey;
             console.log(`🔔 [Scheduler] Triggering deploy reminder push for ${now.dateKey} (${EAT_TIMEZONE}).`);
             await runDeployReminderPush();
+            lastDeployReminderDateKey = now.dateKey;
         }
 
         {
             const slotHours = [1, 6, 11, 16, 21];
-            const currentSlotHour = [...slotHours].reverse().find((hour) => minutesOfDay >= (hour * 60));
+            const currentSlotHour = slotHours.find((hour) => isWithinScheduleWindow(minutesOfDay, hour, REENGAGEMENT_WINDOW_MINUTES));
             if (currentSlotHour !== undefined) {
                 const slotKey = `${now.dateKey}-${String(currentSlotHour).padStart(2, "0")}`;
-            if (lastReengagementSlotKey !== slotKey) {
-                lastReengagementSlotKey = slotKey;
-                console.log(`🔔 [Scheduler] Triggering 5-hour re-engagement push for ${slotKey} (${EAT_TIMEZONE}).`);
-                await runReengagementPush();
+                if (lastReengagementSlotKey !== slotKey) {
+                    console.log(`🔔 [Scheduler] Triggering 5-hour re-engagement push for ${slotKey} (${EAT_TIMEZONE}).`);
+                    await runReengagementPush();
+                    lastReengagementSlotKey = slotKey;
+                }
             }
-        }
         }
 
         if (
-            minutesOfDay >= (14 * 60) &&
+            isWithinScheduleWindow(minutesOfDay, 14, REFERRAL_REMINDER_WINDOW_MINUTES) &&
             lastReferralReminderDateKey !== now.dateKey
         ) {
-            lastReferralReminderDateKey = now.dateKey;
             console.log(`🎁 [Scheduler] Triggering referral reminder push for ${now.dateKey} (${EAT_TIMEZONE}).`);
             await runReferralReminderPush();
+            lastReferralReminderDateKey = now.dateKey;
         }
     } catch (error) {
         console.error("Daily scheduler tick error:", error);
@@ -242,7 +251,7 @@ async function start() {
         }, 60_000);
         // Run one immediate tick on startup so within-window restarts don't miss schedules.
         await runDailySchedulers();
-        console.log(`📣 Daily schedulers active (Group: 00:00-00:${GROUP_BROADCAST_WINDOW_END_MINUTE} EAT, Reseller: 08:00 EAT, Deploy Reminder: 10:00 EAT, Referral Reminder: 14:00 EAT, Re-engagement: every 5h EAT, tz=${EAT_TIMEZONE}).`);
+        console.log(`📣 Daily schedulers active (Group: 00:00-00:${GROUP_BROADCAST_WINDOW_END_MINUTE} EAT, Reseller: 08:00-08:${RESELLER_NUDGE_WINDOW_END_MINUTE} EAT, Deploy Reminder: 10:00-10:${DEPLOY_REMINDER_WINDOW_END_MINUTE} EAT, Referral Reminder: 14:00-14:${REFERRAL_REMINDER_WINDOW_END_MINUTE} EAT, Re-engagement: 01/06/11/16/21 within first ${REENGAGEMENT_WINDOW_MINUTES}m, tz=${EAT_TIMEZONE}).`);
 
         // 7. Check pending payments every 15 seconds for near-instant user feedback
         setInterval(() => {

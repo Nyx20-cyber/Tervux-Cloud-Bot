@@ -425,7 +425,15 @@ export function PlanManagement() {
             </AnimatePresence>
 
             <Dialog open={!!pendingAction} onOpenChange={(open) => !open && setPendingAction(null)}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className={`max-w-md text-white rounded-2xl ${
+                    pendingAction?.type === "delete"
+                        ? "border-red-500/20 bg-[#12090a]"
+                        : pendingAction?.type === "toggle" && pendingAction?.nextActive
+                            ? "border-emerald-500/20 bg-[#09120d]"
+                            : pendingAction?.type === "toggle"
+                                ? "border-amber-500/20 bg-[#120f09]"
+                                : "border-sky-500/20 bg-[#0b1016]"
+                }`}>
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {pendingAction?.type === "delete"
@@ -448,7 +456,13 @@ export function PlanManagement() {
                         </Button>
                         <Button
                             onClick={runPendingAction}
-                            className="bg-primary text-black hover:bg-primary/90"
+                            className={pendingAction?.type === "delete"
+                                ? "bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 hover:text-white"
+                                : pendingAction?.type === "toggle" && pendingAction?.nextActive
+                                    ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 hover:text-white"
+                                    : pendingAction?.type === "toggle"
+                                        ? "bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:bg-amber-500/30 hover:text-white"
+                                        : "bg-sky-500/20 border border-sky-500/30 text-sky-300 hover:bg-sky-500/30 hover:text-white"}
                             disabled={saving || !!deletingId}
                         >
                             {t.confirm}

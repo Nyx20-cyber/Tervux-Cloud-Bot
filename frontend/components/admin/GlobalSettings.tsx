@@ -240,7 +240,7 @@ export function GlobalSettings() {
             </div>
 
             <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className="max-w-md border-sky-500/20 bg-[#0b1016] text-white rounded-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {t.admin_confirm_settings_update_title}
@@ -254,7 +254,7 @@ export function GlobalSettings() {
                             {t.cancel}
                         </Button>
                         <Button
-                            className="bg-primary text-black hover:bg-primary/90"
+                            className="bg-sky-500/20 border border-sky-500/30 text-sky-300 hover:bg-sky-500/30 hover:text-white"
                             onClick={async () => {
                                 setConfirmOpen(false);
                                 await handleSave();
@@ -268,7 +268,11 @@ export function GlobalSettings() {
             </Dialog>
 
             <Dialog open={!!pendingToggle} onOpenChange={(open) => !open && setPendingToggle(null)}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className={`max-w-md text-white rounded-2xl ${
+                    pendingToggle?.nextValue
+                        ? "border-emerald-500/20 bg-[#09120d]"
+                        : "border-amber-500/20 bg-[#120f09]"
+                }`}>
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {t.admin_confirm_toggle_title}
@@ -282,7 +286,9 @@ export function GlobalSettings() {
                             {t.cancel}
                         </Button>
                         <Button
-                            className="bg-primary text-black hover:bg-primary/90"
+                            className={pendingToggle?.nextValue
+                                ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 hover:text-white"
+                                : "bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:bg-amber-500/30 hover:text-white"}
                             onClick={() => {
                                 if (!pendingToggle) return;
                                 setSettings({

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Activity, ShieldCheck, RefreshCcw, Network, Coins, Rocket, Megaphone, Info, AlertTriangle, Wrench, Sparkles, Tag } from "lucide-react";
+import { Activity, ShieldCheck, RefreshCcw, Network, Coins, Rocket, Megaphone, Info, AlertTriangle, Wrench, Sparkles, Tag, GraduationCap, PlayCircle, ExternalLink, CheckCircle2 } from "lucide-react";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { io } from "socket.io-client";
@@ -15,6 +15,9 @@ import { translations } from "@/lib/translations";
 import { DailyCheckIn } from "@/components/dashboard/DailyCheckIn";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 import { Loader2, TrendingUp, CreditCard, UserPlus, Bell, Settings, ArrowUpRight, History } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useOnboardingUIStore } from "@/store/useOnboardingUIStore";
 
 interface AnnouncementRecord {
     _id: string;
@@ -32,10 +35,22 @@ interface DashboardStats {
     summary: { totalCoins: number, referralCount: number };
 }
 
+interface TutorialRecord {
+    _id: string;
+    title: string;
+    description: string;
+    youtubeUrl: string;
+    youtubeVideoId: string;
+}
+
 export default function DashboardPage() {
     const { sessions, isLoading, fetchSessions, updateSessionLocally } = useSessionStore();
-    const { user, token, authReady, isAuthenticated } = useAuthStore();
+    const { user, token, authReady, isAuthenticated, setUser } = useAuthStore();
+    const setTutorialPromptOpen = useOnboardingUIStore((state) => state.setTutorialPromptOpen);
+    const setTutorialPromptCheckComplete = useOnboardingUIStore((state) => state.setTutorialPromptCheckComplete);
+    const resetTutorialPromptState = useOnboardingUIStore((state) => state.resetTutorialPromptState);
     const { language } = useLocaleStore();
+    const router = useRouter();
     const t = translations[language];
     const tr = (key: keyof typeof translations.en, vars?: Record<string, string | number>) => {
         const template = String(t[key] ?? translations.en[key] ?? "");
@@ -46,7 +61,45 @@ export default function DashboardPage() {
     const [referralBonus, setReferralBonus] = useState(10);
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [isStatsLoading, setIsStatsLoading] = useState(true);
+    const [tutorials, setTutorials] = useState<TutorialRecord[]>([]);
+    const [tutorialPrompt, setTutorialPrompt] = useState<TutorialRecord | null>(null);
+    const [showTutorialPrompt, setShowTutorialPrompt] = useState(false);
+    const [hasEvaluatedTutorialPrompt, setHasEvaluatedTutorialPrompt] = useState(false);
+    const [hasLoadedTutorials, setHasLoadedTutorials] = useState(false);
+    const [tutorialBannerEnabled, setTutorialBannerEnabled] = useState(true);
+    const [dailyClaimBannerEnabled, setDailyClaimBannerEnabled] = useState(true);
+    const [tutorialBannerTutorialId, setTutorialBannerTutorialId] = useState<string | null>(null);
     const isMaintenanceError = (err: any) => err?.response?.status === 503 && err?.response?.data?.maintenance;
+    const tutorialPromptCopy = language === "sw"
+        ? {
+            badge: "Anzia Hapa",
+            title: "Tazama Video Hii Kwanza",
+            description: "Tumekuandalia tutorial fupi ya kukuonyesha jinsi ya kuconnect WhatsApp yako, kudeploy bot, na kuendelea na setup bila kubahatisha.",
+            primary: "Fungua Tutorials",
+            secondary: "Nimeona",
+            watchOnYoutube: "Tazama YouTube",
+            bannerBadge: "Video Guide",
+            bannerTitle: "Unahitaji msaada wa kuconnect bot?",
+            bannerDescription: "Anza na tutorial hii kisha uendelee na hatua zilizofuata.",
+            bannerPrimary: "Tazama Hapa"
+        }
+        : {
+            badge: "Start Here",
+            title: "Watch This Tutorial First",
+            description: "We prepared a short tutorial to show you how to connect your WhatsApp, deploy your bot, and continue setup without guessing.",
+            primary: "Open Tutorials",
+            secondary: "Got It",
+            watchOnYoutube: "Watch on YouTube",
+            bannerBadge: "Video Guide",
+            bannerTitle: "Need help connecting your bot?",
+            bannerDescription: "Start with this tutorial, then continue with the next steps.",
+            bannerPrimary: "Watch Here"
+        };
+
+    const featuredTutorial = useMemo(() => {
+        if (tutorials.length === 0) return null;
+        return tutorials.find((tutorial) => tutorial._id === tutorialBannerTutorialId) || tutorials[0] || null;
+    }, [tutorials, tutorialBannerTutorialId]);
 
     useEffect(() => {
         if (!authReady || !isAuthenticated || !token || !user) return;
@@ -101,6 +154,20 @@ export default function DashboardPage() {
         };
         fetchDashboardStats();
 
+        const fetchBannerConfig = async () => {
+            try {
+                const res = await api.get("/config");
+                setTutorialBannerEnabled(res.data?.tutorialBannerEnabled !== false);
+                setDailyClaimBannerEnabled(res.data?.dailyClaimBannerEnabled !== false);
+                setTutorialBannerTutorialId(res.data?.tutorialBannerTutorialId || null);
+            } catch (err) {
+                if (!(err as any)?.authHandled && !isMaintenanceError(err)) {
+                    console.error("Failed to fetch banner config:", err);
+                }
+            }
+        };
+        fetchBannerConfig();
+
         const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
         const socket = io(backendUrl, {
             transports: ["websocket", "polling"],
@@ -119,10 +186,147 @@ export default function DashboardPage() {
                 setUser({ ...currentUser, coins: data.coins });
             }
         });
+
+        socket.on("platform_settings_updated", (payload: {
+            tutorialBannerEnabled?: boolean;
+            dailyClaimBannerEnabled?: boolean;
+            tutorialBannerTutorialId?: string | null;
+        }) => {
+            if (typeof payload?.tutorialBannerEnabled === "boolean") {
+                setTutorialBannerEnabled(payload.tutorialBannerEnabled);
+            }
+            if (typeof payload?.dailyClaimBannerEnabled === "boolean") {
+                setDailyClaimBannerEnabled(payload.dailyClaimBannerEnabled);
+            }
+            if (payload?.tutorialBannerTutorialId !== undefined) {
+                setTutorialBannerTutorialId(payload.tutorialBannerTutorialId || null);
+            }
+        });
+
+        socket.on("tutorials_updated", async () => {
+            try {
+                const res = await api.get("/tutorials");
+                setTutorials(res.data?.tutorials || []);
+            } catch (error) {
+                if (!(error as any)?.authHandled) {
+                    console.error("Failed to refresh tutorials:", error);
+                }
+            }
+        });
+
         return () => {
             socket.disconnect();
         };
     }, [fetchSessions, updateSessionLocally, token, user, authReady, isAuthenticated]);
+
+    useEffect(() => {
+        resetTutorialPromptState();
+        setTutorials([]);
+        setTutorialPrompt(null);
+        setShowTutorialPrompt(false);
+        setHasEvaluatedTutorialPrompt(false);
+        setHasLoadedTutorials(false);
+    }, [user?._id, resetTutorialPromptState]);
+
+    useEffect(() => {
+        setTutorialPromptOpen(showTutorialPrompt);
+    }, [showTutorialPrompt, setTutorialPromptOpen]);
+
+    useEffect(() => {
+        if (!authReady || !isAuthenticated) {
+            return;
+        }
+
+        let cancelled = false;
+        const loadFeaturedTutorial = async () => {
+            try {
+                const res = await api.get("/tutorials");
+                if (!cancelled) {
+                    setTutorials(res.data?.tutorials || []);
+                    setHasLoadedTutorials(true);
+                }
+            } catch (error) {
+                if (!(error as any)?.authHandled) {
+                    console.error("Failed to load featured tutorial:", error);
+                }
+                if (!cancelled) {
+                    setHasLoadedTutorials(true);
+                }
+            }
+        };
+
+        loadFeaturedTutorial();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [authReady, isAuthenticated, user?._id]);
+
+    useEffect(() => {
+        if (!authReady || !isAuthenticated || !user || isLoading || hasEvaluatedTutorialPrompt) {
+            return;
+        }
+
+        if (user.role !== "user") {
+            setTutorialPromptCheckComplete(true);
+            setHasEvaluatedTutorialPrompt(true);
+            return;
+        }
+
+        if (!hasLoadedTutorials) {
+            return;
+        }
+
+        const accountAgeMs = user.createdAt ? Date.now() - new Date(user.createdAt).getTime() : Number.POSITIVE_INFINITY;
+        const isNewAccount = Number.isFinite(accountAgeMs) && accountAgeMs <= 7 * 24 * 60 * 60 * 1000;
+        const isTutorialCandidate =
+            isNewAccount &&
+            !user.tutorialOnboardingSeenAt &&
+            (user.totalDeployments || 0) === 0 &&
+            sessions.length === 0;
+
+        if (!isTutorialCandidate) {
+            setTutorialPromptCheckComplete(true);
+            setHasEvaluatedTutorialPrompt(true);
+            return;
+        }
+
+        setTutorialPrompt(featuredTutorial ?? null);
+        setShowTutorialPrompt(true);
+        setTutorialPromptCheckComplete(true);
+        setHasEvaluatedTutorialPrompt(true);
+    }, [authReady, isAuthenticated, user, isLoading, sessions.length, hasEvaluatedTutorialPrompt, featuredTutorial, hasLoadedTutorials, setTutorialPromptCheckComplete]);
+
+    const markTutorialPromptSeen = async () => {
+        if (!user || user.tutorialOnboardingSeenAt) return;
+        try {
+            const res = await api.post("/auth/tutorial-onboarding/seen");
+            if (res.data?.user) {
+                setUser(res.data.user);
+                return;
+            }
+        } catch (error) {
+            if (!(error as any)?.authHandled) {
+                console.error("Failed to mark tutorial onboarding prompt as seen:", error);
+            }
+        }
+
+        setUser({
+            ...user,
+            tutorialOnboardingSeenAt: new Date().toISOString()
+        });
+    };
+
+    const handleTutorialPromptClose = async () => {
+        setShowTutorialPrompt(false);
+        await markTutorialPromptSeen();
+    };
+
+    const handleTutorialPromptOpenTutorials = async () => {
+        setShowTutorialPrompt(false);
+        await markTutorialPromptSeen();
+        router.push("/dashboard/tutorials");
+    };
 
     const activeSessionsCount = sessions.filter(s => s.status === "active").length;
 
@@ -156,6 +360,138 @@ export default function DashboardPage() {
                 animate="visible"
                 className="space-y-6 sm:space-y-8 max-w-7xl mx-auto"
             >
+                <Dialog open={showTutorialPrompt} onOpenChange={(open) => { if (!open) void handleTutorialPromptClose(); }}>
+                    <DialogContent className="w-[calc(100vw-1rem)] max-w-5xl lg:max-w-[1040px] xl:max-w-[1100px] max-h-[92vh] overflow-hidden border-white/10 bg-[#0d0f14] text-white rounded-[1.75rem] sm:rounded-[2rem] p-0 shadow-2xl">
+                        <div className="grid max-h-[92vh] overflow-y-auto lg:grid-cols-[minmax(330px,0.9fr)_minmax(0,1fr)] xl:grid-cols-[minmax(360px,0.92fr)_minmax(0,1fr)] custom-scrollbar">
+                            <div className="border-b border-white/10 p-4 sm:p-5 lg:border-b-0 lg:border-r lg:p-6 xl:p-7">
+                                <div className="rounded-[1.5rem] border border-white/10 bg-gradient-to-b from-black/40 to-black/20 p-3 sm:p-4 lg:flex lg:h-full lg:flex-col lg:justify-center lg:bg-gradient-to-br lg:from-black/55 lg:via-[#11131a] lg:to-black/25 lg:rounded-[1.7rem] lg:p-4 xl:p-5">
+                                    <div className="mb-3 flex items-center justify-between gap-3 lg:mb-5">
+                                        <div className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] text-primary">
+                                            <GraduationCap className="h-3.5 w-3.5" />
+                                            {tutorialPromptCopy.badge}
+                                        </div>
+                                        {tutorialPrompt?.youtubeUrl && (
+                                            <a
+                                                href={tutorialPrompt.youtubeUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center gap-1.5 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] text-cyan-300 hover:bg-cyan-400/15"
+                                            >
+                                                <ExternalLink className="h-3.5 w-3.5" />
+                                                {tutorialPromptCopy.watchOnYoutube}
+                                            </a>
+                                        )}
+                                    </div>
+
+                                    <div className="rounded-[1.25rem] sm:rounded-[1.5rem] overflow-hidden border border-white/10 bg-black/40 aspect-[9/16] w-full max-w-[240px] sm:max-w-[280px] lg:max-w-[320px] xl:max-w-[340px] mx-auto lg:shadow-[0_24px_55px_rgba(0,0,0,0.34)]">
+                                    {tutorialPrompt ? (
+                                        <iframe
+                                            className="w-full h-full"
+                                            src={`https://www.youtube.com/embed/${tutorialPrompt.youtubeVideoId}`}
+                                            title={tutorialPrompt.title}
+                                            loading="lazy"
+                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                            allowFullScreen
+                                        />
+                                    ) : (
+                                        <div className="w-full h-full flex flex-col items-center justify-center gap-3 px-5 text-center">
+                                            <div className="flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary">
+                                                <GraduationCap className="h-6 w-6 sm:h-7 sm:w-7" />
+                                            </div>
+                                            <div>
+                                                <p className="text-xs sm:text-sm font-black uppercase tracking-widest text-white">
+                                                    {tutorialPromptCopy.badge}
+                                                </p>
+                                                <p className="mt-2 text-[11px] sm:text-xs leading-relaxed text-gray-400">
+                                                    {tutorialPromptCopy.description}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col p-4 sm:p-5 lg:min-h-full lg:p-6 xl:p-7">
+                                <DialogHeader className="space-y-3 text-left lg:space-y-4">
+                                    <DialogTitle className="text-lg sm:text-2xl lg:text-[1.6rem] font-black uppercase tracking-tight text-white leading-tight">
+                                        {tutorialPromptCopy.title}
+                                    </DialogTitle>
+                                    <DialogDescription className="text-sm sm:text-[15px] lg:max-w-xl lg:text-sm leading-relaxed text-gray-300">
+                                        {tutorialPromptCopy.description}
+                                    </DialogDescription>
+                                </DialogHeader>
+
+                                {tutorialPrompt && (
+                                    <div className="mt-5 rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-4 sm:p-5 space-y-3 lg:mt-6 lg:rounded-[1.7rem] lg:p-5 lg:space-y-3.5">
+                                        <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-cyan-300">
+                                            <PlayCircle className="w-3.5 h-3.5" />
+                                            Tutorial
+                                        </div>
+                                        <h3 className="text-sm sm:text-lg lg:text-[1.05rem] font-black uppercase tracking-tight text-white leading-snug">
+                                            {tutorialPrompt.title}
+                                        </h3>
+                                        <p className="text-xs sm:text-sm lg:text-[13px] leading-relaxed text-gray-400">
+                                            {tutorialPrompt.description}
+                                        </p>
+                                        <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2 lg:gap-3 lg:pt-2">
+                                            <Button
+                                                type="button"
+                                                onClick={() => { void handleTutorialPromptOpenTutorials(); }}
+                                                className="w-full rounded-2xl bg-primary text-black hover:bg-primary/90 font-black uppercase tracking-[0.16em] text-[10px] sm:text-xs lg:min-h-[3rem] lg:text-[11px] lg:shadow-[0_16px_35px_rgba(34,197,94,0.18)]"
+                                            >
+                                                {tutorialPromptCopy.primary}
+                                            </Button>
+                                            <a
+                                                href={tutorialPrompt.youtubeUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-cyan-400/35 bg-cyan-400/12 px-4 py-3 text-[10px] sm:text-xs font-black uppercase tracking-[0.16em] text-cyan-200 hover:bg-cyan-400/18 lg:min-h-[3rem] lg:text-[11px] lg:shadow-[0_16px_35px_rgba(34,211,238,0.12)]"
+                                            >
+                                                <ExternalLink className="w-3.5 h-3.5" />
+                                                {tutorialPromptCopy.watchOnYoutube}
+                                            </a>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {!tutorialPrompt && (
+                                    <div className="mt-5 rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-4 sm:p-5 lg:mt-6 lg:rounded-[1.7rem] lg:p-5">
+                                        <p className="text-xs sm:text-sm lg:text-[13px] leading-relaxed text-gray-400">
+                                            {language === "sw"
+                                                ? "Fungua ukurasa wa Tutorials ili uanze kuangalia video za hatua kwa hatua kabla hujaendelea kuconnect na kudeploy bot yako."
+                                                : "Open the Tutorials page to start with step-by-step videos before you continue connecting and deploying your bot."}
+                                        </p>
+                                    </div>
+                                )}
+
+                                <DialogFooter className="mt-5 sm:mt-auto pt-2 lg:pt-4 flex-col-reverse sm:flex-row gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => { void handleTutorialPromptClose(); }}
+                                        className="group relative flex w-full items-center justify-center gap-2 rounded-2xl border-0 bg-yellow-500 px-6 py-3.5 text-xs font-semibold uppercase tracking-widest text-black shadow-[0_0_30px_rgba(234,179,8,0.2)] transition-all hover:bg-yellow-400 hover:shadow-[0_0_40px_rgba(234,179,8,0.4)] hover:-translate-y-1 active:scale-[0.985] sm:w-auto sm:min-w-[200px] sm:px-8 sm:py-4 sm:text-sm"
+                                    >
+                                        <CheckCircle2 className="h-4 w-4 shrink-0 group-hover:scale-110 transition-transform sm:h-5 sm:w-5" />
+                                        {tutorialPromptCopy.secondary}
+                                        <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+                                            <span className="absolute inset-0 h-full w-[200%] -translate-x-[100%] bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shimmer_2s_infinite]" />
+                                        </span>
+                                    </button>
+                                    {!tutorialPrompt && (
+                                        <Button
+                                            type="button"
+                                            onClick={() => { void handleTutorialPromptOpenTutorials(); }}
+                                            className="w-full sm:w-auto rounded-2xl bg-primary text-black hover:bg-primary/90 font-black uppercase tracking-widest lg:min-w-[190px] lg:text-[11px] lg:shadow-[0_16px_35px_rgba(34,197,94,0.18)]"
+                                        >
+                                            {tutorialPromptCopy.primary}
+                                        </Button>
+                                    )}
+                                </DialogFooter>
+                            </div>
+                        </div>
+                    </DialogContent>
+                </Dialog>
+
                 {/* Modern Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-6">
                     <motion.div variants={itemVariants}>
@@ -181,9 +517,68 @@ export default function DashboardPage() {
                     </motion.div>
                 </div>
 
+                {tutorialBannerEnabled && featuredTutorial && (
+                <motion.div variants={itemVariants}>
+                    <div className="rounded-3xl border border-primary/25 bg-gradient-to-r from-primary/12 via-emerald-500/8 to-transparent backdrop-blur-2xl px-3.5 py-3.5 sm:px-4 sm:py-3.5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="flex min-w-0 items-start gap-3">
+                                <div className="shrink-0 rounded-full border border-primary/20 bg-primary/12 p-2.5 text-primary">
+                                    <GraduationCap className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
+                                </div>
+
+                                <div className="min-w-0">
+                                    <motion.div
+                                        animate={{ scale: [1, 1.06, 1] }}
+                                        transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+                                        className="inline-flex max-w-full self-start items-center gap-1.5 sm:gap-2 rounded-full border border-primary/25 bg-primary/10 px-2 sm:px-2.5 py-1 text-[8px] sm:text-[9px] font-black uppercase leading-none tracking-[0.12em] sm:tracking-[0.18em] text-primary"
+                                    >
+                                        <PlayCircle className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
+                                        {tutorialPromptCopy.bannerBadge}
+                                    </motion.div>
+                                    <h2 className="mt-2 text-sm sm:text-base font-black tracking-tight text-white">
+                                        {tutorialPromptCopy.bannerTitle}
+                                    </h2>
+                                    <p className="mt-1 text-xs sm:text-sm leading-relaxed text-gray-300">
+                                        {tutorialPromptCopy.bannerDescription}
+                                    </p>
+                                    {featuredTutorial && (
+                                        <p className="mt-1.5 truncate text-[11px] sm:text-xs font-bold uppercase tracking-[0.14em] text-emerald-300/90">
+                                            {featuredTutorial.title}
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto lg:items-center">
+                                {featuredTutorial?.youtubeUrl && (
+                                    <a
+                                        href={featuredTutorial.youtubeUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-300 hover:bg-emerald-400/15"
+                                    >
+                                        <ExternalLink className="h-3.5 w-3.5" />
+                                        {tutorialPromptCopy.watchOnYoutube}
+                                    </a>
+                                )}
+                                <Button
+                                    type="button"
+                                    onClick={() => router.push("/dashboard/tutorials")}
+                                    className="w-full sm:w-auto rounded-xl bg-primary px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-black hover:bg-primary/90"
+                                >
+                                    {tutorialPromptCopy.bannerPrimary}
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </motion.div>
+                )}
+
+                {dailyClaimBannerEnabled && (
                 <motion.div variants={itemVariants}>
                     <DailyCheckIn />
                 </motion.div>
+                )}
 
                 {/* Stats Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">

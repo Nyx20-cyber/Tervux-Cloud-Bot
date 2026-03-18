@@ -36,6 +36,11 @@ interface TutorialRecord {
     };
 }
 
+interface TutorialBannerSettings {
+    tutorialBannerEnabled: boolean;
+    tutorialBannerTutorialId: string;
+}
+
 const emptyForm = {
     title: "",
     description: "",
@@ -65,19 +70,37 @@ export function TutorialManagement() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [form, setForm] = useState({ ...emptyForm });
     const [saving, setSaving] = useState(false);
+    const [savingBanner, setSavingBanner] = useState(false);
+    const [bannerSettings, setBannerSettings] = useState<TutorialBannerSettings>({
+        tutorialBannerEnabled: true,
+        tutorialBannerTutorialId: ""
+    });
     const [pendingAction, setPendingAction] = useState<{
-        type: "save" | "delete" | "toggle";
+        type: "save" | "delete" | "toggle" | "saveBanner";
         tutorialId?: string;
         tutorialTitle: string;
         nextActive?: boolean;
     } | null>(null);
 
+    const activeTutorials = tutorials.filter((tutorial) => tutorial.isActive);
+
+    const applyBannerSettings = (settings?: any) => {
+        setBannerSettings({
+            tutorialBannerEnabled: settings?.tutorialBannerEnabled !== false,
+            tutorialBannerTutorialId: settings?.tutorialBannerTutorialId ? String(settings.tutorialBannerTutorialId) : ""
+        });
+    };
+
     useEffect(() => {
         const fetchTutorials = async () => {
             try {
                 setIsLoading(true);
-                const res = await api.get("/admin/tutorials");
-                setTutorials(res.data.tutorials || []);
+                const [tutorialsRes, settingsRes] = await Promise.all([
+                    api.get("/admin/tutorials"),
+                    api.get("/admin/settings")
+                ]);
+                setTutorials(tutorialsRes.data.tutorials || []);
+                applyBannerSettings(settingsRes.data.settings);
             } catch (error: unknown) {
                 toast.error(getErrorMessage(error, t.admin_failed_load_tutorials));
             } finally {
@@ -111,10 +134,30 @@ export function TutorialManagement() {
             setTutorials(prev => prev.filter(item => item._id !== payload.tutorialId));
         });
 
+        socket.on("admin_settings_updated", (payload: { settings?: any }) => {
+            if (!payload?.settings) return;
+            applyBannerSettings(payload.settings);
+        });
+
         return () => {
             socket.disconnect();
         };
     }, [token]);
+
+    const saveBannerSettings = async () => {
+        setSavingBanner(true);
+        try {
+            await api.put("/admin/settings", {
+                tutorialBannerEnabled: bannerSettings.tutorialBannerEnabled,
+                tutorialBannerTutorialId: bannerSettings.tutorialBannerTutorialId || null
+            });
+            toast.success(t.admin_banner_settings_saved);
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, t.admin_failed_save_banner_settings));
+        } finally {
+            setSavingBanner(false);
+        }
+    };
 
     const openCreate = () => {
         setEditingId(null);
@@ -191,6 +234,9 @@ export function TutorialManagement() {
         if (pendingAction.type === "toggle" && pendingAction.tutorialId) {
             await toggleActive(pendingAction.tutorialId, !!pendingAction.nextActive);
         }
+        if (pendingAction.type === "saveBanner") {
+            await saveBannerSettings();
+        }
 
         setPendingAction(null);
     };
@@ -217,6 +263,69 @@ export function TutorialManagement() {
                     <Plus className="w-4 h-4 mr-2" />
                     {t.admin_new_tutorial}
                 </Button>
+            </div>
+
+            <div className="rounded-[1.75rem] border border-primary/20 bg-primary/[0.06] p-4 sm:p-5 backdrop-blur-xl">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="space-y-2">
+                        <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-primary">
+                            <GraduationCap className="w-3.5 h-3.5" />
+                            {t.admin_tutorial_banner}
+                        </div>
+                        <p className="text-sm font-semibold text-white">{t.admin_tutorial_banner_desc}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">{t.admin_featured_tutorial_desc}</p>
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 lg:min-w-[260px]">
+                        <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-white">{t.admin_tutorial_visibility}</p>
+                            <p className="mt-1 text-[10px] font-semibold text-gray-400">{bannerSettings.tutorialBannerEnabled ? t.admin_active : t.admin_hidden}</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setBannerSettings((prev) => ({
+                                ...prev,
+                                tutorialBannerEnabled: !prev.tutorialBannerEnabled
+                            }))}
+                            className={`w-10 h-5 rounded-full transition-all relative ${bannerSettings.tutorialBannerEnabled ? "bg-emerald-500/40" : "bg-white/10"}`}
+                        >
+                            <div className={`absolute top-1 w-3 h-3 rounded-full transition-all ${bannerSettings.tutorialBannerEnabled ? "right-1 bg-emerald-400" : "left-1 bg-gray-500"}`} />
+                        </button>
+                    </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+                    <div>
+                        <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">{t.admin_featured_tutorial}</label>
+                        <select
+                            value={bannerSettings.tutorialBannerTutorialId}
+                            onChange={(e) => setBannerSettings((prev) => ({
+                                ...prev,
+                                tutorialBannerTutorialId: e.target.value
+                            }))}
+                            className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        >
+                            <option value="" className="bg-[#0d1117] text-white">{t.admin_auto_first_active_tutorial}</option>
+                            {activeTutorials.map((tutorial) => (
+                                <option key={tutorial._id} value={tutorial._id} className="bg-[#0d1117] text-white">
+                                    {tutorial.title}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <Button
+                        type="button"
+                        onClick={() => setPendingAction({
+                            type: "saveBanner",
+                            tutorialTitle: activeTutorials.find((item) => item._id === bannerSettings.tutorialBannerTutorialId)?.title || t.admin_auto_first_active_tutorial
+                        })}
+                        disabled={savingBanner}
+                        className="w-full lg:w-auto rounded-2xl bg-primary text-black hover:bg-primary/90"
+                    >
+                        {savingBanner ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                        {t.admin_save_banner_settings}
+                    </Button>
+                </div>
             </div>
 
             {isLoading ? (
@@ -404,14 +513,36 @@ export function TutorialManagement() {
             </Dialog>
 
             <AlertDialog open={!!pendingAction} onOpenChange={(open) => !open && setPendingAction(null)}>
-                <AlertDialogContent className="rounded-[2rem] border-white/10 bg-[#0b1016] text-white">
+                <AlertDialogContent className={`rounded-[2rem] text-white ${
+                    pendingAction?.type === "delete"
+                        ? "border-red-500/20 bg-[#12090a]"
+                        : pendingAction?.type === "toggle" && pendingAction?.nextActive
+                            ? "border-emerald-500/20 bg-[#09120d]"
+                            : pendingAction?.type === "toggle"
+                                ? "border-amber-500/20 bg-[#120f09]"
+                                : pendingAction?.type === "saveBanner"
+                                    ? "border-sky-500/20 bg-[#0b1016]"
+                                    : "border-violet-500/20 bg-[#100b16]"
+                }`}>
                     <AlertDialogHeader>
-                        <AlertDialogMedia className="bg-primary/15 text-primary border border-primary/20">
+                        <AlertDialogMedia className={
+                            pendingAction?.type === "delete"
+                                ? "bg-red-500/15 text-red-300 border border-red-500/20"
+                                : pendingAction?.type === "toggle" && pendingAction?.nextActive
+                                    ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"
+                                    : pendingAction?.type === "toggle"
+                                        ? "bg-amber-500/15 text-amber-300 border border-amber-500/20"
+                                        : pendingAction?.type === "saveBanner"
+                                            ? "bg-sky-500/15 text-sky-300 border border-sky-500/20"
+                                            : "bg-violet-500/15 text-violet-300 border border-violet-500/20"
+                        }>
                             <BookOpenText className="w-8 h-8" />
                         </AlertDialogMedia>
                         <AlertDialogTitle className="text-base font-black uppercase tracking-widest">
                             {pendingAction?.type === "save"
                                 ? editingId ? t.admin_confirm_update_tutorial_title : t.admin_confirm_create_tutorial_title
+                                : pendingAction?.type === "saveBanner"
+                                    ? t.admin_save_banner_settings
                                 : pendingAction?.type === "delete"
                                     ? t.admin_confirm_delete_tutorial_title
                                     : pendingAction?.nextActive
@@ -421,6 +552,8 @@ export function TutorialManagement() {
                         <AlertDialogDescription className="text-sm text-gray-300 leading-relaxed">
                             {pendingAction?.type === "save"
                                 ? editingId ? t.admin_confirm_update_tutorial_desc : t.admin_confirm_create_tutorial_desc
+                                : pendingAction?.type === "saveBanner"
+                                    ? t.admin_tutorial_banner_desc
                                 : pendingAction?.type === "delete"
                                     ? t.admin_confirm_delete_tutorial_desc
                                     : pendingAction?.nextActive
@@ -436,7 +569,17 @@ export function TutorialManagement() {
                         <AlertDialogCancel className="rounded-2xl border-white/10 bg-white/5 text-gray-200">{t.cancel}</AlertDialogCancel>
                         <AlertDialogAction
                             onClick={runPendingAction}
-                            className="rounded-2xl bg-primary text-black hover:bg-primary/90"
+                            className={`rounded-2xl ${
+                                pendingAction?.type === "delete"
+                                    ? "bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 hover:text-white"
+                                    : pendingAction?.type === "toggle" && pendingAction?.nextActive
+                                        ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 hover:text-white"
+                                        : pendingAction?.type === "toggle"
+                                            ? "bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:bg-amber-500/30 hover:text-white"
+                                            : pendingAction?.type === "saveBanner"
+                                                ? "bg-sky-500/20 border border-sky-500/30 text-sky-300 hover:bg-sky-500/30 hover:text-white"
+                                                : "bg-violet-500/20 border border-violet-500/30 text-violet-300 hover:bg-violet-500/30 hover:text-white"
+                            }`}
                         >
                             {t.confirm}
                         </AlertDialogAction>

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { usePWAStore } from "@/store/usePWAStore";
 import { api, useAuthStore } from "@/store/useAuthStore";
 import { useLocaleStore } from "@/store/useLocaleStore";
+import { useOnboardingUIStore } from "@/store/useOnboardingUIStore";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
@@ -46,8 +47,11 @@ export default function PWARegistration() {
   const authReady = useAuthStore((state) => state.authReady);
   const user = useAuthStore((state) => state.user);
   const setUser = useAuthStore((state) => state.setUser);
+  const tutorialPromptOpen = useOnboardingUIStore((state) => state.tutorialPromptOpen);
+  const tutorialPromptCheckComplete = useOnboardingUIStore((state) => state.tutorialPromptCheckComplete);
   const language = useLocaleStore((state) => state.language);
   const isGuestRoute = pathname === "/login" || pathname === "/register";
+  const isDashboardRoute = pathname.startsWith("/dashboard");
 
   const [permissionState, setPermissionState] = useState<PermissionState>("unknown");
   const [showPushModal, setShowPushModal] = useState(false);
@@ -146,6 +150,24 @@ export default function PWARegistration() {
 
     if (typeof window === "undefined") return;
 
+    if (isDashboardRoute && user?.role === "user" && !tutorialPromptCheckComplete) {
+      if (IS_DEV) {
+        console.info("[Push][PWA] Waiting for tutorial onboarding decision before showing push modal.", {
+          userId: user?._id || null,
+        });
+      }
+      setShowPushModal(false);
+      return;
+    }
+
+    if (tutorialPromptOpen) {
+      if (IS_DEV) {
+        console.info("[Push][PWA] Tutorial onboarding modal is active; deferring push modal.");
+      }
+      setShowPushModal(false);
+      return;
+    }
+
     if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
       if (IS_DEV) {
         console.warn("[Push][PWA] Browser does not support web push APIs on this origin.");
@@ -164,7 +186,7 @@ export default function PWARegistration() {
     }
     setPermissionState(currentPermission);
     setShowPushModal(currentPermission !== "granted");
-  }, [isGuestRoute, pathname, isAuthenticated, hasHydrated, authReady, user?._id]);
+  }, [isGuestRoute, pathname, isAuthenticated, hasHydrated, authReady, user?._id, user?.role, tutorialPromptOpen, tutorialPromptCheckComplete, isDashboardRoute]);
 
   useEffect(() => {
     if (!IS_DEV) return;

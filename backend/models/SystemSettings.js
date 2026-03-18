@@ -30,6 +30,19 @@ const systemSettingsSchema = new mongoose.Schema({
         type: Number,
         default: 10
     },
+    dailyClaimBannerEnabled: {
+        type: Boolean,
+        default: true
+    },
+    tutorialBannerEnabled: {
+        type: Boolean,
+        default: true
+    },
+    tutorialBannerTutorialId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "TutorialVideo",
+        default: null
+    },
     lastUpdatedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User"
@@ -54,6 +67,11 @@ const toPublicSettings = (settingsDocOrObj) => ({
     commandFooter: settingsDocOrObj.commandFooter,
     kingBonusCoins: Number(settingsDocOrObj.kingBonusCoins || 100),
     referralBonus: Number(settingsDocOrObj.referralBonus || 10),
+    dailyClaimBannerEnabled: settingsDocOrObj.dailyClaimBannerEnabled !== false,
+    tutorialBannerEnabled: settingsDocOrObj.tutorialBannerEnabled !== false,
+    tutorialBannerTutorialId: settingsDocOrObj.tutorialBannerTutorialId
+        ? String(settingsDocOrObj.tutorialBannerTutorialId)
+        : null,
     updatedAt: settingsDocOrObj.updatedAt || null
 });
 

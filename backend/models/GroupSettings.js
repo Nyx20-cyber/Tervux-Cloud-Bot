@@ -33,6 +33,13 @@ const GroupSettingsSchema = new mongoose.Schema({
         enabled: { type: Boolean, default: false },
         action: { type: String, enum: ["warn", "kick", "delete"], default: "warn" }
     },
+    antisticker: {
+        enabled: { type: Boolean, default: false },
+        action: { type: String, enum: ["warn", "kick"], default: "warn" }
+    },
+    antitagall: {
+        enabled: { type: Boolean, default: false }
+    },
     botEnabled: { type: Boolean, default: true },
     antispam: {
         enabled: { type: Boolean, default: false },
@@ -43,6 +50,28 @@ const GroupSettingsSchema = new mongoose.Schema({
         enabled: { type: Boolean, default: false }
     },
     antimention: {
+        enabled: { type: Boolean, default: false }
+    },
+    antivoice: {
+        enabled: { type: Boolean, default: false }
+    },
+    antiimage: {
+        enabled: { type: Boolean, default: false }
+    },
+    antivideo: {
+        enabled: { type: Boolean, default: false }
+    },
+    antidocument: {
+        enabled: { type: Boolean, default: false }
+    },
+    antiforward: {
+        enabled: { type: Boolean, default: false }
+    },
+    antilongtext: {
+        enabled: { type: Boolean, default: false },
+        maxLength: { type: Number, default: 600 }
+    },
+    antipoll: {
         enabled: { type: Boolean, default: false }
     },
     antifake: {

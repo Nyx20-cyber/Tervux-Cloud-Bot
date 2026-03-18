@@ -426,7 +426,7 @@ export function PaymentHistory() {
             </div>
 
             <Dialog open={!!confirmDeletePaymentId} onOpenChange={(open) => !open && !deletingId && setConfirmDeletePaymentId(null)}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className="max-w-md border-red-500/20 bg-[#12090a] text-white rounded-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {t.admin_delete_payment_title}
@@ -458,7 +458,7 @@ export function PaymentHistory() {
             </Dialog>
 
             <Dialog open={!!confirmReconcilePaymentId} onOpenChange={(open) => !open && !reconcilingId && setConfirmReconcilePaymentId(null)}>
-                <DialogContent className="max-w-md border-primary/20 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className="max-w-md border-sky-500/20 bg-[#0b1016] text-white rounded-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {tr("admin_reconcile_payment_title", "Reconcile Payment")}
@@ -481,7 +481,7 @@ export function PaymentHistory() {
                             type="button"
                             disabled={!!reconcilingId || !confirmReconcilePaymentId}
                             onClick={() => confirmReconcilePaymentId && handleReconcilePayment(confirmReconcilePaymentId)}
-                            className="bg-primary/20 border border-primary/40 text-primary hover:bg-primary/30 hover:text-white"
+                            className="bg-sky-500/20 border border-sky-500/30 text-sky-300 hover:bg-sky-500/30 hover:text-white"
                         >
                             {reconcilingId ? <Loader2 className="w-4 h-4 animate-spin" /> : tr("admin_reconcile_now", "Reconcile now")}
                         </Button>

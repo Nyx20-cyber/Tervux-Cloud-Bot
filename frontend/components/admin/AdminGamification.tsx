@@ -387,7 +387,11 @@ export function AdminGamification() {
             )}
 
             <Dialog open={!!pendingAction} onOpenChange={(open) => !open && setPendingAction(null)}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className={`max-w-md text-white rounded-2xl ${
+                    pendingAction?.type === "vip"
+                        ? "border-yellow-500/20 bg-[#120f09]"
+                        : "border-violet-500/20 bg-[#100b16]"
+                }`}>
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {pendingAction?.type === "vip" ? t.admin_confirm_vip_change_title : t.admin_confirm_badge_change_title}
@@ -405,7 +409,9 @@ export function AdminGamification() {
                         <Button
                             onClick={runPendingAction}
                             disabled={!!updatingUserId}
-                            className="bg-primary text-black hover:bg-primary/90"
+                            className={pendingAction?.type === "vip"
+                                ? "bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/30 hover:text-white"
+                                : "bg-violet-500/20 border border-violet-500/30 text-violet-300 hover:bg-violet-500/30 hover:text-white"}
                         >
                             {t.confirm}
                         </Button>

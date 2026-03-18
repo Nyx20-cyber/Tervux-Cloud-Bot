@@ -339,7 +339,7 @@ export function BroadcastControl() {
             )}
 
             <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className="max-w-md border-sky-500/20 bg-[#0b1016] text-white rounded-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {t.admin_manual_broadcast_confirm_title}
@@ -364,7 +364,7 @@ export function BroadcastControl() {
                             type="button"
                             disabled={isSending || (scope === "selected" && selectedCount === 0)}
                             onClick={handleManualBroadcast}
-                            className="bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 hover:text-white"
+                            className="bg-sky-500/20 border border-sky-500/30 text-sky-300 hover:bg-sky-500/30 hover:text-white"
                         >
                             {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : t.confirm_action}
                         </Button>
@@ -376,7 +376,11 @@ export function BroadcastControl() {
                 setConfirmToggleAllOpen(open);
                 if (!open) setPendingToggleAllValue(null);
             }}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className={`max-w-md text-white rounded-2xl ${
+                    pendingToggleAllValue
+                        ? "border-emerald-500/20 bg-[#09120d]"
+                        : "border-red-500/20 bg-[#12090a]"
+                }`}>
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {pendingToggleAllValue ? t.admin_enable_broadcast_all_title : t.admin_disable_broadcast_all_title}

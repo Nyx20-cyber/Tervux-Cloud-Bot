@@ -340,7 +340,15 @@ export function UserManagement() {
             </div>
 
             <Dialog open={!!pendingAction} onOpenChange={(open) => !open && setPendingAction(null)}>
-                <DialogContent className="max-w-md border-white/10 bg-[#0e0e0e] text-white rounded-2xl">
+                <DialogContent className={`max-w-md text-white rounded-2xl ${
+                    pendingAction?.type === "delete"
+                        ? "border-red-500/20 bg-[#12090a]"
+                        : pendingAction?.type === "ban" && !pendingAction?.isBanned
+                            ? "border-orange-500/20 bg-[#120f09]"
+                            : pendingAction?.type === "ban" && pendingAction?.isBanned
+                                ? "border-emerald-500/20 bg-[#09120d]"
+                                : "border-sky-500/20 bg-[#0b1016]"
+                }`}>
                     <DialogHeader>
                         <DialogTitle className="text-sm font-black uppercase tracking-widest text-white">
                             {pendingAction?.type === "ban"
@@ -375,7 +383,11 @@ export function UserManagement() {
                             onClick={runPendingAction}
                             className={pendingAction?.type === "delete"
                                 ? "bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 hover:text-white"
-                                : "bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 hover:text-white"}
+                                : pendingAction?.type === "ban" && !pendingAction?.isBanned
+                                    ? "bg-orange-500/20 border border-orange-500/30 text-orange-300 hover:bg-orange-500/30 hover:text-white"
+                                    : pendingAction?.type === "ban" && pendingAction?.isBanned
+                                        ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 hover:text-white"
+                                        : "bg-sky-500/20 border border-sky-500/30 text-sky-300 hover:bg-sky-500/30 hover:text-white"}
                         >
                             {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : (pendingAction?.type === "delete" ? t.delete : t.confirm)}
                         </Button>

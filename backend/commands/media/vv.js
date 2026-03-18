@@ -1,5 +1,4 @@
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
-import { sessionManager } from "../../services/whatsappService.js";
 import { getCachedConfig } from "../../services/configService.js";
 
 export const vv = async (sock, m, args, ctx = {}) => {
@@ -13,7 +12,8 @@ export const vv = async (sock, m, args, ctx = {}) => {
             return `╔══════════════════════════════════╗\n║   👁️ *𝕋𝔼ℝ𝕍𝕌X 𝕍𝕀𝔼𝕎 𝕆ℕℂ𝔼* 👁️      ║\n╚══════════════════════════════════╝\n\nThis command opens a View Once photo, video, or voice note as normal media.\n\n❌ *Error:* Please reply to a View Once message with *${p}vv* to open it.`;
         }
 
-        const session = sessionManager.sessions.get(sock.sessionId);
+        const sessionManager = sock.__sessionManager;
+        const session = sessionManager?.sessions?.get(sock.sessionId);
         if (!session) {
             return "❌ *Error:* Session not found.";
         }

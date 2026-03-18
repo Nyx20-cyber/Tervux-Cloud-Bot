@@ -17,6 +17,151 @@ const enqueueLowPriority = (sock, label, fn) => {
         .catch((error) => console.error(`[GroupLowPriority] ${label} failed:`, error.message));
 };
 
+const spamTracker = new Map();
+const adminRequirementNoticeCooldowns = new Map();
+const ADMIN_REQUIREMENT_NOTICE_COOLDOWN_MS = 15_000;
+
+function unwrapGroupMessageContent(message = {}) {
+    let content = message;
+    for (let i = 0; i < 8; i++) {
+        if (content?.ephemeralMessage?.message) {
+            content = content.ephemeralMessage.message;
+            continue;
+        }
+        if (content?.viewOnceMessage?.message) {
+            content = content.viewOnceMessage.message;
+            continue;
+        }
+        if (content?.viewOnceMessageV2?.message) {
+            content = content.viewOnceMessageV2.message;
+            continue;
+        }
+        if (content?.viewOnceMessageV2Extension?.message) {
+            content = content.viewOnceMessageV2Extension.message;
+            continue;
+        }
+        break;
+    }
+    return content || {};
+}
+
+function extractGroupMessageText(content = {}) {
+    return (
+        content?.conversation ||
+        content?.extendedTextMessage?.text ||
+        content?.imageMessage?.caption ||
+        content?.videoMessage?.caption ||
+        content?.documentMessage?.caption ||
+        ""
+    );
+}
+
+function extractContextInfo(content = {}) {
+    return (
+        content?.extendedTextMessage?.contextInfo ||
+        content?.imageMessage?.contextInfo ||
+        content?.videoMessage?.contextInfo ||
+        content?.audioMessage?.contextInfo ||
+        content?.documentMessage?.contextInfo ||
+        content?.stickerMessage?.contextInfo ||
+        content?.pollCreationMessage?.contextInfo ||
+        content?.pollCreationMessageV2?.contextInfo ||
+        content?.pollCreationMessageV3?.contextInfo ||
+        {}
+    );
+}
+
+function isVoiceNote(content = {}) {
+    const audio = content?.audioMessage;
+    return Boolean(audio && (audio.ptt === true || String(audio.mimetype || "").includes("audio/ogg")));
+}
+
+function isForwardedMessage(content = {}) {
+    const contextInfo = extractContextInfo(content);
+    return Boolean(contextInfo?.isForwarded || Number(contextInfo?.forwardingScore || 0) > 0);
+}
+
+function isPollMessage(content = {}) {
+    return Boolean(content?.pollCreationMessage || content?.pollCreationMessageV2 || content?.pollCreationMessageV3);
+}
+
+function isMassMention(msgText = "", mentionedJids = []) {
+    const lowered = String(msgText || "").toLowerCase();
+    return (
+        lowered.includes("@all") ||
+        lowered.includes("@everyone") ||
+        lowered.includes("@here") ||
+        lowered.includes("@admins") ||
+        mentionedJids.length >= 5
+    );
+}
+
+function isSpamTriggered(sessionId, remoteJid, sender, config = {}) {
+    const key = `${sessionId}:${remoteJid}:${sender}`;
+    const now = Date.now();
+    const timeWindowMs = Math.max(Number(config.timeWindow || 10), 3) * 1000;
+    const maxMessages = Math.max(Number(config.maxMessages || 5), 3);
+    const recentTimestamps = (spamTracker.get(key) || []).filter((ts) => now - ts <= timeWindowMs);
+    recentTimestamps.push(now);
+    spamTracker.set(key, recentTimestamps);
+    return recentTimestamps.length > maxMessages;
+}
+
+async function sendAdminRequirementNotice(sock, remoteJid, featureKey, text) {
+    const key = `${sock.sessionId}:${remoteJid}:${featureKey}`;
+    const now = Date.now();
+    const lastSentAt = adminRequirementNoticeCooldowns.get(key) || 0;
+    if (now - lastSentAt < ADMIN_REQUIREMENT_NOTICE_COOLDOWN_MS) {
+        return;
+    }
+    adminRequirementNoticeCooldowns.set(key, now);
+    await sock.sendMessage(remoteJid, { text });
+}
+
+async function enforceGroupRestriction({
+    sock,
+    m,
+    remoteJid,
+    sender,
+    senderIsAdmin,
+    botIsAdmin,
+    triggered,
+    featureKey,
+    adminRequiredText,
+    warnText,
+    kick = false,
+    kickText = ""
+}) {
+    if (!triggered || senderIsAdmin) return false;
+
+    if (!botIsAdmin) {
+        await sendAdminRequirementNotice(sock, remoteJid, featureKey, adminRequiredText);
+        return true;
+    }
+
+    await sock.sendMessage(remoteJid, { delete: m.key });
+
+    if (kick) {
+        await sock.groupParticipantsUpdate(remoteJid, [sender], "remove");
+        if (kickText) {
+            await sock.sendMessage(remoteJid, {
+                text: kickText,
+                mentions: [sender]
+            });
+        }
+        return true;
+    }
+
+    if (warnText) {
+        await sock.sendMessage(remoteJid, {
+            text: warnText,
+            mentions: [sender]
+        });
+    }
+
+    return true;
+}
+
 /**
  * Handle Group Participants Update (Welcome/Goodbye)
  */
@@ -117,6 +262,12 @@ export async function handleGroupMessage(sock, m) {
     const botJid = (sock.user?.id?.split("@")[0]?.split(":")[0]) + "@s.whatsapp.net";
     if (sender.split(":")[0].split("@")[0] === botJid.split("@")[0]) return false;
 
+    const content = unwrapGroupMessageContent(m.message);
+    const msgTextRaw = extractGroupMessageText(content);
+    const msgText = String(msgTextRaw || "").toLowerCase();
+    const contextInfo = extractContextInfo(content);
+    const mentionedJids = contextInfo?.mentionedJid || [];
+
     const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const groupContext = await getGroupParticipantContext(sock, remoteJid, sender);
     const senderIsAdmin = groupContext.senderIsAdmin;
@@ -126,25 +277,88 @@ export async function handleGroupMessage(sock, m) {
     if (settings.botEnabled === false) {
         const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
-        const msgText = (m.message.conversation || m.message.extendedTextMessage?.text || "").toLowerCase().trim();
 
         // Only allow !bot on to pass through
-        if (msgText === `${p}bot on`) {
+        if (msgText.trim() === `${p}bot on`) {
             return false;
         }
         return true; // Return true to "consume" the message and stop further processing in whatsappClient.js
     }
 
+    // --- 🚀 ANTISPAM ---
+    if (settings.antispam?.enabled && !senderIsAdmin) {
+        const spamTriggered = isSpamTriggered(sock.sessionId, remoteJid, sender, settings.antispam);
+        if (spamTriggered) {
+            const consumed = await enforceGroupRestriction({
+                sock,
+                m,
+                remoteJid,
+                sender,
+                senderIsAdmin,
+                botIsAdmin,
+                triggered: true,
+                featureKey: "antispam",
+                adminRequiredText: `🚫 *Spam Detected!* I need admin privileges to manage antispam.`,
+                warnText: `⚠️ @${sender.split("@")[0]}, *please slow down!* Spam messages are not allowed in this group.`
+            });
+            if (consumed) return true;
+        }
+    }
+
+    // --- 🚀 ANTIFORWARD ---
+    if (settings.antiforward?.enabled) {
+        const consumed = await enforceGroupRestriction({
+            sock,
+            m,
+            remoteJid,
+            sender,
+            senderIsAdmin,
+            botIsAdmin,
+            triggered: isForwardedMessage(content),
+            featureKey: "antiforward",
+            adminRequiredText: `🚫 *Forwarded Message Detected!* I need admin privileges to manage antiforward.`,
+            warnText: `⚠️ @${sender.split("@")[0]}, *forwarded messages are not allowed* in this group! Your message has been deleted.`
+        });
+        if (consumed) return true;
+    }
+
+    // --- 🚀 ANTILONGTEXT ---
+    if (settings.antilongtext?.enabled) {
+        const maxLength = Math.max(Number(settings.antilongtext?.maxLength || 600), 150);
+        const consumed = await enforceGroupRestriction({
+            sock,
+            m,
+            remoteJid,
+            sender,
+            senderIsAdmin,
+            botIsAdmin,
+            triggered: msgTextRaw.trim().length > maxLength,
+            featureKey: "antilongtext",
+            adminRequiredText: `🚫 *Long Message Detected!* I need admin privileges to manage antilongtext.`,
+            warnText: `⚠️ @${sender.split("@")[0]}, *long messages are not allowed* in this group! Please keep it under ${maxLength} characters.`
+        });
+        if (consumed) return true;
+    }
+
+    // --- 🚀 ANTITAGALL ---
+    if (settings.antitagall?.enabled) {
+        const consumed = await enforceGroupRestriction({
+            sock,
+            m,
+            remoteJid,
+            sender,
+            senderIsAdmin,
+            botIsAdmin,
+            triggered: isMassMention(msgText, mentionedJids),
+            featureKey: "antitagall",
+            adminRequiredText: `🚫 *Mass Mention Detected!* I need admin privileges to manage antitagall.`,
+            warnText: `⚠️ @${sender.split("@")[0]}, *mass mentions are not allowed* in this group! Your message has been deleted.`
+        });
+        if (consumed) return true;
+    }
+
     // 1. Antilink Check
     if (settings.antilink?.enabled) {
-        const msgText = (
-            m.message.conversation ||
-            m.message.extendedTextMessage?.text ||
-            m.message.imageMessage?.caption ||
-            m.message.videoMessage?.caption ||
-            ""
-        ).toLowerCase();
-
         // Detect any URL using regex
         const urlRegex = /(https?:\/\/)?(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)/i;
         const hasUrl = urlRegex.test(msgText);
@@ -160,6 +374,7 @@ export async function handleGroupMessage(sock, m) {
                 "wa.me/message/tervux",
                 "wa.me/255785046741",
                 "tervux.portfolio",
+                "bot.tervux.com",
                 "nyaganya.tervux.com",
                 "github.com/JonniTech/Tervux-WhatsApp-Bot",
                 "nyaganyamalima47@gmail.com"
@@ -229,14 +444,6 @@ export async function handleGroupMessage(sock, m) {
 
     // --- 🚀 BADWORD FILTER ---
     if (settings.badwords?.length > 0) {
-        const msgText = (
-            m.message.conversation ||
-            m.message.extendedTextMessage?.text ||
-            m.message.imageMessage?.caption ||
-            m.message.videoMessage?.caption ||
-            ""
-        ).toLowerCase();
-
         const hasBadWord = settings.badwords.some(word => msgText.includes(word.toLowerCase()));
         if (hasBadWord) {
             if (!senderIsAdmin) {
@@ -253,9 +460,125 @@ export async function handleGroupMessage(sock, m) {
         }
     }
 
+    // --- 🚀 ANTISTICKER ---
+    if (settings.antisticker?.enabled) {
+        const isSticker = !!content.stickerMessage;
+        if (isSticker && !senderIsAdmin) {
+            console.log(`🛡️ [Antisticker] Triggered for ${sender} in ${remoteJid}`);
+
+            if (!botIsAdmin) {
+                await sock.sendMessage(remoteJid, {
+                    text: `🚫 *Sticker Detected!* I need admin privileges to manage antisticker.`
+                });
+                return true;
+            }
+
+            await sock.sendMessage(remoteJid, { delete: m.key });
+
+            if (settings.antisticker.action === "kick") {
+                await sock.groupParticipantsUpdate(remoteJid, [sender], "remove");
+                await sock.sendMessage(remoteJid, {
+                    text: `🚫 *Sticker blocked!* @${sender.split("@")[0]} has been removed for sending stickers.`,
+                    mentions: [sender]
+                });
+            } else {
+                await sock.sendMessage(remoteJid, {
+                    text: `⚠️ @${sender.split("@")[0]}, *stickers are not allowed* in this group! Your sticker has been deleted.`,
+                    mentions: [sender]
+                });
+            }
+            return true;
+        }
+    }
+
+    // --- 🚀 ANTIVOICE ---
+    if (settings.antivoice?.enabled) {
+        const consumed = await enforceGroupRestriction({
+            sock,
+            m,
+            remoteJid,
+            sender,
+            senderIsAdmin,
+            botIsAdmin,
+            triggered: isVoiceNote(content),
+            featureKey: "antivoice",
+            adminRequiredText: `🚫 *Voice Note Detected!* I need admin privileges to manage antivoice.`,
+            warnText: `⚠️ @${sender.split("@")[0]}, *voice notes are not allowed* in this group! Your voice note has been deleted.`
+        });
+        if (consumed) return true;
+    }
+
+    // --- 🚀 ANTIIMAGE ---
+    if (settings.antiimage?.enabled) {
+        const consumed = await enforceGroupRestriction({
+            sock,
+            m,
+            remoteJid,
+            sender,
+            senderIsAdmin,
+            botIsAdmin,
+            triggered: !!content.imageMessage,
+            featureKey: "antiimage",
+            adminRequiredText: `🚫 *Image Detected!* I need admin privileges to manage antiimage.`,
+            warnText: `⚠️ @${sender.split("@")[0]}, *images are not allowed* in this group! Your image has been deleted.`
+        });
+        if (consumed) return true;
+    }
+
+    // --- 🚀 ANTIVIDEO ---
+    if (settings.antivideo?.enabled) {
+        const consumed = await enforceGroupRestriction({
+            sock,
+            m,
+            remoteJid,
+            sender,
+            senderIsAdmin,
+            botIsAdmin,
+            triggered: !!content.videoMessage,
+            featureKey: "antivideo",
+            adminRequiredText: `🚫 *Video Detected!* I need admin privileges to manage antivideo.`,
+            warnText: `⚠️ @${sender.split("@")[0]}, *videos are not allowed* in this group! Your video has been deleted.`
+        });
+        if (consumed) return true;
+    }
+
+    // --- 🚀 ANTIDOCUMENT ---
+    if (settings.antidocument?.enabled) {
+        const consumed = await enforceGroupRestriction({
+            sock,
+            m,
+            remoteJid,
+            sender,
+            senderIsAdmin,
+            botIsAdmin,
+            triggered: !!content.documentMessage,
+            featureKey: "antidocument",
+            adminRequiredText: `🚫 *Document Detected!* I need admin privileges to manage antidocument.`,
+            warnText: `⚠️ @${sender.split("@")[0]}, *documents are not allowed* in this group! Your document has been deleted.`
+        });
+        if (consumed) return true;
+    }
+
+    // --- 🚀 ANTIPOLL ---
+    if (settings.antipoll?.enabled) {
+        const consumed = await enforceGroupRestriction({
+            sock,
+            m,
+            remoteJid,
+            sender,
+            senderIsAdmin,
+            botIsAdmin,
+            triggered: isPollMessage(content),
+            featureKey: "antipoll",
+            adminRequiredText: `🚫 *Poll Detected!* I need admin privileges to manage antipoll.`,
+            warnText: `⚠️ @${sender.split("@")[0]}, *polls are not allowed* in this group! Your poll has been deleted.`
+        });
+        if (consumed) return true;
+    }
+
     // --- 🚀 AUTOSTICKER ---
     if (settings.autosticker?.enabled) {
-        const isImage = !!m.message.imageMessage;
+        const isImage = !!content.imageMessage;
         if (isImage) {
             if (botIsAdmin) {
                 console.log(`🛡️ [Autosticker] Generating sticker for ${remoteJid}`);
@@ -272,24 +595,13 @@ export async function handleGroupMessage(sock, m) {
 
     // 2. Antimention Check
     if (settings.antimention?.enabled) {
-        const msgText = (
-            m.message.conversation ||
-            m.message.extendedTextMessage?.text ||
-            m.message.imageMessage?.caption ||
-            m.message.videoMessage?.caption ||
-            ""
-        ).toLowerCase();
-
-        const mentionedJids = m.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
         const hasTriggerText = msgText.includes("@all") || msgText.includes("@everyone") || msgText.includes("@status");
         const hasMentions = mentionedJids.length > 0;
 
         if (hasTriggerText || hasMentions) {
-            const senderIsAdmin = await isAdmin(sock, remoteJid, sender);
             if (!senderIsAdmin) {
                 console.log(`🛡️ Antimention triggered for ${sender} in ${remoteJid}`);
 
-                const botIsAdmin = await isBotAdmin(sock, remoteJid);
                 if (botIsAdmin) {
                     // Delete the forbidden mention
                     await sock.sendMessage(remoteJid, { delete: m.key });

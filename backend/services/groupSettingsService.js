@@ -41,12 +41,51 @@ const DEFAULT_GROUP_SETTINGS = {
         enabled: false,
         action: "warn"
     },
+    antisticker: {
+        enabled: false,
+        action: "warn"
+    },
+    antitagall: {
+        enabled: false
+    },
     botEnabled: true,
     antispam: {
         enabled: false,
         maxMessages: 5,
         timeWindow: 10
     },
+    antimention: {
+        enabled: false
+    },
+    antivoice: {
+        enabled: false
+    },
+    antiimage: {
+        enabled: false
+    },
+    antivideo: {
+        enabled: false
+    },
+    antidocument: {
+        enabled: false
+    },
+    antiforward: {
+        enabled: false
+    },
+    antilongtext: {
+        enabled: false,
+        maxLength: 600
+    },
+    antipoll: {
+        enabled: false
+    },
+    antifake: {
+        enabled: false
+    },
+    autosticker: {
+        enabled: false
+    },
+    badwords: [],
     groupAntiDelete: {
         enabled: false
     }

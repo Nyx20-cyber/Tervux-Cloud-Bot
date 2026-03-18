@@ -399,6 +399,28 @@ router.put("/preferences/language", authenticate, async (req, res) => {
     }
 });
 
+router.post("/tutorial-onboarding/seen", authenticate, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        if (!user.tutorialOnboardingSeenAt) {
+            user.tutorialOnboardingSeenAt = new Date();
+            await user.save();
+        }
+
+        res.json({
+            success: true,
+            user: user.toJSON()
+        });
+    } catch (error) {
+        console.error("Tutorial onboarding seen error:", error);
+        res.status(500).json({ error: "Failed to update tutorial onboarding state" });
+    }
+});
+
 /**
  * POST /api/auth/daily-claim
  * Claim daily reward (Punch Card)

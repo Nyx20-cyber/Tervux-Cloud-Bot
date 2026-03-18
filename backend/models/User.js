@@ -149,6 +149,10 @@ const userSchema = new mongoose.Schema({
         }],
         default: []
     },
+    tutorialOnboardingSeenAt: {
+        type: Date,
+        default: null
+    },
     lastDeployReminderAt: {
         type: Date,
         default: null

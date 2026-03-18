@@ -15,6 +15,88 @@ import {
 } from "../../services/groupSettingsService.js";
 import GroupMemberStats from "../../models/GroupMemberStats.js";
 
+function buildProtectionGuide({ icon, title, status, commandLines, footer, examples = [] }) {
+    const commandBlock = commandLines.map((line) => `• ${line}`).join("\n");
+    const exampleBlock = examples.length
+        ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Examples:*\n${examples.map((line) => `• ${line}`).join("\n")}\n`
+        : "";
+
+    return `╔══════════════════════════════════╗
+║  ${icon} *${title}* ${icon}  ║
+╚══════════════════════════════════╝
+
+*Status:* ${status}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*Commands:*
+${commandBlock}${exampleBlock}
+${footer}`;
+}
+
+async function ensureGroupProtectionAccess(sock, remoteJid, sender, featureName, { requireBotAdmin = true } = {}) {
+    if (!remoteJid.endsWith("@g.us")) {
+        return `⚠️ This command only works in groups.`;
+    }
+
+    if (!await isAdmin(sock, remoteJid, sender)) {
+        return `⚠️ Only admins can manage ${featureName}.`;
+    }
+
+    if (requireBotAdmin && !await isBotAdmin(sock, remoteJid)) {
+        return `⚠️ Bot must be an admin to manage ${featureName}.`;
+    }
+
+    return null;
+}
+
+async function handleSimpleProtectionToggle({
+    sock,
+    m,
+    args,
+    settingKey,
+    featureName,
+    title,
+    icon,
+    footer,
+    enableText,
+    disableText,
+    requireBotAdmin = true
+}) {
+    const remoteJid = m.key.remoteJid;
+    const sender = m.key.participant || m.key.remoteJid;
+    const accessError = await ensureGroupProtectionAccess(sock, remoteJid, sender, featureName, { requireBotAdmin });
+    if (accessError) return accessError;
+
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
+    const action = args[0]?.toLowerCase();
+
+    if (action === "on") {
+        settings[settingKey] = { enabled: true };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `✅ *${title} Enabled* ✅\n\n${enableText}`;
+    }
+
+    if (action === "off") {
+        settings[settingKey] = { enabled: false };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `❌ *${title} Disabled* ❌\n\n${disableText}`;
+    }
+
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
+    return buildProtectionGuide({
+        icon,
+        title,
+        status: settings[settingKey]?.enabled ? "✅ Enabled" : "❌ Disabled",
+        commandLines: [
+            `${p}${settingKey} on - Enable`,
+            `${p}${settingKey} off - Disable`
+        ],
+        examples: [`${p}${settingKey} on`, `${p}${settingKey} off`],
+        footer
+    });
+}
+
 /**
  * !hidetag <message> - Tag all members without showing mentions (stealth tag)
  */
@@ -840,9 +922,9 @@ Members can now share links freely.`;
 }
 
 /**
- * !antimention on/off - Toggle anti-mention protection
+ * !antisticker on/off/kick/warn - Toggle anti-sticker protection
  */
-export async function antimention(sock, m, args) {
+export async function antisticker(sock, m, args) {
     const remoteJid = m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
@@ -850,38 +932,328 @@ export async function antimention(sock, m, args) {
     }
 
     if (!await isAdmin(sock, remoteJid, m.key.participant || m.key.remoteJid)) {
-        return `⚠️ Only admins can manage antimention.`;
+        return `⚠️ Only admins can manage antisticker.`;
+    }
+
+    if (!await isBotAdmin(sock, remoteJid)) {
+        return `⚠️ Bot must be an admin to manage antisticker.`;
     }
 
     const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const action = args[0]?.toLowerCase();
 
-    if (action === "on") {
-        settings.antimention = { enabled: true };
+    if (action === "on" || action === "warn") {
+        settings.antisticker = { enabled: true, action: "warn" };
         await saveGroupSettings(sock.sessionId, remoteJid, settings);
-        return `🛡️ *𝔸ℕ𝕋𝕀𝕄𝔼ℕ𝕋𝕀𝕆ℕ 𝔼ℕ𝔸𝔹𝕃𝔼𝔻* 🛡️\n\nNon-admins can no longer tag @all or many members at once.`;
+        return `╔══════════════════════════════════╗
+║  🎭 *𝔸ℕ𝕋𝕀𝕊𝕋𝕀ℂ𝕂𝔼ℝ - 𝕎𝔸ℝℕ* 🎭  ║
+╚══════════════════════════════════╝
+
+Anti-sticker is now *ON* (Warn mode)
+
+Stickers will be deleted and the sender will be warned.`;
+    }
+
+    if (action === "kick" || action === "remove") {
+        settings.antisticker = { enabled: true, action: "kick" };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `╔══════════════════════════════════╗
+║  🎭 *𝔸ℕ𝕋𝕀𝕊𝕋𝕀ℂ𝕂𝔼ℝ - 𝕂𝕀ℂ𝕂* 🎭  ║
+╚══════════════════════════════════╝
+
+Anti-sticker is now *ON* (Kick mode)
+
+Stickers will be deleted and the sender will be removed.`;
     }
 
     if (action === "off") {
-        settings.antimention = { enabled: false };
+        settings.antisticker = { enabled: false, action: settings.antisticker?.action || "warn" };
         await saveGroupSettings(sock.sessionId, remoteJid, settings);
-        return `❌ *𝔸ℕ𝕋𝕀𝕄𝔼ℕ𝕋𝕀𝕆ℕ 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌\n\nMembers can now toggle mentions freely.`;
+        return `╔══════════════════════════════════╗
+║  ❌ *𝔸ℕ𝕋𝕀𝕊𝕋𝕀ℂ𝕂𝔼ℝ 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌  ║
+╚══════════════════════════════════╝
+
+Members can now send stickers freely.`;
     }
 
     const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
+    const currentMode = settings.antisticker?.enabled
+        ? settings.antisticker.action === "kick"
+            ? "✅ Enabled (Kick mode)"
+            : "✅ Enabled (Warn mode)"
+        : "❌ Disabled";
+
     return `╔══════════════════════════════════╗
-║  📣 *𝔸ℕ𝕋𝕀𝕄𝔼ℕ𝕋𝕀𝕆ℕ 𝕊𝕐𝕊𝕋𝔼𝕄* 📣  ║
+║  🎭 *𝔸ℕ𝕋𝕀𝕊𝕋𝕀ℂ𝕂𝔼ℝ 𝕊𝕐𝕊𝕋𝔼𝕄* 🎭  ║
 ╚══════════════════════════════════╝
 
-*Status:* ${settings.antimention?.enabled ? "✅ Enabled" : "❌ Disabled"}
+*Status:* ${currentMode}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *Commands:*
-• ${p}antimention on - Enable
-• ${p}antimention off - Disable
+• ${p}antisticker on - Enable (warn mode)
+• ${p}antisticker warn - Same as on
+• ${p}antisticker kick - Enable (remove mode)
+• ${p}antisticker remove - Same as kick
+• ${p}antisticker off - Disable
 
-🛡️ Stops @everyone / @all spam from non-admins!`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*Examples:*
+• ${p}antisticker on
+• ${p}antisticker kick
+• ${p}antisticker off
+
+🛡️ Blocks stickers from non-admin members.
+⚠️ Bot must be admin for delete/remove actions.`;
+}
+
+/**
+ * !antispam on/off [max] [window] - Toggle anti-spam protection
+ */
+export async function antispam(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+    const sender = m.key.participant || m.key.remoteJid;
+    const accessError = await ensureGroupProtectionAccess(sock, remoteJid, sender, "antispam");
+    if (accessError) return accessError;
+
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
+    const action = args[0]?.toLowerCase();
+
+    if (action === "on") {
+        const parsedMaxMessages = Number.parseInt(args[1] || "", 10);
+        const parsedWindow = Number.parseInt(args[2] || "", 10);
+        settings.antispam = {
+            enabled: true,
+            maxMessages: Number.isFinite(parsedMaxMessages) && parsedMaxMessages >= 3 ? parsedMaxMessages : (settings.antispam?.maxMessages || 5),
+            timeWindow: Number.isFinite(parsedWindow) && parsedWindow >= 3 ? parsedWindow : (settings.antispam?.timeWindow || 10)
+        };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `🛡️ *ANTISPAM ENABLED* 🛡️\n\nFlood messages from non-admin members will now be deleted.\n\n*Limit:* ${settings.antispam.maxMessages} messages in ${settings.antispam.timeWindow}s`;
+    }
+
+    if (action === "off") {
+        settings.antispam = {
+            enabled: false,
+            maxMessages: settings.antispam?.maxMessages || 5,
+            timeWindow: settings.antispam?.timeWindow || 10
+        };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `❌ *ANTISPAM DISABLED* ❌\n\nMembers can now send rapid messages freely.`;
+    }
+
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
+    return buildProtectionGuide({
+        icon: "⏱️",
+        title: "ANTISPAM SYSTEM",
+        status: settings.antispam?.enabled
+            ? `✅ Enabled (${settings.antispam.maxMessages} msgs / ${settings.antispam.timeWindow}s)`
+            : "❌ Disabled",
+        commandLines: [
+            `${p}antispam on - Enable with current limits`,
+            `${p}antispam on 5 10 - Enable with custom limits`,
+            `${p}antispam off - Disable`
+        ],
+        examples: [`${p}antispam on`, `${p}antispam on 6 12`, `${p}antispam off`],
+        footer: "🛡️ Deletes flood messages from non-admin members.\n⚠️ Bot must be admin for delete actions."
+    });
+}
+
+/**
+ * !antitagall on/off - Toggle anti-tag-all protection
+ */
+export async function antitagall(sock, m, args) {
+    return handleSimpleProtectionToggle({
+        sock,
+        m,
+        args,
+        settingKey: "antitagall",
+        featureName: "antitagall",
+        title: "ANTITAGALL",
+        icon: "📣",
+        enableText: "Mass mention attempts like @all / @everyone from non-admins will now be deleted.",
+        disableText: "Members can now use mass mentions freely.",
+        footer: "🛡️ Blocks @all, @everyone, and mass mention spam from non-admins.\n⚠️ Bot must be admin for delete actions."
+    });
+}
+
+/**
+ * !antivoice on/off - Toggle anti-voice-note protection
+ */
+export async function antivoice(sock, m, args) {
+    return handleSimpleProtectionToggle({
+        sock,
+        m,
+        args,
+        settingKey: "antivoice",
+        featureName: "antivoice",
+        title: "ANTIVOICE",
+        icon: "🎙️",
+        enableText: "Voice notes from non-admin members will now be deleted automatically.",
+        disableText: "Members can now send voice notes freely.",
+        footer: "🛡️ Blocks voice notes from non-admin members.\n⚠️ Bot must be admin for delete actions."
+    });
+}
+
+/**
+ * !antiimage on/off - Toggle anti-image protection
+ */
+export async function antiimage(sock, m, args) {
+    return handleSimpleProtectionToggle({
+        sock,
+        m,
+        args,
+        settingKey: "antiimage",
+        featureName: "antiimage",
+        title: "ANTIIMAGE",
+        icon: "🖼️",
+        enableText: "Images from non-admin members will now be deleted automatically.",
+        disableText: "Members can now send images freely.",
+        footer: "🛡️ Blocks images from non-admin members.\n⚠️ Bot must be admin for delete actions."
+    });
+}
+
+/**
+ * !antivideo on/off - Toggle anti-video protection
+ */
+export async function antivideo(sock, m, args) {
+    return handleSimpleProtectionToggle({
+        sock,
+        m,
+        args,
+        settingKey: "antivideo",
+        featureName: "antivideo",
+        title: "ANTIVIDEO",
+        icon: "🎬",
+        enableText: "Videos from non-admin members will now be deleted automatically.",
+        disableText: "Members can now send videos freely.",
+        footer: "🛡️ Blocks videos from non-admin members.\n⚠️ Bot must be admin for delete actions."
+    });
+}
+
+/**
+ * !antidocument on/off - Toggle anti-document protection
+ */
+export async function antidocument(sock, m, args) {
+    return handleSimpleProtectionToggle({
+        sock,
+        m,
+        args,
+        settingKey: "antidocument",
+        featureName: "antidocument",
+        title: "ANTIDOCUMENT",
+        icon: "📄",
+        enableText: "Documents from non-admin members will now be deleted automatically.",
+        disableText: "Members can now send documents freely.",
+        footer: "🛡️ Blocks document sharing from non-admin members.\n⚠️ Bot must be admin for delete actions."
+    });
+}
+
+/**
+ * !antiforward on/off - Toggle anti-forward protection
+ */
+export async function antiforward(sock, m, args) {
+    return handleSimpleProtectionToggle({
+        sock,
+        m,
+        args,
+        settingKey: "antiforward",
+        featureName: "antiforward",
+        title: "ANTIFORWARD",
+        icon: "↪️",
+        enableText: "Forwarded messages from non-admin members will now be deleted automatically.",
+        disableText: "Members can now send forwarded messages freely.",
+        footer: "🛡️ Blocks forwarded message spam from non-admin members.\n⚠️ Bot must be admin for delete actions."
+    });
+}
+
+/**
+ * !antilongtext on/off [maxLength] - Toggle anti-long-text protection
+ */
+export async function antilongtext(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+    const sender = m.key.participant || m.key.remoteJid;
+    const accessError = await ensureGroupProtectionAccess(sock, remoteJid, sender, "antilongtext");
+    if (accessError) return accessError;
+
+    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
+    const action = args[0]?.toLowerCase();
+
+    if (action === "on") {
+        const parsedMaxLength = Number.parseInt(args[1] || "", 10);
+        settings.antilongtext = {
+            enabled: true,
+            maxLength: Number.isFinite(parsedMaxLength) && parsedMaxLength >= 150
+                ? parsedMaxLength
+                : (settings.antilongtext?.maxLength || 600)
+        };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `📝 *ANTILONGTEXT ENABLED* 📝\n\nVery long messages from non-admin members will now be deleted.\n\n*Limit:* ${settings.antilongtext.maxLength} characters`;
+    }
+
+    if (action === "off") {
+        settings.antilongtext = {
+            enabled: false,
+            maxLength: settings.antilongtext?.maxLength || 600
+        };
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `❌ *ANTILONGTEXT DISABLED* ❌\n\nMembers can now send very long messages freely.`;
+    }
+
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
+    return buildProtectionGuide({
+        icon: "📝",
+        title: "ANTILONGTEXT",
+        status: settings.antilongtext?.enabled
+            ? `✅ Enabled (${settings.antilongtext.maxLength} chars)`
+            : "❌ Disabled",
+        commandLines: [
+            `${p}antilongtext on - Enable with current limit`,
+            `${p}antilongtext on 600 - Enable with custom limit`,
+            `${p}antilongtext off - Disable`
+        ],
+        examples: [`${p}antilongtext on`, `${p}antilongtext on 500`, `${p}antilongtext off`],
+        footer: "🛡️ Deletes overly long messages from non-admin members.\n⚠️ Bot must be admin for delete actions."
+    });
+}
+
+/**
+ * !antipoll on/off - Toggle anti-poll protection
+ */
+export async function antipoll(sock, m, args) {
+    return handleSimpleProtectionToggle({
+        sock,
+        m,
+        args,
+        settingKey: "antipoll",
+        featureName: "antipoll",
+        title: "ANTIPOLL",
+        icon: "📊",
+        enableText: "Polls from non-admin members will now be deleted automatically.",
+        disableText: "Members can now create polls freely.",
+        footer: "🛡️ Blocks poll creation by non-admin members.\n⚠️ Bot must be admin for delete actions."
+    });
+}
+
+/**
+ * !antimention on/off - Toggle anti-mention protection
+ */
+export async function antimention(sock, m, args) {
+    return handleSimpleProtectionToggle({
+        sock,
+        m,
+        args,
+        settingKey: "antimention",
+        featureName: "antimention",
+        title: "ANTIMENTION",
+        icon: "📣",
+        enableText: "Non-admin members can no longer use @all, @everyone, or mass mentions.",
+        disableText: "Members can now mention freely again.",
+        footer: "🛡️ Stops mention spam from non-admin members.\n⚠️ Bot needs admin privileges for delete actions.",
+        requireBotAdmin: false
+    });
 }
 
 /**
@@ -1152,56 +1524,38 @@ Deleted messages in this group will no longer be restored.`;
  * !antifake on/off - Toggle local-only mode (+255)
  */
 export async function antifake(sock, m, args) {
-    const remoteJid = m.key.remoteJid;
-    if (!remoteJid.endsWith("@g.us")) return `⚠️ This only works in groups.`;
-
-    if (!await isAdmin(sock, remoteJid, m.key.participant || m.key.remoteJid)) {
-        return `⚠️ Only admins can manage settings.`;
-    }
-
-    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
-    const action = args[0]?.toLowerCase();
-
-    if (action === "on") {
-        settings.antifake = { enabled: true };
-        await saveGroupSettings(sock.sessionId, remoteJid, settings);
-        return `🛡️ *𝔸ℕ𝕋𝕀𝔽𝔸𝕂𝔼 𝔼ℕ𝔸𝔹𝕃𝔼𝔻* 🛡️\n\nOnly members with *+255* numbers can join. Others will be kicked automatically.`;
-    } else if (action === "off") {
-        settings.antifake = { enabled: false };
-        await saveGroupSettings(sock.sessionId, remoteJid, settings);
-        return `❌ *𝔸ℕ𝕋𝕀𝔽𝔸𝕂𝔼 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌\n\nInternational numbers are now allowed to join.`;
-    }
-
-    const config = await getCachedConfig(sock.sessionId);
-    return `*Antifake Status:* ${settings.antifake?.enabled ? "✅ On" : "❌ Off"}\n\nThis command blocks non-Tanzanian numbers from joining the group automatically.\n\n*Usage:* ${(config.prefix || "!")}antifake on/off`;
+    return handleSimpleProtectionToggle({
+        sock,
+        m,
+        args,
+        settingKey: "antifake",
+        featureName: "antifake",
+        title: "ANTIFAKE",
+        icon: "🚩",
+        enableText: "Only members with *+255* numbers will be allowed to join. Others will be removed automatically.",
+        disableText: "International numbers are now allowed to join again.",
+        footer: "🛡️ Blocks non-Tanzanian numbers from joining automatically.\n⚠️ Bot needs admin privileges to remove members.",
+        requireBotAdmin: false
+    });
 }
 
 /**
  * !autosticker on/off - Toggle auto image-to-sticker
  */
 export async function autosticker(sock, m, args) {
-    const remoteJid = m.key.remoteJid;
-    if (!remoteJid.endsWith("@g.us")) return `⚠️ This only works in groups.`;
-
-    if (!await isAdmin(sock, remoteJid, m.key.participant || m.key.remoteJid)) {
-        return `⚠️ Only admins can manage settings.`;
-    }
-
-    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
-    const action = args[0]?.toLowerCase();
-
-    if (action === "on") {
-        settings.autosticker = { enabled: true };
-        await saveGroupSettings(sock.sessionId, remoteJid, settings);
-        return `📸 *𝔸𝕌𝕋𝕆𝕊𝕋𝕀ℂ𝕂𝔼ℝ 𝔼ℕ𝔸𝔹𝕃𝔼𝔻* 📸\n\nAll images sent in this group will be converted to stickers automatically!`;
-    } else if (action === "off") {
-        settings.autosticker = { enabled: false };
-        await saveGroupSettings(sock.sessionId, remoteJid, settings);
-        return `❌ *𝔸𝕌𝕋𝕆𝕊𝕋𝕀ℂ𝕂𝔼ℝ 𝔻𝕀𝕊𝔸𝔹𝕃𝔼𝔻* ❌`;
-    }
-
-    const config = await getCachedConfig(sock.sessionId);
-    return `*Autosticker Status:* ${settings.autosticker?.enabled ? "✅ On" : "❌ Off"}\n\nThis command automatically turns new images sent in the group into stickers.\n\n*Usage:* ${(config.prefix || "!")}autosticker on/off`;
+    return handleSimpleProtectionToggle({
+        sock,
+        m,
+        args,
+        settingKey: "autosticker",
+        featureName: "autosticker",
+        title: "AUTOSTICKER",
+        icon: "📸",
+        enableText: "New images sent in this group will now be converted into stickers automatically.",
+        disableText: "Images will no longer be converted into stickers automatically.",
+        footer: "🛡️ Converts new images to stickers automatically.\n💡 No admin delete permission is required for this feature.",
+        requireBotAdmin: false
+    });
 }
 
 /**

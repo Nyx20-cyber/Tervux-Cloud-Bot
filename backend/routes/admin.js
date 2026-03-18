@@ -27,6 +27,26 @@ const PLANS_CACHE_KEY = "public:plans:v1";
 const TUTORIALS_CACHE_KEY = "tutorials:active:v1";
 const ANNOUNCEMENTS_CACHE_KEY_PATTERN = "announcements:active:*";
 
+const buildPlatformSettingsPayload = (settingsDocOrObj) => ({
+    maintenanceMode: !!settingsDocOrObj.maintenanceMode,
+    registrationEnabled: !!settingsDocOrObj.registrationEnabled,
+    supportPhone: settingsDocOrObj.supportPhone,
+    siteName: settingsDocOrObj.siteName,
+    commandFooter: settingsDocOrObj.commandFooter,
+    kingBonusCoins: Number(settingsDocOrObj.kingBonusCoins || 100),
+    referralBonus: Number(settingsDocOrObj.referralBonus || 10),
+    dailyClaimBannerEnabled: settingsDocOrObj.dailyClaimBannerEnabled !== false,
+    tutorialBannerEnabled: settingsDocOrObj.tutorialBannerEnabled !== false,
+    tutorialBannerTutorialId: settingsDocOrObj.tutorialBannerTutorialId
+        ? String(settingsDocOrObj.tutorialBannerTutorialId)
+        : null
+});
+
+const emitPlatformSettingsUpdate = (settingsDocOrObj) => {
+    emitUpdate("admin_settings_updated", { settings: settingsDocOrObj });
+    emitUpdate("platform_settings_updated", buildPlatformSettingsPayload(settingsDocOrObj));
+};
+
 /**
  * GET /api/admin/stats
  * Platform analytics
@@ -1260,6 +1280,17 @@ router.put("/tutorials/:id", authenticate, requireAdmin, async (req, res) => {
         await tutorial.save();
         const populated = await tutorial.populate("createdBy", "name email");
 
+        if (!tutorial.isActive) {
+            const settings = await getSettings();
+            if (String(settings.tutorialBannerTutorialId || "") === tutorial._id.toString()) {
+                settings.tutorialBannerTutorialId = null;
+                settings.lastUpdatedBy = req.user._id;
+                await settings.save();
+                await invalidateSettingsCache();
+                emitPlatformSettingsUpdate(settings);
+            }
+        }
+
         emitUpdate("admin_tutorial_updated", { tutorial: populated });
         emitUpdate("tutorials_updated", { action: "updated", tutorial: populated });
         await delKey(TUTORIALS_CACHE_KEY);
@@ -1279,6 +1310,15 @@ router.delete("/tutorials/:id", authenticate, requireAdmin, async (req, res) => 
     try {
         const tutorial = await TutorialVideo.findByIdAndDelete(req.params.id);
         if (!tutorial) return res.status(404).json({ error: "Tutorial not found" });
+
+        const settings = await getSettings();
+        if (String(settings.tutorialBannerTutorialId || "") === tutorial._id.toString()) {
+            settings.tutorialBannerTutorialId = null;
+            settings.lastUpdatedBy = req.user._id;
+            await settings.save();
+            await invalidateSettingsCache();
+            emitPlatformSettingsUpdate(settings);
+        }
 
         emitUpdate("admin_tutorial_deleted", { tutorialId: tutorial._id.toString() });
         emitUpdate("tutorials_updated", { action: "deleted", tutorialId: tutorial._id.toString() });
@@ -1311,7 +1351,18 @@ router.get("/settings", authenticate, requireAdmin, async (req, res) => {
  */
 router.put("/settings", authenticate, requireAdmin, async (req, res) => {
     try {
-        const { maintenanceMode, registrationEnabled, supportPhone, siteName, commandFooter, kingBonusCoins, referralBonus } = req.body;
+        const {
+            maintenanceMode,
+            registrationEnabled,
+            supportPhone,
+            siteName,
+            commandFooter,
+            kingBonusCoins,
+            referralBonus,
+            dailyClaimBannerEnabled,
+            tutorialBannerEnabled,
+            tutorialBannerTutorialId
+        } = req.body;
         const settings = await getSettings();
 
         const oldKingBonus = settings.kingBonusCoins;
@@ -1324,22 +1375,33 @@ router.put("/settings", authenticate, requireAdmin, async (req, res) => {
         if (commandFooter !== undefined && String(commandFooter).trim()) settings.commandFooter = String(commandFooter);
         if (kingBonusCoins !== undefined && Number(kingBonusCoins) > 0) settings.kingBonusCoins = Number(kingBonusCoins);
         if (referralBonus !== undefined && Number(referralBonus) > 0) settings.referralBonus = Number(referralBonus);
+        if (dailyClaimBannerEnabled !== undefined) settings.dailyClaimBannerEnabled = !!dailyClaimBannerEnabled;
+        if (tutorialBannerEnabled !== undefined) settings.tutorialBannerEnabled = !!tutorialBannerEnabled;
+        if (tutorialBannerTutorialId !== undefined) {
+            if (!tutorialBannerTutorialId) {
+                settings.tutorialBannerTutorialId = null;
+            } else if (mongoose.Types.ObjectId.isValid(String(tutorialBannerTutorialId))) {
+                const tutorial = await TutorialVideo.findOne({
+                    _id: tutorialBannerTutorialId,
+                    isActive: true
+                }).select("_id");
+
+                if (!tutorial) {
+                    return res.status(400).json({ error: "Selected tutorial must be active before it can appear on the dashboard banner" });
+                }
+
+                settings.tutorialBannerTutorialId = tutorial._id;
+            } else {
+                return res.status(400).json({ error: "Invalid tutorial selected for dashboard banner" });
+            }
+        }
 
         settings.lastUpdatedBy = req.user._id;
         await settings.save();
         await invalidateSettingsCache();
         await getCachedPublicSettings();
 
-        emitUpdate("admin_settings_updated", { settings });
-        emitUpdate("platform_settings_updated", {
-            maintenanceMode: settings.maintenanceMode,
-            registrationEnabled: settings.registrationEnabled,
-            supportPhone: settings.supportPhone,
-            siteName: settings.siteName,
-            commandFooter: settings.commandFooter,
-            kingBonusCoins: settings.kingBonusCoins,
-            referralBonus: settings.referralBonus
-        });
+        emitPlatformSettingsUpdate(settings);
 
         // Broadcast notification for coin changes
         const kingBonusChanged = oldKingBonus !== settings.kingBonusCoins;
