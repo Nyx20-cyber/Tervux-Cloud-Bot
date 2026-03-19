@@ -123,9 +123,10 @@ async function cleanUndeployedSessions() {
 async function healUnresponsiveLiveSessions() {
     const now = new Date();
     const candidates = await WhatsAppSession.find({
-        status: { $in: ["active", "paused"] },
-        expiresAt: { $gt: now }
-    }).select("_id status expiresAt lastConnected");
+        status: { $in: ["active", "paused", "disconnected"] },
+        expiresAt: { $gt: now },
+        autoReconnectDisabled: { $ne: true }
+    }).select("_id status expiresAt lastConnected autoReconnectDisabled");
 
     let healed = 0;
     for (const session of candidates) {
@@ -246,7 +247,21 @@ async function cleanStaleDisconnected() {
 
     const stale = await WhatsAppSession.find({
         status: { $in: ["disconnected", "expired"] },
-        updatedAt: { $lt: sevenDaysAgo }
+        $or: [
+            { autoReconnectDisabled: true },
+            { disconnectIntent: { $in: ["manual", "logged_out", "expired", "banned"] } },
+            { expiresAt: null },
+            { expiresAt: { $lte: new Date() } }
+        ],
+        $and: [
+            {
+                $or: [
+                    { lastDisconnectedAt: { $lt: sevenDaysAgo } },
+                    { lastDisconnectedAt: null, updatedAt: { $lt: sevenDaysAgo } },
+                    { lastDisconnectedAt: { $exists: false }, updatedAt: { $lt: sevenDaysAgo } }
+                ]
+            }
+        ]
     });
 
     for (const session of stale) {

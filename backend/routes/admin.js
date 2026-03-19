@@ -212,11 +212,18 @@ router.put("/users/:id", authenticate, requireAdmin, async (req, res) => {
 
         // If banned, disconnect their sessions
         if (isBanned) {
-            const sessions = await WhatsAppSession.find({ userId: user._id, status: "active" });
+            const sessions = await WhatsAppSession.find({
+                userId: user._id,
+                status: { $in: ["active", "paused", "disconnected"] }
+            });
             for (const session of sessions) {
-                await sessionManager.disconnectSession(session._id.toString());
                 session.status = "disconnected";
+                session.autoReconnectDisabled = true;
+                session.disconnectIntent = "banned";
+                session.lastDisconnectedAt = new Date();
                 await session.save();
+                await sessionManager.primeSessionRuntimeFromDocument(session);
+                await sessionManager.destroySession(session._id.toString());
             }
         }
 
@@ -717,10 +724,13 @@ router.post("/sessions/:id/disconnect", authenticate, requireAdmin, async (req, 
         const session = await WhatsAppSession.findById(req.params.id);
         if (!session) return res.status(404).json({ error: "Session not found" });
 
-        await sessionManager.disconnectSession(session._id.toString());
         session.status = "disconnected";
+        session.autoReconnectDisabled = true;
+        session.disconnectIntent = "manual";
+        session.lastDisconnectedAt = new Date();
         await session.save();
         await sessionManager.primeSessionRuntimeFromDocument(session);
+        await sessionManager.destroySession(session._id.toString());
 
         emitUpdate("admin_session_updated", {
             sessionId: session._id.toString(),
@@ -760,6 +770,8 @@ router.put("/sessions/:id", authenticate, requireAdmin, async (req, res) => {
             session.expiresAt = expiresAt ? new Date(expiresAt) : null;
         }
 
+        let afterSaveRuntimeAction = null;
+
         if (status !== undefined) {
             if (!allowedStatuses.includes(status)) {
                 return res.status(400).json({ error: "Invalid session status" });
@@ -768,17 +780,32 @@ router.put("/sessions/:id", authenticate, requireAdmin, async (req, res) => {
 
             // Apply runtime connection behavior for status changes
             if (status === "disconnected") {
-                await sessionManager.disconnectSession(session._id.toString());
+                session.autoReconnectDisabled = true;
+                session.disconnectIntent = "manual";
+                session.lastDisconnectedAt = new Date();
+                afterSaveRuntimeAction = async () => {
+                    await sessionManager.destroySession(session._id.toString());
+                };
             } else if (status === "paused") {
-                if (sessionManager?.isConnected(session._id.toString())) {
-                    await sessionManager.pauseSession(session._id.toString());
-                }
+                session.autoReconnectDisabled = false;
+                session.disconnectIntent = "none";
+                session.lastDisconnectedAt = null;
+                afterSaveRuntimeAction = async () => {
+                    if (sessionManager?.isConnected(session._id.toString())) {
+                        await sessionManager.pauseSession(session._id.toString());
+                    }
+                };
             } else if (status === "active") {
-                if (sessionManager?.isConnected(session._id.toString())) {
-                    await sessionManager.resumeSession(session._id.toString());
-                } else {
-                    sessionManager.connectSession(session._id.toString(), { useReconnectPermit: true, reconnectReason: "admin_activate" });
-                }
+                session.autoReconnectDisabled = false;
+                session.disconnectIntent = "none";
+                session.lastDisconnectedAt = null;
+                afterSaveRuntimeAction = async () => {
+                    if (sessionManager?.isConnected(session._id.toString())) {
+                        await sessionManager.resumeSession(session._id.toString());
+                    } else {
+                        await sessionManager.connectSession(session._id.toString(), { useReconnectPermit: true, reconnectReason: "admin_activate" });
+                    }
+                };
             }
         }
 
@@ -792,6 +819,9 @@ router.put("/sessions/:id", authenticate, requireAdmin, async (req, res) => {
 
         await session.save();
         await sessionManager.primeSessionRuntimeFromDocument(session);
+        if (afterSaveRuntimeAction) {
+            await afterSaveRuntimeAction();
+        }
 
         emitToUser(session.userId.toString(), "session_update", {
             sessionId: session._id,

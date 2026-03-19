@@ -64,6 +64,7 @@ const buildRuntimeFromSession = (session) => {
     const settings = session?.settings?.toObject?.() || session?.settings || {};
     const prefix = settings.prefix || DEFAULT_SETTINGS.prefix;
     const groupPromotionBroadcast = settings.groupPromotionBroadcast === true;
+    const autoReconnectDisabled = session?.autoReconnectDisabled === true;
 
     return {
         sessionId: session?._id?.toString?.() || "",
@@ -71,6 +72,9 @@ const buildRuntimeFromSession = (session) => {
         expiresAt,
         isPaused: status === "paused",
         isDeployed: !!(expiresAt && new Date(expiresAt) > new Date()),
+        autoReconnectDisabled,
+        disconnectIntent: session?.disconnectIntent || "none",
+        lastDisconnectedAt: session?.lastDisconnectedAt || null,
         prefix,
         phone: session?.phone || "",
         name: session?.name || "Bot User",
@@ -117,7 +121,7 @@ export async function getCachedConfig(sessionId, options = {}) {
         return null;
     }
 
-    const session = await WhatsAppSession.findById(sid).select("phone name settings status expiresAt");
+    const session = await WhatsAppSession.findById(sid).select("phone name settings status expiresAt autoReconnectDisabled disconnectIntent lastDisconnectedAt");
     if (!session) return { ...DEFAULT_SETTINGS };
 
     const { config } = (await primeSessionCachesFromDocument(session)) || {
@@ -144,7 +148,7 @@ export async function getCachedRuntimeSnapshot(sessionId, options = {}) {
         return null;
     }
 
-    const session = await WhatsAppSession.findById(sid).select("phone name settings status expiresAt");
+    const session = await WhatsAppSession.findById(sid).select("phone name settings status expiresAt autoReconnectDisabled disconnectIntent lastDisconnectedAt");
     if (!session) return null;
 
     const { runtime } = (await primeSessionCachesFromDocument(session)) || {
@@ -186,7 +190,7 @@ export async function updateConfig(sessionId, updates) {
         { $set: setUpdates },
         {
             new: true,
-            select: "phone name settings status expiresAt"
+            select: "phone name settings status expiresAt autoReconnectDisabled disconnectIntent lastDisconnectedAt"
         }
     );
 
