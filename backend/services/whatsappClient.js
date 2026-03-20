@@ -41,6 +41,7 @@ const OFFICIAL_GROUP_INVITE_LINK = process.env.OFFICIAL_GROUP_INVITE_LINK || "ht
 const OFFICIAL_CHANNEL_LINK = process.env.OFFICIAL_CHANNEL_LINK || "https://whatsapp.com/channel/0029Vb6z2Hp7YSczTRHtmr0N";
 const OFFICIAL_CHANNEL_JID = process.env.OFFICIAL_CHANNEL_JID || "";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const TRACE_GROUP_PATH = process.env.WA_TRACE_GROUP_PATH === "true";
 const LEGACY_COMMAND_FOOTERS = new Set([
     "💠 Powered by TERVUX & ALLANMOX",
     "╭── ✧✦✧ ──╮\n  𝓟𝓸𝔀𝓮𝓻𝓮𝓭 𝓫𝔂\n*ＴＥＲＶＵＸ & ＡＬＬＡＮＭＯＸ*\n╰── ✧✦✧ ──╯",
@@ -235,6 +236,7 @@ class SessionManager {
         this.LOW_PRIORITY_DEFER_MS = Number.parseInt(process.env.WA_LOW_PRIORITY_DEFER_MS || "150", 10);
         this.HEALTH_SKIP_AFTER_COMMAND_MS = Number.parseInt(process.env.WA_HEALTH_SKIP_AFTER_COMMAND_MS || "60000", 10);
         this.SLOW_COMMAND_WARN_MS = Number.parseInt(process.env.WA_SLOW_COMMAND_WARN_MS || "1500", 10);
+        this.AMBIENT_QUEUE_WARN_DEPTH = Number.parseInt(process.env.WA_AMBIENT_QUEUE_WARN_DEPTH || "8", 10);
         this.pairingRecoveryAttempts = new Map();
         this.pairingRunTokens = new Map();
         this.cancelledPairingUsers = new Set();
@@ -247,6 +249,7 @@ class SessionManager {
         this.cryptoRepairInFlight = new Set();
         this.delayedCommandHealCooldowns = new Map();
         this.delayedCommandHealInFlight = new Set();
+        this.ambientTaskCooldowns = new Map();
         this.commandLanes = new Map();
         this.commandLaneDepths = new Map();
         this.lowPriorityLanes = new Map();
@@ -404,7 +407,14 @@ class SessionManager {
 
         if (isLowPriority && currentDepth >= backlogLimit) {
             this._recordMetric("lowPriorityDropped", 1);
+            if (TRACE_GROUP_PATH) {
+                console.warn(`🩺 [${sid}] Dropped low-priority task (${options.label || "unknown"}) at depth=${currentDepth} backlogLimit=${backlogLimit}`);
+            }
             return null;
+        }
+
+        if (isLowPriority && TRACE_GROUP_PATH && currentDepth >= this.AMBIENT_QUEUE_WARN_DEPTH) {
+            console.warn(`🩺 [${sid}] High low-priority lane depth before enqueue (${options.label || "unknown"}): depth=${currentDepth}`);
         }
 
         const queuedAt = Date.now();
@@ -452,7 +462,7 @@ class SessionManager {
                     console.warn(`⚠️ [${sid}] Low-priority task failed (${label}): ${error.message}`);
                     return null;
                 }
-            }, options).catch(() => {});
+            }, { ...options, label }).catch(() => {});
         }, Number(options.deferMs || this.LOW_PRIORITY_DEFER_MS));
     }
 
@@ -872,6 +882,17 @@ class SessionManager {
         return true;
     }
 
+    shouldRunAmbientTask(sessionId, taskKey, cooldownMs) {
+        const key = `${String(sessionId)}:${taskKey}`;
+        const now = Date.now();
+        const lastAt = this.ambientTaskCooldowns.get(key) || 0;
+        if (now - lastAt < cooldownMs) {
+            return false;
+        }
+        this.ambientTaskCooldowns.set(key, now);
+        return true;
+    }
+
     queueAmbientMessageTasks(sessionId, sock, message, config = {}) {
         if (!message?.key || message.key.fromMe) return;
         const remoteJid = message.key.remoteJid;
@@ -884,13 +905,17 @@ class SessionManager {
         }
 
         if (config?.alwaysTyping) {
-            this.enqueueLowPriorityTask(sessionId, "presence-composing", async () => {
-                await sock.sendPresenceUpdate("composing", remoteJid);
-            }, { backlogLimit: 10 });
+            if (this.shouldRunAmbientTask(sessionId, `presence:composing:${remoteJid}`, 5000)) {
+                this.enqueueLowPriorityTask(sessionId, "presence-composing", async () => {
+                    await sock.sendPresenceUpdate("composing", remoteJid);
+                }, { backlogLimit: 6 });
+            }
         } else if (config?.alwaysRecording) {
-            this.enqueueLowPriorityTask(sessionId, "presence-recording", async () => {
-                await sock.sendPresenceUpdate("recording", remoteJid);
-            }, { backlogLimit: 10 });
+            if (this.shouldRunAmbientTask(sessionId, `presence:recording:${remoteJid}`, 5000)) {
+                this.enqueueLowPriorityTask(sessionId, "presence-recording", async () => {
+                    await sock.sendPresenceUpdate("recording", remoteJid);
+                }, { backlogLimit: 6 });
+            }
         }
     }
 
@@ -927,6 +952,7 @@ class SessionManager {
             isOwner: true,
             isGroup,
             isAdminSender: false,
+            totalCommands: Object.keys(commands).length,
             sessionId,
             sessionManager: this,
             commandName,
@@ -984,15 +1010,19 @@ class SessionManager {
 
             const totalMs = Date.now() - commandStartAt;
             ctx.commandTiming.totalMs = totalMs;
+            const currentCommandLaneDepth = this.commandLaneDepths.get(String(sessionId)) || 0;
+            const currentLowLaneDepth = this.lowPriorityLaneDepths.get(String(sessionId)) || 0;
             const telemetry = {
                 ingressAgeMs: ctx.commandTiming.ingressAgeMs,
                 parseMs: ctx.commandTiming.parseMs,
                 queueWaitMs: ctx.commandTiming.queueWaitMs,
                 handlerMs: ctx.commandTiming.handlerMs,
                 replyMs: ctx.commandTiming.replyMs,
-                totalMs
+                totalMs,
+                commandLaneDepth: currentCommandLaneDepth,
+                lowLaneDepth: currentLowLaneDepth
             };
-            const telemetryText = `ingress=${telemetry.ingressAgeMs}ms parse=${telemetry.parseMs}ms queue=${telemetry.queueWaitMs}ms handler=${telemetry.handlerMs}ms reply=${telemetry.replyMs}ms total=${telemetry.totalMs}ms`;
+            const telemetryText = `ingress=${telemetry.ingressAgeMs}ms parse=${telemetry.parseMs}ms queue=${telemetry.queueWaitMs}ms handler=${telemetry.handlerMs}ms reply=${telemetry.replyMs}ms total=${telemetry.totalMs}ms lanes=cmd:${telemetry.commandLaneDepth} low:${telemetry.lowLaneDepth}`;
             if (totalMs >= this.SLOW_COMMAND_WARN_MS) {
                 console.warn(`⚠️ [${sessionId}] Slow command ${commandName}: ${telemetryText}`);
             } else {
@@ -1680,19 +1710,22 @@ ${footer}`
                     }
 
                     const messageText = extractIncomingCommandText(m.message);
-
-                    if (await handleGroupMessage(sock, m)) continue;
-
                     const config = await this.getSessionConfig(sessionId);
                     const prefix = config?.prefix || "!";
+                    const isPotentialCommand = messageText.startsWith(prefix);
+                    const isOwner = isPotentialCommand
+                        ? isOwnerCommandMessage(sock, m, config)
+                        : false;
+                    const isGroupMessage = String(m.key?.remoteJid || "").endsWith("@g.us");
 
-                    if (!messageText.startsWith(prefix)) {
+                    if (!(isGroupMessage && isOwner)) {
+                        if (await handleGroupMessage(sock, m)) continue;
+                    }
+
+                    if (!isPotentialCommand) {
                         this.queueAmbientMessageTasks(sessionId, sock, m, config);
                         continue;
                     }
-
-                    // Check sender is the session owner
-                    const isOwner = isOwnerCommandMessage(sock, m, config);
 
                     if (!isOwner) {
                         await sock.sendMessage(m.key.remoteJid, {
@@ -2794,32 +2827,46 @@ ${footer}`;
 *🇹🇿 🇰🇪 🇺🇬 🇷🇼 🇧🇮 🇸🇸 🇪🇹 🇸🇴*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+*WEWE NI GROUP OWNER AU ADMIN?*
 
-*WHATSAPP YAKO, NGUVU ZAIDI.*
+Linda group lako dhidi ya spam, stickers, voice notes, picha, video, forwarded messages, polls na mass mentions kwa commands mpya za protection 🔥
 
+*ANTI-COMMANDS MPYA ZA KUVUTIA:*
 
-*FEATURES ZA KUVUTIA ZAIDI:*
+🛡️ *${prefix}antispam on*  
+Zuia message flood na spam za haraka.
 
+🎭 *${prefix}antisticker kick*  
+Futa sticker na umtoe aliyetuma.
+
+📣 *${prefix}antitagall on*  
+Zuia *@all* na mass mentions zisizo na mpangilio.
+
+🎙️ *${prefix}antivoice on*  
+Zuia voice notes kwenye group.
+
+🖼️ *${prefix}antiimage on*  
+Zuia picha zisizo hitajika.
+
+🎬 *${prefix}antivideo on*  
+Zuia videos za spam.
+
+📄 *${prefix}antidocument on*  
+Zuia documents na files.
+
+↪️ *${prefix}antiforward on*  
+Zuia forwarded messages.
+
+📝 *${prefix}antilongtext on 600*  
+Zuia meseji ndefu kupita kiasi.
+
+📊 *${prefix}antipoll on*  
+Zuia polls zisizohitajika.
+
+✨ Pia bado unapata:
 👁️ *${prefix}vv*  
-Fungua *view once* kawaida.
-
-📵 *${prefix}anticall on*  
-Zuia calls zinazoingia.
-
 🛡️ *${prefix}antidelete on*  
-Rudisha message iliyofutwa.
-
-👀 *${prefix}autoviewstatus on*  
-View status kiotomatiki.
-
-🟢 *${prefix}alwaysonline on*  
-Hufanya uonekane upo online muda wote hata usipokuwa online.
-
-
-*🪙 OFA YA LEO TU*
-
-Anza haraka leo, deploy kirahisi, na upate bot kali kwa offer maalum ya leo tu.
-
+📵 *${prefix}anticall on*
 
 *🌐 WEBSITE:*
 https://bot.tervux.com
@@ -2830,11 +2877,9 @@ https://bot.tervux.com
 
 3️⃣ Login
 
-4️⃣ Kisha uendelee na hatua zilizopo humo
+4️⃣ Deploy bot yako
 
-
-*ANZA SASA HIVI.*
-
+*ANZA SASA HIVI, LINDA GROUP LAKO KAMA PRO.*
 
 ${footer}`;
 
@@ -2844,32 +2889,46 @@ ${footer}`;
 *🇹🇿 🇰🇪 🇺🇬 🇷🇼 🇧🇮 🇸🇸 🇪🇹 🇸🇴*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+*ARE YOU A GROUP OWNER OR ADMIN?*
 
-*YOUR WHATSAPP, MORE POWERFUL.*
+Protect your group from spam, stickers, voice notes, images, videos, forwarded messages, polls, and mass mentions with the new protection commands 🔥
 
+*NEW ANTI-COMMANDS GROUP OWNERS WILL LOVE:*
 
-*TOP FEATURES YOU WILL LOVE:*
+🛡️ *${prefix}antispam on*  
+Stop fast message floods and spam.
 
+🎭 *${prefix}antisticker kick*  
+Delete stickers and remove the sender.
+
+📣 *${prefix}antitagall on*  
+Block chaotic *@all* and mass mentions.
+
+🎙️ *${prefix}antivoice on*  
+Block voice notes in your group.
+
+🖼️ *${prefix}antiimage on*  
+Block unwanted images.
+
+🎬 *${prefix}antivideo on*  
+Block spam videos.
+
+📄 *${prefix}antidocument on*  
+Block files and documents.
+
+↪️ *${prefix}antiforward on*  
+Block forwarded messages.
+
+📝 *${prefix}antilongtext on 600*  
+Block very long spam texts.
+
+📊 *${prefix}antipoll on*  
+Block unwanted polls.
+
+✨ You still also get:
 👁️ *${prefix}vv*  
-Open *view once* messages normally.
-
-📵 *${prefix}anticall on*  
-Block incoming calls.
-
 🛡️ *${prefix}antidelete on*  
-Recover deleted messages.
-
-👀 *${prefix}autoviewstatus on*  
-View status automatically.
-
-🟢 *${prefix}alwaysonline on*  
-Makes you appear online all the time even when you are not online.
-
-
-*🪙 TODAY'S SPECIAL OFFER*
-
-Start today, deploy easily, and get a powerful bot with today's special offer.
-
+📵 *${prefix}anticall on*
 
 *🌐 WEBSITE:*
 https://bot.tervux.com
@@ -2880,11 +2939,9 @@ https://bot.tervux.com
 
 3️⃣ Log in
 
-4️⃣ Continue with the steps there
+4️⃣ Deploy your bot
 
-
-*START NOW.*
-
+*START NOW AND PROTECT YOUR GROUP LIKE A PRO.*
 
 ${footer}`;
 

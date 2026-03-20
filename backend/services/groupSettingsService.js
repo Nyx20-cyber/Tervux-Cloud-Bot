@@ -8,6 +8,14 @@ import { delKey, getJson, setJson } from "../lib/redis.js";
 const groupSettingsCache = new Map();
 const GROUP_SETTINGS_CACHE_TTL_MS = Number(process.env.GROUP_SETTINGS_CACHE_TTL_MS || 30_000);
 const GROUP_SETTINGS_REDIS_TTL_SECONDS = Number(process.env.GROUP_SETTINGS_CACHE_TTL_SECONDS || 30);
+const TRACE_GROUP_PATH = process.env.WA_TRACE_GROUP_PATH === "true";
+const SLOW_GROUP_PATH_WARN_MS = Number(process.env.WA_SLOW_GROUP_PATH_WARN_MS || 200);
+const groupSettingsMetrics = {
+    memoryHits: 0,
+    redisHits: 0,
+    dbHits: 0,
+    dbMisses: 0
+};
 
 function deepMerge(target, source) {
     const result = { ...target };
@@ -91,6 +99,62 @@ const DEFAULT_GROUP_SETTINGS = {
     }
 };
 
+function deriveGroupFastPathProfile(settings = {}) {
+    const hasGrouplock = Boolean(settings?.grouplock?.until && new Date(settings.grouplock.until) > new Date());
+    const hasBadwords = Array.isArray(settings?.badwords) && settings.badwords.length > 0;
+    const hasMessageRestriction = Boolean(
+        hasGrouplock ||
+        hasBadwords ||
+        settings?.antilink?.enabled ||
+        settings?.antispam?.enabled ||
+        settings?.antilongtext?.enabled
+    );
+    const hasMediaRestriction = Boolean(
+        settings?.antisticker?.enabled ||
+        settings?.antivoice?.enabled ||
+        settings?.antiimage?.enabled ||
+        settings?.antivideo?.enabled ||
+        settings?.antidocument?.enabled ||
+        settings?.antipoll?.enabled ||
+        settings?.autosticker?.enabled
+    );
+    const hasMentionRestriction = Boolean(settings?.antitagall?.enabled || settings?.antimention?.enabled);
+    const hasForwardRestriction = Boolean(settings?.antiforward?.enabled);
+    const hasModerationEnabled = Boolean(
+        hasMessageRestriction ||
+        hasMediaRestriction ||
+        hasMentionRestriction ||
+        hasForwardRestriction
+    );
+
+    return {
+        hasMessageRestriction,
+        hasMediaRestriction,
+        hasMentionRestriction,
+        hasForwardRestriction,
+        hasModerationEnabled,
+        hasGrouplock,
+        hasBadwords,
+        hasBotDisableGate: settings?.botEnabled === false
+    };
+}
+
+function stripDerivedGroupSettings(value) {
+    if (Array.isArray(value)) {
+        return value.map(stripDerivedGroupSettings);
+    }
+    if (!value || typeof value !== "object") {
+        return value;
+    }
+
+    const output = {};
+    for (const [key, nextValue] of Object.entries(value)) {
+        if (key.startsWith("__")) continue;
+        output[key] = stripDerivedGroupSettings(nextValue);
+    }
+    return output;
+}
+
 const buildCacheKey = (sessionId, groupJid) => `group_settings:${sessionId}:${groupJid}`;
 
 const getFreshCacheValue = (key) => {
@@ -111,11 +175,15 @@ const setFreshCacheValue = (key, data) => {
     return data;
 };
 
-const normalizeGroupSettings = (doc, sessionId, groupJid) => deepMerge(DEFAULT_GROUP_SETTINGS, {
-    sessionId,
-    groupJid,
-    ...(doc?.toObject?.() || doc || {})
-});
+const normalizeGroupSettings = (doc, sessionId, groupJid) => {
+    const normalized = deepMerge(DEFAULT_GROUP_SETTINGS, {
+        sessionId,
+        groupJid,
+        ...(doc?.toObject?.() || doc || {})
+    });
+    normalized.__fastPathProfile = deriveGroupFastPathProfile(normalized);
+    return normalized;
+};
 
 export async function invalidateGroupSettingsCache(sessionId, groupJid) {
     if (!sessionId || !groupJid) return;
@@ -133,43 +201,69 @@ export async function primeGroupSettingsCache(sessionId, groupJid, settings) {
     return normalized;
 }
 
-export async function loadGroupSettings(sessionId, groupJid) {
+export function getGroupSettingsMetrics() {
+    return { ...groupSettingsMetrics };
+}
+
+export async function loadGroupSettings(sessionId, groupJid, options = {}) {
     if (!sessionId) {
         console.error("❌ Need sessionId in loadGroupSettings");
-        return deepMerge({}, DEFAULT_GROUP_SETTINGS);
+        const fallback = normalizeGroupSettings(null, sessionId, groupJid);
+        return options.returnMeta ? { settings: fallback, meta: { source: "fallback", elapsedMs: 0 } } : fallback;
     }
 
+    const startedAt = Date.now();
     const key = buildCacheKey(sessionId, groupJid);
     const memoryValue = getFreshCacheValue(key);
     if (memoryValue) {
-        return memoryValue;
+        groupSettingsMetrics.memoryHits += 1;
+        const meta = { source: "memory", elapsedMs: Date.now() - startedAt };
+        return options.returnMeta ? { settings: memoryValue, meta } : memoryValue;
     }
 
     const redisValue = await getJson(key);
     if (redisValue) {
-        return setFreshCacheValue(key, normalizeGroupSettings(redisValue, sessionId, groupJid));
+        groupSettingsMetrics.redisHits += 1;
+        const normalized = setFreshCacheValue(key, normalizeGroupSettings(redisValue, sessionId, groupJid));
+        const meta = { source: "redis", elapsedMs: Date.now() - startedAt };
+        return options.returnMeta ? { settings: normalized, meta } : normalized;
     }
 
     try {
         const doc = await GroupSettings.findOne({ sessionId, groupJid });
+        groupSettingsMetrics.dbHits += 1;
+        if (!doc) {
+            groupSettingsMetrics.dbMisses += 1;
+        }
         const normalized = normalizeGroupSettings(doc, sessionId, groupJid);
         await primeGroupSettingsCache(sessionId, groupJid, normalized);
-        return normalized;
+        const meta = {
+            source: "db",
+            elapsedMs: Date.now() - startedAt,
+            found: Boolean(doc)
+        };
+        if (TRACE_GROUP_PATH && meta.elapsedMs >= SLOW_GROUP_PATH_WARN_MS) {
+            console.warn(`🩺 [${sessionId}] Slow group settings load for ${groupJid}: source=${meta.source} total=${meta.elapsedMs}ms`);
+        }
+        return options.returnMeta ? { settings: normalized, meta } : normalized;
     } catch (err) {
         console.error(`❌ Failed to load group settings for ${groupJid}:`, err.message);
-        return normalizeGroupSettings(null, sessionId, groupJid);
+        const fallback = normalizeGroupSettings(null, sessionId, groupJid);
+        const meta = { source: "fallback", elapsedMs: Date.now() - startedAt, error: err.message };
+        return options.returnMeta ? { settings: fallback, meta } : fallback;
     }
 }
 
 export async function saveGroupSettings(sessionId, groupJid, settings) {
     if (!sessionId) return false;
     try {
+        const sanitized = stripDerivedGroupSettings(settings);
         await GroupSettings.updateOne(
             { sessionId, groupJid },
-            { $set: settings },
+            { $set: sanitized },
             { upsert: true }
         );
-        await primeGroupSettingsCache(sessionId, groupJid, settings);
+        await primeGroupSettingsCache(sessionId, groupJid, sanitized);
         return true;
     } catch (err) {
         console.error(`❌ Failed to save group settings for ${groupJid}:`, err.message);

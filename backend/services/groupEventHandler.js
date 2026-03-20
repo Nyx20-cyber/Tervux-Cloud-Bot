@@ -20,6 +20,11 @@ const enqueueLowPriority = (sock, label, fn) => {
 const spamTracker = new Map();
 const adminRequirementNoticeCooldowns = new Map();
 const ADMIN_REQUIREMENT_NOTICE_COOLDOWN_MS = 15_000;
+const TRACE_GROUP_PATH = process.env.WA_TRACE_GROUP_PATH === "true";
+const SLOW_GROUP_PATH_WARN_MS = Number(process.env.WA_SLOW_GROUP_PATH_WARN_MS || 200);
+const pendingGroupStats = new Map();
+const pendingGroupStatsTimers = new Map();
+const GROUP_STATS_FLUSH_DELAY_MS = Number(process.env.WA_GROUP_STATS_FLUSH_DELAY_MS || 8000);
 
 function unwrapGroupMessageContent(message = {}) {
     let content = message;
@@ -94,6 +99,71 @@ function isMassMention(msgText = "", mentionedJids = []) {
         lowered.includes("@admins") ||
         mentionedJids.length >= 5
     );
+}
+
+function getSessionLaneDepths(sock) {
+    const manager = sock?.__sessionManager;
+    const sid = String(sock?.sessionId || "");
+    return {
+        command: manager?.commandLaneDepths?.get?.(sid) || 0,
+        low: manager?.lowPriorityLaneDepths?.get?.(sid) || 0
+    };
+}
+
+function logGroupPathTrace(sock, remoteJid, payload = {}, options = {}) {
+    const totalMs = Number(payload.totalMs || 0);
+    const shouldWarn = options.warn === true || totalMs >= SLOW_GROUP_PATH_WARN_MS;
+    if (!TRACE_GROUP_PATH && !shouldWarn) return;
+    const sid = String(sock?.sessionId || "unknown");
+    const printer = shouldWarn ? console.warn : console.log;
+    const parts = [
+        `total=${totalMs}ms`,
+        `consumed=${payload.consumed === true}`,
+        `settings=${payload.settingsSource || "unknown"}`,
+        `metadata=${payload.metadataSource || "n/a"}`,
+        `context=${Number(payload.contextMs || 0)}ms`,
+        `cmdLane=${Number(payload.commandLaneDepth || 0)}`,
+        `lowLane=${Number(payload.lowLaneDepth || 0)}`
+    ];
+    if (payload.trigger) parts.push(`trigger=${payload.trigger}`);
+    printer(`🩺 [${sid}] handleGroupMessage ${remoteJid}: ${parts.join(" ")}`);
+}
+
+function queueGroupMemberStatsUpdate(sock, remoteJid, sender) {
+    const key = `${sock.sessionId}:${remoteJid}:${sender}`;
+    const current = pendingGroupStats.get(key) || {
+        sessionId: sock.sessionId,
+        groupJid: remoteJid,
+        userJid: sender,
+        count: 0
+    };
+    current.count += 1;
+    pendingGroupStats.set(key, current);
+
+    if (pendingGroupStatsTimers.has(key)) {
+        return;
+    }
+
+    const timer = setTimeout(() => {
+        pendingGroupStatsTimers.delete(key);
+        const next = pendingGroupStats.get(key);
+        if (!next) return;
+        pendingGroupStats.delete(key);
+
+        enqueueLowPriority(sock, "group_member_stats", async () => {
+            try {
+                await GroupMemberStats.findOneAndUpdate(
+                    { sessionId: next.sessionId, groupJid: next.groupJid, userJid: next.userJid },
+                    { $inc: { messageCount: next.count }, $set: { lastMessageAt: new Date() } },
+                    { upsert: true }
+                );
+            } catch (e) {
+                console.error("Stats update error:", e.message);
+            }
+        });
+    }, GROUP_STATS_FLUSH_DELAY_MS);
+
+    pendingGroupStatsTimers.set(key, timer);
 }
 
 function isSpamTriggered(sessionId, remoteJid, sender, config = {}) {
@@ -179,7 +249,18 @@ export async function handleGroupParticipantsUpdate(sock, update) {
     try {
         invalidateGroupMetadataCache(sock.sessionId, id);
         const settings = await loadGroupSettings(sock.sessionId, id);
-        console.log(`📋 [GroupEvent] Settings loaded: welcome.enabled=${settings.welcome?.enabled}, goodbye.enabled=${settings.goodbye?.enabled}`);
+        const welcomeEnabled = settings.welcome?.enabled === true;
+        const goodbyeEnabled = settings.goodbye?.enabled === true;
+        const antifakeEnabled = settings.antifake?.enabled === true;
+        console.log(`📋 [GroupEvent] Settings loaded: welcome.enabled=${welcomeEnabled}, goodbye.enabled=${goodbyeEnabled}, antifake.enabled=${antifakeEnabled}`);
+
+        const shouldHandleWelcome = action === "add" && welcomeEnabled;
+        const shouldHandleGoodbye = action === "remove" && goodbyeEnabled;
+        const shouldHandleAntifake = action === "add" && antifakeEnabled;
+        if (!shouldHandleWelcome && !shouldHandleGoodbye && !shouldHandleAntifake) {
+            console.log(`ℹ️ [GroupEvent] No enabled participant automations for group ${id}. Skipping.`);
+            return;
+        }
 
         const metadata = await getGroupMetadata(sock, id, { forceRefresh: true });
         if (!metadata) {
@@ -187,7 +268,10 @@ export async function handleGroupParticipantsUpdate(sock, update) {
             return;
         }
 
-        const botContext = await getGroupParticipantContext(sock, id, sock.user?.id || "");
+        const needsBotAdmin = shouldHandleAntifake;
+        const botContext = needsBotAdmin
+            ? await getGroupParticipantContext(sock, id, sock.user?.id || "")
+            : { botIsAdmin: false };
 
         const groupName = metadata?.subject || "Group";
         const desc = metadata?.desc?.toString() || "";
@@ -196,11 +280,11 @@ export async function handleGroupParticipantsUpdate(sock, update) {
             let messageText = "";
             let isWelcome = false;
 
-            if (action === "add" && settings.welcome?.enabled) {
+            if (action === "add" && welcomeEnabled) {
                 messageText = settings.welcome.message || "";
                 isWelcome = true;
                 console.log(`✅ [GroupEvent] Welcome is enabled, preparing message for ${participant}`);
-            } else if (action === "remove" && settings.goodbye?.enabled) {
+            } else if (action === "remove" && goodbyeEnabled) {
                 messageText = settings.goodbye.message || "";
                 console.log(`✅ [GroupEvent] Goodbye is enabled, preparing message for ${participant}`);
             } else {
@@ -227,7 +311,7 @@ export async function handleGroupParticipantsUpdate(sock, update) {
             }
 
             // --- 🚀 ANTIFAKE PROTECTION ---
-            if (action === "add" && settings.antifake?.enabled) {
+            if (action === "add" && antifakeEnabled) {
                 // Check for +255 (Tanzania)
                 const isLocal = participant.startsWith("255");
                 if (!isLocal) {
@@ -256,225 +340,382 @@ export async function handleGroupMessage(sock, m) {
     const remoteJid = m.key.remoteJid;
     if (!remoteJid.endsWith("@g.us")) return false;
 
-    // Skip bot's own messages - check both fromMe flag and JID comparison
     if (m.key.fromMe) return false;
     const sender = m.key.participant || m.key.remoteJid;
     const botJid = (sock.user?.id?.split("@")[0]?.split(":")[0]) + "@s.whatsapp.net";
     if (sender.split(":")[0].split("@")[0] === botJid.split("@")[0]) return false;
 
+    const startedAt = Date.now();
+    const laneDepths = getSessionLaneDepths(sock);
     const content = unwrapGroupMessageContent(m.message);
     const msgTextRaw = extractGroupMessageText(content);
     const msgText = String(msgTextRaw || "").toLowerCase();
     const contextInfo = extractContextInfo(content);
     const mentionedJids = contextInfo?.mentionedJid || [];
 
-    const settings = await loadGroupSettings(sock.sessionId, remoteJid);
-    const groupContext = await getGroupParticipantContext(sock, remoteJid, sender);
-    const senderIsAdmin = groupContext.senderIsAdmin;
-    const botIsAdmin = groupContext.botIsAdmin;
+    const settingsResult = await loadGroupSettings(sock.sessionId, remoteJid, TRACE_GROUP_PATH ? { returnMeta: true } : {});
+    const settings = TRACE_GROUP_PATH ? settingsResult.settings : settingsResult;
+    const settingsMeta = TRACE_GROUP_PATH ? settingsResult.meta : null;
+    const fastPathProfile = settings.__fastPathProfile || {};
+    let contextMeta = null;
+    let triggerLabel = "none";
 
-    // Check if bot is disabled for this group
+    if (TRACE_GROUP_PATH && settingsMeta?.source === "db") {
+        console.warn(`🩺 [${sock.sessionId}] Group settings DB fallback for ${remoteJid}: total=${settingsMeta.elapsedMs}ms`);
+    }
+
+    let groupContextPromise = null;
+    const getGroupContextLazy = async () => {
+        if (!groupContextPromise) {
+            groupContextPromise = (async () => {
+                const contextResult = await getGroupParticipantContext(
+                    sock,
+                    remoteJid,
+                    sender,
+                    TRACE_GROUP_PATH ? { returnMeta: true } : {}
+                );
+                if (TRACE_GROUP_PATH) {
+                    contextMeta = contextResult.meta || null;
+                }
+                return TRACE_GROUP_PATH ? contextResult.context : contextResult;
+            })();
+        }
+        return groupContextPromise;
+    };
+
     if (settings.botEnabled === false) {
         const config = await getCachedConfig(sock.sessionId);
         const p = config.prefix || "!";
-
-        // Only allow !bot on to pass through
         if (msgText.trim() === `${p}bot on`) {
             return false;
         }
-        return true; // Return true to "consume" the message and stop further processing in whatsappClient.js
+        logGroupPathTrace(sock, remoteJid, {
+            totalMs: Date.now() - startedAt,
+            consumed: true,
+            settingsSource: settingsMeta?.source,
+            metadataSource: contextMeta?.metadataSource,
+            contextMs: contextMeta?.totalMs,
+            commandLaneDepth: laneDepths.command,
+            lowLaneDepth: laneDepths.low,
+            trigger: "bot_disabled"
+        });
+        return true;
     }
 
-    // --- 🚀 ANTISPAM ---
-    if (settings.antispam?.enabled && !senderIsAdmin) {
-        const spamTriggered = isSpamTriggered(sock.sessionId, remoteJid, sender, settings.antispam);
-        if (spamTriggered) {
-            const consumed = await enforceGroupRestriction({
-                sock,
-                m,
-                remoteJid,
-                sender,
-                senderIsAdmin,
-                botIsAdmin,
-                triggered: true,
-                featureKey: "antispam",
-                adminRequiredText: `🚫 *Spam Detected!* I need admin privileges to manage antispam.`,
-                warnText: `⚠️ @${sender.split("@")[0]}, *please slow down!* Spam messages are not allowed in this group.`
-            });
-            if (consumed) return true;
-        }
+    const isSticker = !!content.stickerMessage;
+    const isImage = !!content.imageMessage;
+    const hasVoiceNote = isVoiceNote(content);
+    const hasVideo = !!content.videoMessage;
+    const hasDocument = !!content.documentMessage;
+    const hasPoll = isPollMessage(content);
+    const hasForward = isForwardedMessage(content);
+    const hasMassMention = isMassMention(msgText, mentionedJids);
+    const hasMentionTrigger = hasMassMention || msgText.includes("@status") || mentionedJids.length > 0;
+    const maxLongTextLength = Math.max(Number(settings.antilongtext?.maxLength || 600), 150);
+    const hasLongText = msgTextRaw.trim().length > maxLongTextLength;
+    const hasBadWord = fastPathProfile.hasBadwords === true
+        ? settings.badwords.some((word) => msgText.includes(String(word).toLowerCase()))
+        : false;
+    const hasGrouplock = fastPathProfile.hasGrouplock === true;
+    const urlRegex = /(https?:\/\/)?(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)/i;
+    const hasUrl = settings.antilink?.enabled ? urlRegex.test(msgText) : false;
+    const shouldTrackSpam = settings.antispam?.enabled === true;
+    const spamTriggered = shouldTrackSpam ? isSpamTriggered(sock.sessionId, remoteJid, sender, settings.antispam) : false;
+
+    queueGroupMemberStatsUpdate(sock, remoteJid, sender);
+
+    const mightNeedModerationContext = Boolean(
+        spamTriggered ||
+        (settings.antiforward?.enabled && hasForward) ||
+        (settings.antilongtext?.enabled && hasLongText) ||
+        (settings.antitagall?.enabled && hasMassMention) ||
+        (settings.antilink?.enabled && hasUrl) ||
+        (settings.antisticker?.enabled && isSticker) ||
+        (settings.antivoice?.enabled && hasVoiceNote) ||
+        (settings.antiimage?.enabled && isImage) ||
+        (settings.antivideo?.enabled && hasVideo) ||
+        (settings.antidocument?.enabled && hasDocument) ||
+        (settings.antipoll?.enabled && hasPoll) ||
+        (settings.antimention?.enabled && hasMentionTrigger) ||
+        hasGrouplock ||
+        hasBadWord ||
+        (settings.autosticker?.enabled && isImage)
+    );
+
+    if (!mightNeedModerationContext) {
+        logGroupPathTrace(sock, remoteJid, {
+            totalMs: Date.now() - startedAt,
+            consumed: false,
+            settingsSource: settingsMeta?.source,
+            metadataSource: contextMeta?.metadataSource,
+            contextMs: contextMeta?.totalMs,
+            commandLaneDepth: laneDepths.command,
+            lowLaneDepth: laneDepths.low,
+            trigger: fastPathProfile.hasModerationEnabled ? "no_match" : "fast_skip"
+        });
+        return false;
     }
 
-    // --- 🚀 ANTIFORWARD ---
-    if (settings.antiforward?.enabled) {
+    if (spamTriggered) {
+        triggerLabel = "antispam";
+        const groupContext = await getGroupContextLazy();
         const consumed = await enforceGroupRestriction({
             sock,
             m,
             remoteJid,
             sender,
-            senderIsAdmin,
-            botIsAdmin,
-            triggered: isForwardedMessage(content),
+            senderIsAdmin: groupContext.senderIsAdmin,
+            botIsAdmin: groupContext.botIsAdmin,
+            triggered: true,
+            featureKey: "antispam",
+            adminRequiredText: `🚫 *Spam Detected!* I need admin privileges to manage antispam.`,
+            warnText: `⚠️ @${sender.split("@")[0]}, *please slow down!* Spam messages are not allowed in this group.`
+        });
+        if (consumed) {
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
+        }
+    }
+
+    if (settings.antiforward?.enabled && hasForward) {
+        triggerLabel = "antiforward";
+        const groupContext = await getGroupContextLazy();
+        const consumed = await enforceGroupRestriction({
+            sock,
+            m,
+            remoteJid,
+            sender,
+            senderIsAdmin: groupContext.senderIsAdmin,
+            botIsAdmin: groupContext.botIsAdmin,
+            triggered: true,
             featureKey: "antiforward",
             adminRequiredText: `🚫 *Forwarded Message Detected!* I need admin privileges to manage antiforward.`,
             warnText: `⚠️ @${sender.split("@")[0]}, *forwarded messages are not allowed* in this group! Your message has been deleted.`
         });
-        if (consumed) return true;
+        if (consumed) {
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
+        }
     }
 
-    // --- 🚀 ANTILONGTEXT ---
-    if (settings.antilongtext?.enabled) {
-        const maxLength = Math.max(Number(settings.antilongtext?.maxLength || 600), 150);
+    if (settings.antilongtext?.enabled && hasLongText) {
+        triggerLabel = "antilongtext";
+        const groupContext = await getGroupContextLazy();
         const consumed = await enforceGroupRestriction({
             sock,
             m,
             remoteJid,
             sender,
-            senderIsAdmin,
-            botIsAdmin,
-            triggered: msgTextRaw.trim().length > maxLength,
+            senderIsAdmin: groupContext.senderIsAdmin,
+            botIsAdmin: groupContext.botIsAdmin,
+            triggered: true,
             featureKey: "antilongtext",
             adminRequiredText: `🚫 *Long Message Detected!* I need admin privileges to manage antilongtext.`,
-            warnText: `⚠️ @${sender.split("@")[0]}, *long messages are not allowed* in this group! Please keep it under ${maxLength} characters.`
+            warnText: `⚠️ @${sender.split("@")[0]}, *long messages are not allowed* in this group! Please keep it under ${maxLongTextLength} characters.`
         });
-        if (consumed) return true;
+        if (consumed) {
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
+        }
     }
 
-    // --- 🚀 ANTITAGALL ---
-    if (settings.antitagall?.enabled) {
+    if (settings.antitagall?.enabled && hasMassMention) {
+        triggerLabel = "antitagall";
+        const groupContext = await getGroupContextLazy();
         const consumed = await enforceGroupRestriction({
             sock,
             m,
             remoteJid,
             sender,
-            senderIsAdmin,
-            botIsAdmin,
-            triggered: isMassMention(msgText, mentionedJids),
+            senderIsAdmin: groupContext.senderIsAdmin,
+            botIsAdmin: groupContext.botIsAdmin,
+            triggered: true,
             featureKey: "antitagall",
             adminRequiredText: `🚫 *Mass Mention Detected!* I need admin privileges to manage antitagall.`,
             warnText: `⚠️ @${sender.split("@")[0]}, *mass mentions are not allowed* in this group! Your message has been deleted.`
         });
-        if (consumed) return true;
-    }
-
-    // 1. Antilink Check
-    if (settings.antilink?.enabled) {
-        // Detect any URL using regex
-        const urlRegex = /(https?:\/\/)?(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)/i;
-        const hasUrl = urlRegex.test(msgText);
-
-        if (hasUrl) {
-            // Whitelist check: Skip antilink for official domains
-            const whitelist = [
-                "tervux.com",
-                "www.tervux.com",
-                "github.com/JonniTech",
-                "github.com/tervux",
-                "instagram.com/tervux",
-                "wa.me/message/tervux",
-                "wa.me/255785046741",
-                "tervux.portfolio",
-                "bot.tervux.com",
-                "nyaganya.tervux.com",
-                "github.com/JonniTech/Tervux-WhatsApp-Bot",
-                "nyaganyamalima47@gmail.com"
-            ];
-
-            const isWhitelisted = whitelist.some(domain => msgText.includes(domain));
-            if (isWhitelisted) {
-                console.log(`🛡️ [Antilink] Skipping whitelisted link in ${remoteJid}`);
-                return false;
-            }
-
-            if (!senderIsAdmin) {
-                console.log(`🛡️ Antilink triggered for ${sender} in ${remoteJid}`);
-
-                if (!botIsAdmin) {
-                    await sock.sendMessage(remoteJid, {
-                        text: `🚫 *Link Detected!* I need admin privileges to manage antilink.`
-                    });
-                    return true;
-                }
-
-                // Delete message
-                await sock.sendMessage(remoteJid, { delete: m.key });
-
-                // Check action
-                if (settings.antilink.action === "kick") {
-                    await sock.groupParticipantsUpdate(remoteJid, [sender], "remove");
-                    await sock.sendMessage(remoteJid, {
-                        text: `🚫 *Link Detected!* @${sender.split("@")[0]} has been kicked for sharing links.`,
-                        mentions: [sender]
-                    });
-                } else {
-                    // Warn/Delete mode (default)
-                    await sock.sendMessage(remoteJid, {
-                        text: `⚠️ @${sender.split("@")[0]}, *links are not allowed* in this group! Your message has been deleted.`,
-                        mentions: [sender]
-                    });
-                }
-                return true; // Stop processing command/other things
-            }
+        if (consumed) {
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
         }
     }
 
-    // --- 🚀 ACTIVITY TRACKING ---
-    enqueueLowPriority(sock, "group_member_stats", async () => {
-        try {
-            await GroupMemberStats.findOneAndUpdate(
-                { sessionId: sock.sessionId, groupJid: remoteJid, userJid: sender },
-                { $inc: { messageCount: 1 }, $set: { lastMessageAt: new Date() } },
-                { upsert: true }
-            );
-        } catch (e) {
-            console.error("Stats update error:", e.message);
+    if (settings.antilink?.enabled && hasUrl) {
+        triggerLabel = "antilink";
+        const whitelist = [
+            "tervux.com",
+            "www.tervux.com",
+            "github.com/JonniTech",
+            "github.com/tervux",
+            "instagram.com/tervux",
+            "wa.me/message/tervux",
+            "wa.me/255785046741",
+            "tervux.portfolio",
+            "bot.tervux.com",
+            "nyaganya.tervux.com",
+            "github.com/JonniTech/Tervux-WhatsApp-Bot",
+            "nyaganyamalima47@gmail.com"
+        ];
+        const isWhitelisted = whitelist.some(domain => msgText.includes(domain));
+        if (isWhitelisted) {
+            console.log(`🛡️ [Antilink] Skipping whitelisted link in ${remoteJid}`);
+            return false;
         }
-    });
 
-    // --- 🚀 GROUPLOCK CHECK ---
-    if (settings.grouplock?.until && new Date(settings.grouplock.until) > new Date()) {
-        if (!senderIsAdmin) {
-            console.log(`🛡️ [Grouplock] Deleting message from non-admin during lock in ${remoteJid}`);
-            if (botIsAdmin) {
-                await sock.sendMessage(remoteJid, { delete: m.key });
-                return true;
-            }
-        }
-    }
-
-    // --- 🚀 BADWORD FILTER ---
-    if (settings.badwords?.length > 0) {
-        const hasBadWord = settings.badwords.some(word => msgText.includes(word.toLowerCase()));
-        if (hasBadWord) {
-            if (!senderIsAdmin) {
-                console.log(`🛡️ [Badword] Filtered message in ${remoteJid}`);
-                if (botIsAdmin) {
-                    await sock.sendMessage(remoteJid, { delete: m.key });
-                    await sock.sendMessage(remoteJid, {
-                        text: `⚠️ @${sender.split("@")[0]}, *bad words are not allowed!* Your message has been removed.`,
-                        mentions: [sender]
-                    });
-                    return true;
-                }
-            }
-        }
-    }
-
-    // --- 🚀 ANTISTICKER ---
-    if (settings.antisticker?.enabled) {
-        const isSticker = !!content.stickerMessage;
-        if (isSticker && !senderIsAdmin) {
-            console.log(`🛡️ [Antisticker] Triggered for ${sender} in ${remoteJid}`);
-
-            if (!botIsAdmin) {
+        const groupContext = await getGroupContextLazy();
+        if (!groupContext.senderIsAdmin) {
+            console.log(`🛡️ Antilink triggered for ${sender} in ${remoteJid}`);
+            if (!groupContext.botIsAdmin) {
                 await sock.sendMessage(remoteJid, {
-                    text: `🚫 *Sticker Detected!* I need admin privileges to manage antisticker.`
+                    text: `🚫 *Link Detected!* I need admin privileges to manage antilink.`
+                });
+                logGroupPathTrace(sock, remoteJid, {
+                    totalMs: Date.now() - startedAt,
+                    consumed: true,
+                    settingsSource: settingsMeta?.source,
+                    metadataSource: contextMeta?.metadataSource,
+                    contextMs: contextMeta?.totalMs,
+                    commandLaneDepth: laneDepths.command,
+                    lowLaneDepth: laneDepths.low,
+                    trigger: triggerLabel
                 });
                 return true;
             }
 
             await sock.sendMessage(remoteJid, { delete: m.key });
+            if (settings.antilink.action === "kick") {
+                await sock.groupParticipantsUpdate(remoteJid, [sender], "remove");
+                await sock.sendMessage(remoteJid, {
+                    text: `🚫 *Link Detected!* @${sender.split("@")[0]} has been kicked for sharing links.`,
+                    mentions: [sender]
+                });
+            } else {
+                await sock.sendMessage(remoteJid, {
+                    text: `⚠️ @${sender.split("@")[0]}, *links are not allowed* in this group! Your message has been deleted.`,
+                    mentions: [sender]
+                });
+            }
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
+        }
+    }
 
+    if (hasGrouplock) {
+        triggerLabel = "grouplock";
+        const groupContext = await getGroupContextLazy();
+        if (!groupContext.senderIsAdmin) {
+            console.log(`🛡️ [Grouplock] Deleting message from non-admin during lock in ${remoteJid}`);
+            if (groupContext.botIsAdmin) {
+                await sock.sendMessage(remoteJid, { delete: m.key });
+                logGroupPathTrace(sock, remoteJid, {
+                    totalMs: Date.now() - startedAt,
+                    consumed: true,
+                    settingsSource: settingsMeta?.source,
+                    metadataSource: contextMeta?.metadataSource,
+                    contextMs: contextMeta?.totalMs,
+                    commandLaneDepth: laneDepths.command,
+                    lowLaneDepth: laneDepths.low,
+                    trigger: triggerLabel
+                });
+                return true;
+            }
+        }
+    }
+
+    if (hasBadWord) {
+        triggerLabel = "badwords";
+        const groupContext = await getGroupContextLazy();
+        if (!groupContext.senderIsAdmin) {
+            console.log(`🛡️ [Badword] Filtered message in ${remoteJid}`);
+            if (groupContext.botIsAdmin) {
+                await sock.sendMessage(remoteJid, { delete: m.key });
+                await sock.sendMessage(remoteJid, {
+                    text: `⚠️ @${sender.split("@")[0]}, *bad words are not allowed!* Your message has been removed.`,
+                    mentions: [sender]
+                });
+                logGroupPathTrace(sock, remoteJid, {
+                    totalMs: Date.now() - startedAt,
+                    consumed: true,
+                    settingsSource: settingsMeta?.source,
+                    metadataSource: contextMeta?.metadataSource,
+                    contextMs: contextMeta?.totalMs,
+                    commandLaneDepth: laneDepths.command,
+                    lowLaneDepth: laneDepths.low,
+                    trigger: triggerLabel
+                });
+                return true;
+            }
+        }
+    }
+
+    if (settings.antisticker?.enabled && isSticker) {
+        triggerLabel = "antisticker";
+        const groupContext = await getGroupContextLazy();
+        if (!groupContext.senderIsAdmin) {
+            console.log(`🛡️ [Antisticker] Triggered for ${sender} in ${remoteJid}`);
+            if (!groupContext.botIsAdmin) {
+                await sock.sendMessage(remoteJid, {
+                    text: `🚫 *Sticker Detected!* I need admin privileges to manage antisticker.`
+                });
+                logGroupPathTrace(sock, remoteJid, {
+                    totalMs: Date.now() - startedAt,
+                    consumed: true,
+                    settingsSource: settingsMeta?.source,
+                    metadataSource: contextMeta?.metadataSource,
+                    contextMs: contextMeta?.totalMs,
+                    commandLaneDepth: laneDepths.command,
+                    lowLaneDepth: laneDepths.low,
+                    trigger: triggerLabel
+                });
+                return true;
+            }
+
+            await sock.sendMessage(remoteJid, { delete: m.key });
             if (settings.antisticker.action === "kick") {
                 await sock.groupParticipantsUpdate(remoteJid, [sender], "remove");
                 await sock.sendMessage(remoteJid, {
@@ -487,137 +728,218 @@ export async function handleGroupMessage(sock, m) {
                     mentions: [sender]
                 });
             }
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
             return true;
         }
     }
 
-    // --- 🚀 ANTIVOICE ---
-    if (settings.antivoice?.enabled) {
+    if (settings.antivoice?.enabled && hasVoiceNote) {
+        triggerLabel = "antivoice";
+        const groupContext = await getGroupContextLazy();
         const consumed = await enforceGroupRestriction({
             sock,
             m,
             remoteJid,
             sender,
-            senderIsAdmin,
-            botIsAdmin,
-            triggered: isVoiceNote(content),
+            senderIsAdmin: groupContext.senderIsAdmin,
+            botIsAdmin: groupContext.botIsAdmin,
+            triggered: true,
             featureKey: "antivoice",
             adminRequiredText: `🚫 *Voice Note Detected!* I need admin privileges to manage antivoice.`,
             warnText: `⚠️ @${sender.split("@")[0]}, *voice notes are not allowed* in this group! Your voice note has been deleted.`
         });
-        if (consumed) return true;
+        if (consumed) {
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
+        }
     }
 
-    // --- 🚀 ANTIIMAGE ---
-    if (settings.antiimage?.enabled) {
+    if (settings.antiimage?.enabled && isImage) {
+        triggerLabel = "antiimage";
+        const groupContext = await getGroupContextLazy();
         const consumed = await enforceGroupRestriction({
             sock,
             m,
             remoteJid,
             sender,
-            senderIsAdmin,
-            botIsAdmin,
-            triggered: !!content.imageMessage,
+            senderIsAdmin: groupContext.senderIsAdmin,
+            botIsAdmin: groupContext.botIsAdmin,
+            triggered: true,
             featureKey: "antiimage",
             adminRequiredText: `🚫 *Image Detected!* I need admin privileges to manage antiimage.`,
             warnText: `⚠️ @${sender.split("@")[0]}, *images are not allowed* in this group! Your image has been deleted.`
         });
-        if (consumed) return true;
+        if (consumed) {
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
+        }
     }
 
-    // --- 🚀 ANTIVIDEO ---
-    if (settings.antivideo?.enabled) {
+    if (settings.antivideo?.enabled && hasVideo) {
+        triggerLabel = "antivideo";
+        const groupContext = await getGroupContextLazy();
         const consumed = await enforceGroupRestriction({
             sock,
             m,
             remoteJid,
             sender,
-            senderIsAdmin,
-            botIsAdmin,
-            triggered: !!content.videoMessage,
+            senderIsAdmin: groupContext.senderIsAdmin,
+            botIsAdmin: groupContext.botIsAdmin,
+            triggered: true,
             featureKey: "antivideo",
             adminRequiredText: `🚫 *Video Detected!* I need admin privileges to manage antivideo.`,
             warnText: `⚠️ @${sender.split("@")[0]}, *videos are not allowed* in this group! Your video has been deleted.`
         });
-        if (consumed) return true;
+        if (consumed) {
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
+        }
     }
 
-    // --- 🚀 ANTIDOCUMENT ---
-    if (settings.antidocument?.enabled) {
+    if (settings.antidocument?.enabled && hasDocument) {
+        triggerLabel = "antidocument";
+        const groupContext = await getGroupContextLazy();
         const consumed = await enforceGroupRestriction({
             sock,
             m,
             remoteJid,
             sender,
-            senderIsAdmin,
-            botIsAdmin,
-            triggered: !!content.documentMessage,
+            senderIsAdmin: groupContext.senderIsAdmin,
+            botIsAdmin: groupContext.botIsAdmin,
+            triggered: true,
             featureKey: "antidocument",
             adminRequiredText: `🚫 *Document Detected!* I need admin privileges to manage antidocument.`,
             warnText: `⚠️ @${sender.split("@")[0]}, *documents are not allowed* in this group! Your document has been deleted.`
         });
-        if (consumed) return true;
+        if (consumed) {
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
+        }
     }
 
-    // --- 🚀 ANTIPOLL ---
-    if (settings.antipoll?.enabled) {
+    if (settings.antipoll?.enabled && hasPoll) {
+        triggerLabel = "antipoll";
+        const groupContext = await getGroupContextLazy();
         const consumed = await enforceGroupRestriction({
             sock,
             m,
             remoteJid,
             sender,
-            senderIsAdmin,
-            botIsAdmin,
-            triggered: isPollMessage(content),
+            senderIsAdmin: groupContext.senderIsAdmin,
+            botIsAdmin: groupContext.botIsAdmin,
+            triggered: true,
             featureKey: "antipoll",
             adminRequiredText: `🚫 *Poll Detected!* I need admin privileges to manage antipoll.`,
             warnText: `⚠️ @${sender.split("@")[0]}, *polls are not allowed* in this group! Your poll has been deleted.`
         });
-        if (consumed) return true;
+        if (consumed) {
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
+        }
     }
 
-    // --- 🚀 AUTOSTICKER ---
-    if (settings.autosticker?.enabled) {
-        const isImage = !!content.imageMessage;
-        if (isImage) {
-            if (botIsAdmin) {
-                console.log(`🛡️ [Autosticker] Generating sticker for ${remoteJid}`);
-                // Simple trick: We call the sticker function directly with the message
-                // Since sticker function knows how to download from the message 'm'
-                try {
-                    await sticker(sock, m, []);
-                } catch (e) {
-                    console.error("Autosticker error:", e.message);
-                }
+    if (settings.autosticker?.enabled && isImage) {
+        triggerLabel = "autosticker";
+        const groupContext = await getGroupContextLazy();
+        if (groupContext.botIsAdmin) {
+            console.log(`🛡️ [Autosticker] Generating sticker for ${remoteJid}`);
+            try {
+                await sticker(sock, m, []);
+            } catch (e) {
+                console.error("Autosticker error:", e.message);
             }
         }
     }
 
-    // 2. Antimention Check
-    if (settings.antimention?.enabled) {
-        const hasTriggerText = msgText.includes("@all") || msgText.includes("@everyone") || msgText.includes("@status");
-        const hasMentions = mentionedJids.length > 0;
-
-        if (hasTriggerText || hasMentions) {
-            if (!senderIsAdmin) {
-                console.log(`🛡️ Antimention triggered for ${sender} in ${remoteJid}`);
-
-                if (botIsAdmin) {
-                    // Delete the forbidden mention
-                    await sock.sendMessage(remoteJid, { delete: m.key });
-                    
-                    await sock.sendMessage(remoteJid, {
-                        text: `⚠️ @${sender.split("@")[0]}, *mentions are disabled* in this group! Only admins can tag members or use @everyone.`,
-                        mentions: [sender]
-                    });
-                    return true;
-                }
+    if (settings.antimention?.enabled && hasMentionTrigger) {
+        triggerLabel = "antimention";
+        const groupContext = await getGroupContextLazy();
+        if (!groupContext.senderIsAdmin) {
+            console.log(`🛡️ Antimention triggered for ${sender} in ${remoteJid}`);
+            if (groupContext.botIsAdmin) {
+                await sock.sendMessage(remoteJid, { delete: m.key });
+                await sock.sendMessage(remoteJid, {
+                    text: `⚠️ @${sender.split("@")[0]}, *mentions are disabled* in this group! Only admins can tag members or use @everyone.`,
+                    mentions: [sender]
+                });
+                logGroupPathTrace(sock, remoteJid, {
+                    totalMs: Date.now() - startedAt,
+                    consumed: true,
+                    settingsSource: settingsMeta?.source,
+                    metadataSource: contextMeta?.metadataSource,
+                    contextMs: contextMeta?.totalMs,
+                    commandLaneDepth: laneDepths.command,
+                    lowLaneDepth: laneDepths.low,
+                    trigger: triggerLabel
+                });
+                return true;
             }
         }
     }
 
-    // 3. Antispam (basic placeholder for now)
-    // if (settings.antispam?.enabled) { ... }
-
-    return false; // Continue processing
+    logGroupPathTrace(sock, remoteJid, {
+        totalMs: Date.now() - startedAt,
+        consumed: false,
+        settingsSource: settingsMeta?.source,
+        metadataSource: contextMeta?.metadataSource,
+        contextMs: contextMeta?.totalMs,
+        commandLaneDepth: laneDepths.command,
+        lowLaneDepth: laneDepths.low,
+        trigger: triggerLabel
+    });
+    return false;
 }
