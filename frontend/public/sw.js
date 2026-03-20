@@ -1,10 +1,27 @@
-const CACHE_NAME = "tervux-cache-v4";
+const CACHE_NAME = "tervux-cache-v5";
 const APP_SHELL_CACHE = [
   "/",
   "/manifest.json",
   "/icons/icon-192x192.png",
   "/icons/icon-512x512.png"
 ];
+
+function shouldBypassCache(request, url) {
+  const accept = request.headers.get("accept") || "";
+  const isApiRequest = url.origin === self.location.origin && url.pathname.startsWith("/api/");
+  const isSocketRequest = url.origin === self.location.origin && url.pathname.startsWith("/socket.io/");
+  const isRscRequest = url.searchParams.has("_rsc") || accept.includes("text/x-component");
+  const isJsonRequest = accept.includes("application/json");
+  return isApiRequest || isSocketRequest || isRscRequest || isJsonRequest;
+}
+
+function shouldCacheStaticAsset(request, url) {
+  if (url.origin !== self.location.origin) return false;
+  if (url.pathname.startsWith("/_next/static/")) return true;
+  if (url.pathname.startsWith("/icons/")) return true;
+  if (url.pathname === "/manifest.json") return true;
+  return ["style", "script", "worker", "image", "font", "audio", "video"].includes(request.destination);
+}
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -36,6 +53,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  if (shouldBypassCache(request, url)) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
   // Always prefer fresh HTML/app routes so installed PWA doesn't stay stuck on old builds.
   if (request.mode === "navigate") {
     event.respondWith((async () => {
@@ -52,12 +74,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Cache-first for same-origin static assets, with background refresh.
-  if (url.origin === self.location.origin) {
+  // Cache-first only for true static assets, with background refresh.
+  if (shouldCacheStaticAsset(request, url)) {
     event.respondWith((async () => {
       const cachedResponse = await caches.match(request);
       const fetchPromise = fetch(request)
         .then(async (networkResponse) => {
+          if (!networkResponse || !networkResponse.ok) {
+            return networkResponse;
+          }
           const cache = await caches.open(CACHE_NAME);
           cache.put(request, networkResponse.clone());
           return networkResponse;
@@ -66,6 +91,12 @@ self.addEventListener("fetch", (event) => {
 
       return cachedResponse || fetchPromise;
     })());
+  }
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
   }
 });
 
