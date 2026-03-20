@@ -79,7 +79,7 @@ export async function settleCompletedPayment(paymentId, gatewayResponse, source 
         const markedUser = await User.findOneAndUpdate(
             { _id: user._id, referredByPaid: false },
             { $set: { referredByPaid: true } },
-            { new: true }
+            { returnDocument: "after" }
         );
 
         if (markedUser) {
@@ -96,7 +96,7 @@ export async function settleCompletedPayment(paymentId, gatewayResponse, source 
                         totalReferralCoinsEarned: bonusAmount
                     }
                 },
-                { new: true }
+                { returnDocument: "after" }
             );
 
             if (referrer) {

@@ -63,7 +63,7 @@ export async function runGroupPromotionBroadcast() {
                             lastGroupPromotionBroadcastAt: new Date()
                         }
                     },
-                    { new: true }
+                    { returnDocument: "after" }
                 ).select("_id");
 
                 if (!claimed) {

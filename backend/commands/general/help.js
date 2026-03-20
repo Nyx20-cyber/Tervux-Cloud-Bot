@@ -1,6 +1,28 @@
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { existsSync } from "fs";
+import { readFile } from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
 import { getCachedConfig } from "../../services/configService.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const HELP_LOGO_PATH = path.join(__dirname, "../../assets/tervux-logo.png");
+let cachedHelpLogoBuffer = null;
+let warnedMissingHelpLogo = false;
+
+async function getHelpLogoBuffer() {
+  if (cachedHelpLogoBuffer) return cachedHelpLogoBuffer;
+  if (!existsSync(HELP_LOGO_PATH)) {
+    if (!warnedMissingHelpLogo) {
+      console.warn(`[Help] Missing logo file: ${HELP_LOGO_PATH}`);
+      warnedMissingHelpLogo = true;
+    }
+    return null;
+  }
+
+  cachedHelpLogoBuffer = await readFile(HELP_LOGO_PATH);
+  return cachedHelpLogoBuffer;
+}
 
 export const help = async (sock, m, args, ctx = {}) => {
   const config = ctx.config || await getCachedConfig(sock.sessionId);
@@ -25,17 +47,6 @@ export const help = async (sock, m, args, ctx = {}) => {
   const totalCommands = Number(ctx.totalCommands || 0);
   const botStatus = runtime?.status ? String(runtime.status).toUpperCase() : "ACTIVE";
   const deploymentState = runtime?.isDeployed === false ? "Not Deployed" : "Deployed";
-
-  // Load Logo securely
-  let logoBuffer = null;
-  try {
-    const logoPath = join(process.cwd(), "assets", "tervux-logo.png");
-    if (existsSync(logoPath)) {
-      logoBuffer = readFileSync(logoPath);
-    }
-  } catch (e) {
-    console.error("❌ Failed to load logo for help command:", e.message);
-  }
 
   const caption = `╭───『 🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 ℂ𝕃𝕆𝕌𝔻 𝔹𝕆𝕋* 』───╮
 │
@@ -222,8 +233,14 @@ export const help = async (sock, m, args, ctx = {}) => {
 
 `;
 
+  const logoBuffer = await getHelpLogoBuffer();
   if (logoBuffer) {
-    return { image: logoBuffer, caption, linkPreview: null };
+    return {
+      image: logoBuffer,
+      caption,
+      linkPreview: null
+    };
   }
+
   return caption;
 };

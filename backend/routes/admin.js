@@ -1573,7 +1573,7 @@ router.post("/users/:id/gamification", authenticate, requireAdmin, async (req, r
         const updatedUser = await User.findByIdAndUpdate(
             req.params.id,
             { $set: updateData },
-            { new: true }
+            { returnDocument: "after" }
         );
 
         if (!updatedUser) return res.status(404).json({ error: "User not found" });

@@ -237,6 +237,12 @@ class SessionManager {
         this.HEALTH_SKIP_AFTER_COMMAND_MS = Number.parseInt(process.env.WA_HEALTH_SKIP_AFTER_COMMAND_MS || "60000", 10);
         this.SLOW_COMMAND_WARN_MS = Number.parseInt(process.env.WA_SLOW_COMMAND_WARN_MS || "1500", 10);
         this.AMBIENT_QUEUE_WARN_DEPTH = Number.parseInt(process.env.WA_AMBIENT_QUEUE_WARN_DEPTH || "8", 10);
+        this.GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT = Number.parseInt(process.env.WA_GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT || "12", 10);
+        this.GLOBAL_LOW_PRIORITY_QUEUE_LIMIT = Number.parseInt(process.env.WA_GLOBAL_LOW_PRIORITY_QUEUE_LIMIT || "180", 10);
+        this.LOAD_SHED_SESSION_THRESHOLD = Number.parseInt(process.env.WA_LOAD_SHED_SESSION_THRESHOLD || "220", 10);
+        this.LOAD_SHED_LOW_PRIORITY_DEPTH = Number.parseInt(process.env.WA_LOAD_SHED_LOW_PRIORITY_DEPTH || "90", 10);
+        this.HEARTBEAT_INTERVAL_MS = Number.parseInt(process.env.WA_HEARTBEAT_INTERVAL_MS || "60000", 10);
+        this.HEARTBEAT_JITTER_MS = Number.parseInt(process.env.WA_HEARTBEAT_JITTER_MS || "15000", 10);
         this.pairingRecoveryAttempts = new Map();
         this.pairingRunTokens = new Map();
         this.cancelledPairingUsers = new Set();
@@ -256,6 +262,9 @@ class SessionManager {
         this.lowPriorityLaneDepths = new Map();
         this.reconnectPermitWaiters = [];
         this.reconnectPermitsInUse = 0;
+        this.lowPriorityPermitWaiters = [];
+        this.lowPriorityPermitsInUse = 0;
+        this.globalLowPriorityQueued = 0;
         this.metrics = {
             hotPathMongoReads: 0,
             sessionConfigCacheHits: 0,
@@ -397,6 +406,51 @@ class SessionManager {
         }
     }
 
+    _acquireLowPriorityPermit() {
+        return new Promise((resolve) => {
+            const tryAcquire = () => {
+                if (this.lowPriorityPermitsInUse < this.GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT) {
+                    this.lowPriorityPermitsInUse += 1;
+                    resolve(() => this._releaseLowPriorityPermit());
+                    return true;
+                }
+                return false;
+            };
+
+            if (!tryAcquire()) {
+                this.lowPriorityPermitWaiters.push(tryAcquire);
+            }
+        });
+    }
+
+    _releaseLowPriorityPermit() {
+        this.lowPriorityPermitsInUse = Math.max(0, this.lowPriorityPermitsInUse - 1);
+        while (this.lowPriorityPermitWaiters.length > 0) {
+            const waiter = this.lowPriorityPermitWaiters.shift();
+            if (waiter?.()) {
+                break;
+            }
+        }
+    }
+
+    getConnectedSessionCount() {
+        let total = 0;
+        for (const entry of this.sessions.values()) {
+            if (entry?.connectionState === "open") {
+                total += 1;
+            }
+        }
+        return total;
+    }
+
+    isSystemUnderPressure() {
+        return (
+            this.getConnectedSessionCount() >= this.LOAD_SHED_SESSION_THRESHOLD ||
+            this.globalLowPriorityQueued >= this.LOAD_SHED_LOW_PRIORITY_DEPTH ||
+            this.reconnectPermitsInUse >= this.RECONNECT_CONCURRENCY_LIMIT
+        );
+    }
+
     async _enqueueLaneTask(sessionId, laneName, fn, options = {}) {
         const sid = String(sessionId);
         const isLowPriority = laneName === "low";
@@ -413,24 +467,69 @@ class SessionManager {
             return null;
         }
 
+        if (isLowPriority && options.dropWhenSystemBusy && this.isSystemUnderPressure()) {
+            this._recordMetric("lowPriorityDropped", 1);
+            if (TRACE_GROUP_PATH) {
+                console.warn(`🩺 [${sid}] Skipped low-priority task under system pressure (${options.label || "unknown"}).`);
+            }
+            return null;
+        }
+
+        if (isLowPriority && options.dropWhenSessionDegraded) {
+            const entry = this.sessions.get(sid);
+            if (entry?.degradedUntil && entry.degradedUntil > Date.now()) {
+                this._recordMetric("lowPriorityDropped", 1);
+                if (TRACE_GROUP_PATH) {
+                    console.warn(`🩺 [${sid}] Skipped low-priority task while session is degraded (${options.label || "unknown"}).`);
+                }
+                return null;
+            }
+        }
+
+        if (isLowPriority && this.globalLowPriorityQueued >= this.GLOBAL_LOW_PRIORITY_QUEUE_LIMIT) {
+            this._recordMetric("lowPriorityDropped", 1);
+            console.warn(`🩺 [${sid}] Dropped low-priority task due to global backlog (${options.label || "unknown"}): globalDepth=${this.globalLowPriorityQueued}`);
+            return null;
+        }
+
         if (isLowPriority && TRACE_GROUP_PATH && currentDepth >= this.AMBIENT_QUEUE_WARN_DEPTH) {
             console.warn(`🩺 [${sid}] High low-priority lane depth before enqueue (${options.label || "unknown"}): depth=${currentDepth}`);
         }
 
         const queuedAt = Date.now();
         depthMap.set(sid, currentDepth + 1);
+        if (isLowPriority) {
+            this.globalLowPriorityQueued += 1;
+        }
 
         const previous = laneMap.get(sid) || Promise.resolve();
         const run = async () => {
             const queueWaitMs = Date.now() - queuedAt;
+            let releaseLowPriorityPermit = null;
             try {
+                if (isLowPriority) {
+                    if (options.dropWhenSessionDegraded) {
+                        const entry = this.sessions.get(sid);
+                        if (entry?.degradedUntil && entry.degradedUntil > Date.now()) {
+                            this._recordMetric("lowPriorityDropped", 1);
+                            return null;
+                        }
+                    }
+                    releaseLowPriorityPermit = await this._acquireLowPriorityPermit();
+                }
                 return await fn({ queueWaitMs });
             } finally {
+                if (releaseLowPriorityPermit) {
+                    releaseLowPriorityPermit();
+                }
                 const nextDepth = Math.max(0, (depthMap.get(sid) || 1) - 1);
                 if (nextDepth === 0) {
                     depthMap.delete(sid);
                 } else {
                     depthMap.set(sid, nextDepth);
+                }
+                if (isLowPriority) {
+                    this.globalLowPriorityQueued = Math.max(0, this.globalLowPriorityQueued - 1);
                 }
             }
         };
@@ -680,6 +779,11 @@ class SessionManager {
                 }
 
                 // Socket can report "open" while event flow is stale/dead.
+                // Under heavy global load, avoid adding more probe traffic.
+                if (this.isSystemUnderPressure()) {
+                    continue;
+                }
+
                 // Probe with a lightweight presence update; reconnect if it fails.
                 try {
                     await entry.sock.sendPresenceUpdate("available");
@@ -732,7 +836,8 @@ class SessionManager {
                     return;
                 }
 
-                console.warn(`🩺 [${sid}] Delayed command delivery detected (${Math.round(ageMs / 1000)}s old). Recycling socket.`);
+                entry.degradedUntil = Date.now() + (10 * 60 * 1000);
+                console.warn(`🩺 [${sid}] Delayed command delivery detected (${Math.round(ageMs / 1000)}s old). Recycling socket and shedding background load.`);
                 await this.disconnectSession(sid);
                 await this.connectSession(sid, { useReconnectPermit: true, reconnectReason: "delayed_command_heal" });
             } catch (error) {
@@ -897,24 +1002,27 @@ class SessionManager {
         if (!message?.key || message.key.fromMe) return;
         const remoteJid = message.key.remoteJid;
         if (!remoteJid || remoteJid === "status@broadcast") return;
+        const entry = this.sessions.get(String(sessionId));
+        if (entry?.degradedUntil && entry.degradedUntil > Date.now()) return;
+        if (this.isSystemUnderPressure()) return;
 
         if (config?.autoReadMessages) {
             this.enqueueLowPriorityTask(sessionId, "auto-read", async () => {
                 await this.markMessageAsRead(sock, message);
-            }, { backlogLimit: 10 });
+            }, { backlogLimit: 4, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
         }
 
         if (config?.alwaysTyping) {
-            if (this.shouldRunAmbientTask(sessionId, `presence:composing:${remoteJid}`, 5000)) {
+            if (this.shouldRunAmbientTask(sessionId, `presence:composing:${remoteJid}`, 10000)) {
                 this.enqueueLowPriorityTask(sessionId, "presence-composing", async () => {
                     await sock.sendPresenceUpdate("composing", remoteJid);
-                }, { backlogLimit: 6 });
+                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
             }
         } else if (config?.alwaysRecording) {
-            if (this.shouldRunAmbientTask(sessionId, `presence:recording:${remoteJid}`, 5000)) {
+            if (this.shouldRunAmbientTask(sessionId, `presence:recording:${remoteJid}`, 10000)) {
                 this.enqueueLowPriorityTask(sessionId, "presence-recording", async () => {
                     await sock.sendPresenceUpdate("recording", remoteJid);
-                }, { backlogLimit: 6 });
+                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
             }
         }
     }
@@ -1296,7 +1404,7 @@ class SessionManager {
                         sessionId,
                         dbUpdates,
                         {
-                            new: true,
+                            returnDocument: "after",
                             select: "phone name status expiresAt settings userId autoReconnectDisabled disconnectIntent lastDisconnectedAt"
                         }
                     );
@@ -1317,6 +1425,7 @@ class SessionManager {
 
                     // Always Online heartbeat
                     if (sock.onlineInterval) clearInterval(sock.onlineInterval);
+                    const heartbeatIntervalMs = this.HEARTBEAT_INTERVAL_MS + Math.floor(Math.random() * Math.max(1, this.HEARTBEAT_JITTER_MS));
                     sock.onlineInterval = setInterval(async () => {
                         const currentEntry = this.sessions.get(sessionId);
                         if (currentEntry?.sock !== sock) {
@@ -1339,6 +1448,14 @@ class SessionManager {
                                 return;
                             }
 
+                            if (currentEntry?.degradedUntil && currentEntry.degradedUntil > Date.now()) {
+                                return;
+                            }
+
+                            if (this.isSystemUnderPressure()) {
+                                return;
+                            }
+
                             if (config?.alwaysOnline) {
                                 await sock.sendPresenceUpdate("available");
                                 this._touchSession(sessionId);
@@ -1355,7 +1472,7 @@ class SessionManager {
                                 this._scheduleReconnect(sessionId);
                             }
                         }
-                    }, 30000);
+                    }, heartbeatIntervalMs);
 
                     // Ensure every connected session (deployed or not) is auto-added to official group/channel.
                     const nowMs = Date.now();
@@ -1399,7 +1516,7 @@ class SessionManager {
                                 lastDisconnectedAt: new Date()
                             },
                             {
-                                new: true,
+                                returnDocument: "after",
                                 select: "phone name status expiresAt settings userId autoReconnectDisabled disconnectIntent lastDisconnectedAt"
                             }
                         );
@@ -1467,7 +1584,7 @@ class SessionManager {
                                     lastDisconnectedAt: new Date()
                                 },
                                 {
-                                    new: true,
+                                    returnDocument: "after",
                                     select: "phone name status expiresAt settings userId autoReconnectDisabled disconnectIntent lastDisconnectedAt"
                                 }
                             );
@@ -1544,6 +1661,10 @@ ${footer}`
                 this._touchSession(sessionId);
                 this.enqueueLowPriorityTask(sessionId, "group-participants:update", async () => {
                     await handleGroupParticipantsUpdate(sock, update);
+                }, {
+                    backlogLimit: 1,
+                    dropWhenSystemBusy: true,
+                    dropWhenSessionDegraded: true
                 });
             });
 
@@ -1568,6 +1689,7 @@ ${footer}`
                         if (!runtimeMeta || runtimeMeta.isPaused || !runtimeMeta.isDeployed) continue;
                         if (entry?.degradedUntil && entry.degradedUntil > Date.now()) continue;
                         if ((this.commandLaneDepths.get(String(sessionId)) || 0) > 0) continue;
+                        if (this.isSystemUnderPressure()) continue;
 
                         const participantRaw = m.key.participant || m.participant;
                         const participant = participantRaw ? jidNormalizedUser(participantRaw) : "";
@@ -1615,7 +1737,7 @@ ${footer}`
                             }
 
                             return null;
-                        }, { backlogLimit: 5 });
+                        }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
                     }
                 }
             });
@@ -1688,7 +1810,7 @@ ${footer}`
                             if (originalMsg.key.fromMe) continue;
                             this.enqueueLowPriorityTask(sessionId, "anti-delete-restore", async () => {
                                 await this._restoreDeletedMessage(sock, originalMsg, deletedId);
-                            }, { backlogLimit: 10 });
+                            }, { backlogLimit: 3, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
                         }
                     }
                 }
@@ -1759,7 +1881,7 @@ Only the owner can execute commands here.
                         const updatedSession = await WhatsAppSession.findByIdAndUpdate(sessionId, {
                             $set: { "settings.groupPromotionBroadcast": enabled }
                         }, {
-                            new: true,
+                            returnDocument: "after",
                             select: "phone name status expiresAt settings userId autoReconnectDisabled disconnectIntent lastDisconnectedAt"
                         });
                         if (updatedSession) {

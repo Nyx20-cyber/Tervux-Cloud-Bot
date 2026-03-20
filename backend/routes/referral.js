@@ -66,7 +66,7 @@ router.post("/generate", authenticate, generateLimiter, async (req, res) => {
                             hasGeneratedCode: true
                         }
                     },
-                    { new: true }
+                    { returnDocument: "after" }
                 );
 
                 if (user) {

@@ -189,7 +189,7 @@ export async function updateConfig(sessionId, updates) {
         sid,
         { $set: setUpdates },
         {
-            new: true,
+            returnDocument: "after",
             select: "phone name settings status expiresAt autoReconnectDisabled disconnectIntent lastDisconnectedAt"
         }
     );

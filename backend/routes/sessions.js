@@ -457,7 +457,7 @@ router.put("/:id/settings", authenticate, async (req, res) => {
         const session = await WhatsAppSession.findOneAndUpdate(
             { _id: req.params.id, userId: req.user._id },
             { $set: updates },
-            { new: true }
+            { returnDocument: "after" }
         );
 
         if (!session) {
