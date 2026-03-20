@@ -1,4 +1,5 @@
 import { getCachedConfig } from "../../services/configService.js";
+import { launchBackgroundSequence, sleep } from "./background.js";
 
 export const suicide = async (sock, m, args) => {
     const remoteJid = m.key.remoteJid;
@@ -22,15 +23,17 @@ export const suicide = async (sock, m, args) => {
 
     await sock.sendMessage(remoteJid, { text: message, mentions: [sender] }, { quoted: m });
 
-    // Wait a bit for the dramatic effect
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    launchBackgroundSequence(sock, "suicide-sequence", async () => {
+        await sleep(3000);
 
-    try {
-        await sock.groupParticipantsUpdate(remoteJid, [sender], "remove");
-    } catch (e) {
-        // Fallback if bot is not admin or user is owner
-        return "⚠️ I tried to remove you dramatically, but I don't have the power! (Make me admin first, or you are too powerful to leave).";
-    }
+        try {
+            await sock.groupParticipantsUpdate(remoteJid, [sender], "remove");
+        } catch (e) {
+            await sock.sendMessage(remoteJid, {
+                text: "⚠️ I tried to remove you dramatically, but I don't have the power! (Make me admin first, or you are too powerful to leave)."
+            }, { quoted: m });
+        }
+    });
     
     return null;
 };

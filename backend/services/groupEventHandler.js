@@ -21,6 +21,7 @@ const spamTracker = new Map();
 const adminRequirementNoticeCooldowns = new Map();
 const ADMIN_REQUIREMENT_NOTICE_COOLDOWN_MS = 15_000;
 const TRACE_GROUP_PATH = process.env.WA_TRACE_GROUP_PATH === "true";
+const TRACE_GROUP_EVENTS = process.env.WA_TRACE_GROUP_EVENTS === "true";
 const SLOW_GROUP_PATH_WARN_MS = Number(process.env.WA_SLOW_GROUP_PATH_WARN_MS || 200);
 const pendingGroupStats = new Map();
 const pendingGroupStatsTimers = new Map();
@@ -244,23 +245,30 @@ export async function handleGroupParticipantsUpdate(sock, update) {
     // Normalize participants (some Baileys versions send objects instead of JIDs)
     const normalizedParticipants = (update.participants || []).map(p => typeof p === "string" ? p : p.id).filter(Boolean);
 
-    console.log(`👥 [GroupEvent] Participants update: action=${action}, group=${id}, participants=${normalizedParticipants.join(", ")}`);
+    if (TRACE_GROUP_EVENTS) {
+        console.log(`👥 [GroupEvent] Participants update: action=${action}, group=${id}, participants=${normalizedParticipants.join(", ")}`);
+    }
 
     try {
-        invalidateGroupMetadataCache(sock.sessionId, id);
         const settings = await loadGroupSettings(sock.sessionId, id);
         const welcomeEnabled = settings.welcome?.enabled === true;
         const goodbyeEnabled = settings.goodbye?.enabled === true;
         const antifakeEnabled = settings.antifake?.enabled === true;
-        console.log(`📋 [GroupEvent] Settings loaded: welcome.enabled=${welcomeEnabled}, goodbye.enabled=${goodbyeEnabled}, antifake.enabled=${antifakeEnabled}`);
+        if (TRACE_GROUP_EVENTS || welcomeEnabled || goodbyeEnabled || antifakeEnabled) {
+            console.log(`📋 [GroupEvent] Settings loaded: welcome.enabled=${welcomeEnabled}, goodbye.enabled=${goodbyeEnabled}, antifake.enabled=${antifakeEnabled}`);
+        }
 
         const shouldHandleWelcome = action === "add" && welcomeEnabled;
         const shouldHandleGoodbye = action === "remove" && goodbyeEnabled;
         const shouldHandleAntifake = action === "add" && antifakeEnabled;
         if (!shouldHandleWelcome && !shouldHandleGoodbye && !shouldHandleAntifake) {
-            console.log(`ℹ️ [GroupEvent] No enabled participant automations for group ${id}. Skipping.`);
+            if (TRACE_GROUP_EVENTS) {
+                console.log(`ℹ️ [GroupEvent] No enabled participant automations for group ${id}. Skipping.`);
+            }
             return;
         }
+
+        invalidateGroupMetadataCache(sock.sessionId, id);
 
         const metadata = await getGroupMetadata(sock, id, { forceRefresh: true });
         if (!metadata) {
@@ -283,12 +291,14 @@ export async function handleGroupParticipantsUpdate(sock, update) {
             if (action === "add" && welcomeEnabled) {
                 messageText = settings.welcome.message || "";
                 isWelcome = true;
-                console.log(`✅ [GroupEvent] Welcome is enabled, preparing message for ${participant}`);
+                if (TRACE_GROUP_EVENTS) {
+                    console.log(`✅ [GroupEvent] Welcome is enabled, preparing message for ${participant}`);
+                }
             } else if (action === "remove" && goodbyeEnabled) {
                 messageText = settings.goodbye.message || "";
-                console.log(`✅ [GroupEvent] Goodbye is enabled, preparing message for ${participant}`);
-            } else {
-                console.log(`ℹ️ [GroupEvent] ${action === "add" ? "Welcome" : "Goodbye"} is disabled for group ${id}`);
+                if (TRACE_GROUP_EVENTS) {
+                    console.log(`✅ [GroupEvent] Goodbye is enabled, preparing message for ${participant}`);
+                }
             }
 
             if (messageText) {

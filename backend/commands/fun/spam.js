@@ -1,3 +1,5 @@
+import { launchBackgroundSequence, sleep } from "./background.js";
+
 const emojiSets = [
     "💀💀💀💀💀💀💀💀💀💀💀💀💀💀💀",
     "😂🤣😂🤣😂🤣😂🤣😂🤣😂🤣😂🤣😂",
@@ -22,26 +24,26 @@ export const spam = async (sock, m, args) => {
 💥 *INCOMING!* 💥`
     });
 
-    // Send 5 random emoji walls (limited to prevent actual spam)
     const waves = 5;
-    for (let i = 0; i < waves; i++) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const set = emojiSets[Math.floor(Math.random() * emojiSets.length)];
-        // Build a 3-line emoji block
+    launchBackgroundSequence(sock, "spam-sequence", async () => {
+        for (let i = 0; i < waves; i++) {
+            await sleep(500);
+            const set = emojiSets[Math.floor(Math.random() * emojiSets.length)];
+            await sock.sendMessage(chatJid, {
+                text: `${set}\n${set}\n${set}`
+            });
+        }
+
+        await sleep(800);
+
         await sock.sendMessage(chatJid, {
-            text: `${set}\n${set}\n${set}`
-        });
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    await sock.sendMessage(chatJid, {
-        text: `╔══════════════════════════════════╗
+            text: `╔══════════════════════════════════╗
 ║  ✅ *𝔹𝕆𝕄𝔹 ℂ𝕆𝕄ℙ𝕃𝔼𝕋𝔼* ✅            ║
 ╚══════════════════════════════════╝
 
 💥 ${waves} emoji waves delivered!
 😂 _Your chat is now blessed_ ✨`
+        });
     });
 
     return null;

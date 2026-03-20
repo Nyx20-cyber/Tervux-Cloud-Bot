@@ -1542,7 +1542,9 @@ ${footer}`
             sock.ev.on("group-participants.update", async (update) => {
                 if (!isCurrentSocket()) return;
                 this._touchSession(sessionId);
-                await handleGroupParticipantsUpdate(sock, update);
+                this.enqueueLowPriorityTask(sessionId, "group-participants:update", async () => {
+                    await handleGroupParticipantsUpdate(sock, update);
+                });
             });
 
             // Status auto-actions
