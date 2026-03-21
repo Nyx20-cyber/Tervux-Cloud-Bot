@@ -12,7 +12,7 @@ import FastLipaWebhookLog from "../models/FastLipaWebhookLog.js";
 import WhatsAppAuth from "../models/WhatsAppAuth.js";
 import { sessionManager } from "../services/whatsappService.js";
 import { emitToUser, emitUpdate } from "../services/socketService.js";
-import { checkTransactionStatus } from "../services/paymentService.js";
+import { checkTransactionStatus, getBalance } from "../services/paymentService.js";
 import { extractFastLipaFields, settleCompletedPayment, settleFailedPayment } from "../services/paymentSettlement.js";
 import { checkOrderStatus, extractBongoPayOrderStatus } from "../services/bongopayService.js";
 import { extractYoutubeVideoId, sanitize } from "./tutorials.js";
@@ -22,7 +22,7 @@ import { getJson, setJson, delKey } from "../lib/redis.js";
 
 const router = Router();
 const ADMIN_STATS_CACHE_TTL_SECONDS = Number(process.env.ADMIN_STATS_CACHE_TTL_SECONDS || 20);
-const ADMIN_STATS_CACHE_KEY = "admin:stats:v1";
+const ADMIN_STATS_CACHE_KEY = "admin:stats:v2";
 const PLANS_CACHE_KEY = "public:plans:v1";
 const TUTORIALS_CACHE_KEY = "tutorials:active:v1";
 const ANNOUNCEMENTS_CACHE_KEY_PATTERN = "announcements:active:*";
@@ -47,6 +47,60 @@ const emitPlatformSettingsUpdate = (settingsDocOrObj) => {
     emitUpdate("platform_settings_updated", buildPlatformSettingsPayload(settingsDocOrObj));
 };
 
+function normalizeMoneyValue(value) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+        const cleaned = value.replace(/[^0-9.-]/g, "");
+        const parsed = Number.parseFloat(cleaned);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+}
+
+function extractFastLipaBalanceValue(payload) {
+    const candidates = [
+        payload?.balance,
+        payload?.availableBalance,
+        payload?.available_balance,
+        payload?.walletBalance,
+        payload?.wallet_balance,
+        payload?.currentBalance,
+        payload?.current_balance,
+        payload?.data?.balance,
+        payload?.data?.availableBalance,
+        payload?.data?.available_balance,
+        payload?.data?.walletBalance,
+        payload?.data?.wallet_balance,
+        payload?.data?.currentBalance,
+        payload?.data?.current_balance
+    ];
+
+    for (const candidate of candidates) {
+        const normalized = normalizeMoneyValue(candidate);
+        if (normalized !== null) {
+            return normalized;
+        }
+    }
+
+    return null;
+}
+
+async function getRealtimeFastLipaBalanceSafe() {
+    try {
+        const response = await getBalance();
+        return {
+            value: extractFastLipaBalanceValue(response),
+            raw: response
+        };
+    } catch (error) {
+        console.error("Admin realtime FastLipa balance error:", error.message);
+        return {
+            value: null,
+            raw: null
+        };
+    }
+}
+
 /**
  * GET /api/admin/stats
  * Platform analytics
@@ -55,7 +109,12 @@ router.get("/stats", authenticate, requireAdmin, async (req, res) => {
     try {
         const cached = await getJson(ADMIN_STATS_CACHE_KEY);
         if (cached) {
-            return res.json(cached);
+            const realtimeBalance = await getRealtimeFastLipaBalanceSafe();
+            return res.json({
+                ...cached,
+                accountBalance: realtimeBalance.value ?? cached.accountBalance ?? null,
+                accountBalanceLive: realtimeBalance.value !== null
+            });
         }
 
         const [
@@ -64,7 +123,8 @@ router.get("/stats", authenticate, requireAdmin, async (req, res) => {
             totalSessions,
             activeSessions,
             totalRevenue,
-            recentPayments
+            recentPayments,
+            realtimeBalance
         ] = await Promise.all([
             User.countDocuments(),
             WhatsAppSession.countDocuments({ expiresAt: { $gt: new Date() } }),
@@ -78,7 +138,8 @@ router.get("/stats", authenticate, requireAdmin, async (req, res) => {
                 .sort({ createdAt: -1 })
                 .limit(10)
                 .populate("userId", "email name")
-                .populate("planId", "name price")
+                .populate("planId", "name price"),
+            getRealtimeFastLipaBalanceSafe()
         ]);
 
         const payload = {
@@ -88,6 +149,8 @@ router.get("/stats", authenticate, requireAdmin, async (req, res) => {
             activeSessions,
             liveConnections: sessionManager?.getActiveCount() || 0,
             totalRevenue: totalRevenue[0]?.total || 0,
+            accountBalance: realtimeBalance.value,
+            accountBalanceLive: realtimeBalance.value !== null,
             currency: "TZS",
             recentPayments
         };
@@ -106,10 +169,9 @@ router.get("/stats", authenticate, requireAdmin, async (req, res) => {
  */
 router.get("/users", authenticate, requireAdmin, async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 20;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
         const fetchAll = String(req.query.all || "").toLowerCase() === "true";
-        const skip = fetchAll ? 0 : (page - 1) * limit;
         const search = String(req.query.search || "").trim();
 
         const query = {};
@@ -123,6 +185,22 @@ router.get("/users", authenticate, requireAdmin, async (req, res) => {
             query.$or = conditions;
         }
 
+        const [total, totalCoinsAggregate, globalTotal, globalCoinsAggregate] = await Promise.all([
+            User.countDocuments(query),
+            User.aggregate([
+                { $match: query },
+                { $group: { _id: null, totalCoins: { $sum: "$coins" } } }
+            ]),
+            User.countDocuments({}),
+            User.aggregate([
+                { $group: { _id: null, totalCoins: { $sum: "$coins" } } }
+            ])
+        ]);
+
+        const pages = fetchAll ? 1 : Math.max(1, Math.ceil(total / limit));
+        const currentPage = fetchAll ? 1 : Math.min(page, pages);
+        const skip = fetchAll ? 0 : (currentPage - 1) * limit;
+
         const usersQuery = User.find(query)
             .sort({ createdAt: -1 })
             .skip(skip);
@@ -131,10 +209,7 @@ router.get("/users", authenticate, requireAdmin, async (req, res) => {
             usersQuery.limit(limit);
         }
 
-        const [users, total] = await Promise.all([
-            usersQuery,
-            User.countDocuments(query)
-        ]);
+        const users = await usersQuery;
 
         const usersData = users.map((u) => {
             const serialized = u.toJSON();
@@ -165,8 +240,11 @@ router.get("/users", authenticate, requireAdmin, async (req, res) => {
         res.json({
             users: usersData,
             total,
-            page,
-            pages: fetchAll ? 1 : Math.ceil(total / limit)
+            page: currentPage,
+            pages,
+            totalCoins: totalCoinsAggregate[0]?.totalCoins || 0,
+            globalTotal,
+            globalTotalCoins: globalCoinsAggregate[0]?.totalCoins || 0
         });
     } catch (error) {
         console.error("Admin list users error:", error);
@@ -304,16 +382,35 @@ router.delete("/users/:id", authenticate, requireAdmin, async (req, res) => {
  */
 router.get("/payments", authenticate, requireAdmin, async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 20;
-        const skip = (page - 1) * limit;
-        const { status, search, from, to } = req.query;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
+        const status = String(req.query.status || "all");
+        const search = String(req.query.search || "").trim();
+        const from = req.query.from;
+        const to = req.query.to;
 
         const filter = {};
-        if (status && ["pending", "completed", "failed", "cancelled"].includes(status)) {
+        if (["pending", "completed", "failed", "cancelled"].includes(status)) {
             filter.status = status;
         }
         if (search) {
+            const [userMatches, planMatches] = await Promise.all([
+                User.find({
+                    $or: [
+                        { name: { $regex: search, $options: "i" } },
+                        { email: { $regex: search, $options: "i" } },
+                        { phone: { $regex: search, $options: "i" } }
+                    ]
+                })
+                    .select("_id")
+                    .lean(),
+                Plan.find({ name: { $regex: search, $options: "i" } })
+                    .select("_id")
+                    .lean()
+            ]);
+
+            const matchingUserIds = userMatches.map((user) => user._id);
+            const matchingPlanIds = planMatches.map((plan) => plan._id);
             const conditions = [
                 { payerPhone: { $regex: search, $options: "i" } },
                 { fastlipaTransactionId: { $regex: search, $options: "i" } },
@@ -321,9 +418,22 @@ router.get("/payments", authenticate, requireAdmin, async (req, res) => {
                 { provider: { $regex: search, $options: "i" } },
                 { paymentMethod: { $regex: search, $options: "i" } }
             ];
-            if (mongoose.Types.ObjectId.isValid(String(search))) {
-                conditions.push({ _id: new mongoose.Types.ObjectId(String(search)) });
+
+            if (matchingUserIds.length > 0) {
+                conditions.push({ userId: { $in: matchingUserIds } });
             }
+
+            if (matchingPlanIds.length > 0) {
+                conditions.push({ planId: { $in: matchingPlanIds } });
+            }
+
+            if (mongoose.Types.ObjectId.isValid(search)) {
+                const objectId = new mongoose.Types.ObjectId(search);
+                conditions.push({ _id: objectId });
+                conditions.push({ userId: objectId });
+                conditions.push({ planId: objectId });
+            }
+
             filter.$or = conditions;
         }
         if (from || to) {
@@ -345,6 +455,11 @@ router.get("/payments", authenticate, requireAdmin, async (req, res) => {
                 delete filter.createdAt;
             }
         }
+
+        const total = await Payment.countDocuments(filter);
+        const pages = Math.max(1, Math.ceil(total / limit));
+        const currentPage = Math.min(page, pages);
+        const skip = (currentPage - 1) * limit;
 
         const providerBucketsPipeline = [
             { $match: { ...filter, status: "completed" } },
@@ -374,14 +489,13 @@ router.get("/payments", authenticate, requireAdmin, async (req, res) => {
             }
         ];
 
-        const [payments, total, totalsByProvider] = await Promise.all([
+        const [payments, totalsByProvider] = await Promise.all([
             Payment.find(filter)
                 .populate("userId", "email name phone")
                 .populate("planId", "name price coinsAmount")
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit),
-            Payment.countDocuments(filter),
             Payment.aggregate(providerBucketsPipeline)
         ]);
 
@@ -401,8 +515,8 @@ router.get("/payments", authenticate, requireAdmin, async (req, res) => {
         res.json({
             payments,
             total,
-            page,
-            pages: Math.ceil(total / limit),
+            page: currentPage,
+            pages,
             totalAmount: summary.totalAmount,
             fastlipaAmount: summary.fastlipaAmount,
             cardAmount: summary.cardAmount
@@ -693,22 +807,80 @@ router.delete("/plans/:id", authenticate, requireAdmin, async (req, res) => {
  */
 router.get("/sessions", authenticate, requireAdmin, async (req, res) => {
     try {
-        const { status } = req.query;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 12, 1), 100);
+        const fetchAll = String(req.query.all || "").toLowerCase() === "true";
+        const status = String(req.query.status || "all");
+        const broadcast = String(req.query.broadcast || "all").toLowerCase();
+        const search = String(req.query.search || "").trim();
+
         const filter = {};
-        if (status && ["pairing", "active", "disconnected", "paused", "expired"].includes(status)) {
+        if (["pairing", "active", "disconnected", "paused", "expired"].includes(status)) {
             filter.status = status;
         }
 
-        const sessions = await WhatsAppSession.find(filter)
-            .populate("userId", "email name phone")
-            .sort({ lastConnected: -1, createdAt: -1 });
+        if (broadcast === "on") {
+            filter["settings.groupPromotionBroadcast"] = true;
+        } else if (broadcast === "off") {
+            filter["settings.groupPromotionBroadcast"] = { $ne: true };
+        }
 
+        if (search) {
+            const userMatches = await User.find({
+                $or: [
+                    { name: { $regex: search, $options: "i" } },
+                    { email: { $regex: search, $options: "i" } },
+                    { phone: { $regex: search, $options: "i" } }
+                ]
+            })
+                .select("_id")
+                .lean();
+
+            const matchingUserIds = userMatches.map((user) => user._id);
+            const conditions = [
+                { phone: { $regex: search, $options: "i" } }
+            ];
+
+            if (matchingUserIds.length > 0) {
+                conditions.push({ userId: { $in: matchingUserIds } });
+            }
+
+            if (mongoose.Types.ObjectId.isValid(search)) {
+                const objectId = new mongoose.Types.ObjectId(search);
+                conditions.push({ _id: objectId });
+                conditions.push({ userId: objectId });
+            }
+
+            filter.$or = conditions;
+        }
+
+        const total = await WhatsAppSession.countDocuments(filter);
+        const pages = fetchAll ? 1 : Math.max(1, Math.ceil(total / limit));
+        const currentPage = fetchAll ? 1 : Math.min(page, pages);
+        const skip = fetchAll ? 0 : (currentPage - 1) * limit;
+
+        const sessionsQuery = WhatsAppSession.find(filter)
+            .populate("userId", "email name phone")
+            .sort({ lastConnected: -1, createdAt: -1 })
+            .skip(skip);
+
+        if (!fetchAll) {
+            sessionsQuery.limit(limit);
+        }
+
+        const sessions = await sessionsQuery;
         const enriched = sessions.map(s => ({
             ...s.toJSON(),
             isLive: !!sessionManager?.isConnected(s._id.toString()),
         }));
 
-        res.json({ sessions: enriched, total: enriched.length });
+        res.json({
+            sessions: enriched,
+            total,
+            page: currentPage,
+            pages,
+            limit: fetchAll ? (total || limit) : limit
+        });
     } catch (error) {
         console.error("Admin sessions error:", error);
         res.status(500).json({ error: "Failed to fetch sessions" });

@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/store/useAuthStore";
 import {
-    Wifi, Search, Loader2, Filter, Radio,
+    Wifi, Search, Loader2, Filter, Radio, ChevronLeft, ChevronRight,
     Power, Smartphone, Pencil, Trash2, Megaphone
 } from "lucide-react";
 import { format } from "date-fns";
@@ -43,8 +43,11 @@ export function SessionMonitor() {
     const { token } = useAuthStore();
     const [sessions, setSessions] = useState<SessionRecord[]>([]);
     const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
+    const [pages, setPages] = useState(1);
     const [isLoading, setIsLoading] = useState(true);
     const [search, setSearch] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [broadcastFilter, setBroadcastFilter] = useState<"all" | "on" | "off">("all");
     const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -57,25 +60,76 @@ export function SessionMonitor() {
     const [editExpiresAt, setEditExpiresAt] = useState("");
     const [editGroupPromotionBroadcast, setEditGroupPromotionBroadcast] = useState(false);
 
-    const fetchSessions = useCallback(async (status?: string) => {
+    const fetchSessions = useCallback(async ({
+        page: nextPage = 1,
+        search: query = "",
+        status = "all",
+        broadcast = "all"
+    }: {
+        page?: number;
+        search?: string;
+        status?: string;
+        broadcast?: "all" | "on" | "off";
+    } = {}) => {
         setIsLoading(true);
         try {
-            let url = "/admin/sessions";
-            if (status && status !== "all") url += `?status=${status}`;
-            const res = await api.get(url);
-            setSessions(res.data.sessions);
-            setTotal(res.data.total);
+            const params = new URLSearchParams({
+                page: String(nextPage),
+                limit: "12"
+            });
+
+            if (status !== "all") {
+                params.set("status", status);
+            }
+
+            if (broadcast !== "all") {
+                params.set("broadcast", broadcast);
+            }
+
+            if (query) {
+                params.set("search", query);
+            }
+
+            const res = await api.get(`/admin/sessions?${params.toString()}`);
+            setSessions(res.data.sessions || []);
+            setTotal(res.data.total || 0);
+            setPages(res.data.pages || 1);
+            setPage(res.data.page || 1);
         } catch (err) {
             console.error(err);
             toast.error(t.admin_failed_fetch_sessions);
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [t.admin_failed_fetch_sessions]);
 
     useEffect(() => {
-        fetchSessions(statusFilter);
-    }, [fetchSessions, statusFilter]);
+        const timeoutId = window.setTimeout(() => {
+            const nextQuery = search.trim();
+            setSearchQuery(nextQuery);
+            setPage(1);
+        }, 250);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [search]);
+
+    useEffect(() => {
+        void fetchSessions({
+            page,
+            search: searchQuery,
+            status: statusFilter,
+            broadcast: broadcastFilter
+        });
+    }, [broadcastFilter, fetchSessions, page, searchQuery, statusFilter]);
+
+    const refetchCurrentSessions = useCallback(async (targetPage = page) => {
+        await fetchSessions({
+            page: targetPage,
+            search: searchQuery,
+            status: statusFilter,
+            broadcast: broadcastFilter
+        });
+    }, [broadcastFilter, fetchSessions, page, searchQuery, statusFilter]);
 
     // Live updates via socket.io (silent updates, no polling)
     useEffect(() => {
@@ -86,35 +140,26 @@ export function SessionMonitor() {
             auth: { token }
         });
 
-        socket.on("admin_session_updated", (payload: { sessionId: string; status?: SessionRecord["status"] }) => {
+        socket.on("admin_session_updated", (payload: { sessionId: string }) => {
             if (!payload?.sessionId) return;
-            if (payload.status) {
-                setSessions(prev => prev.map(s =>
-                    s._id === payload.sessionId ? { ...s, status: payload.status ?? s.status } : s
-                ));
-            } else {
-                fetchSessions(statusFilter);
-            }
+            void refetchCurrentSessions();
         });
 
         socket.on("admin_session_deleted", (payload: { sessionId: string }) => {
             if (!payload?.sessionId) return;
-            setSessions(prev => prev.filter(s => s._id !== payload.sessionId));
-            setTotal(prev => Math.max(0, prev - 1));
+            void refetchCurrentSessions();
         });
 
         return () => {
             socket.disconnect();
         };
-    }, [fetchSessions, statusFilter, token]);
+    }, [refetchCurrentSessions, token]);
 
     const handleDisconnect = async (sessionId: string) => {
         setActionLoading(sessionId);
         try {
             await api.post(`/admin/sessions/${sessionId}/disconnect`);
-            setSessions(prev => prev.map(s =>
-                s._id === sessionId ? { ...s, status: "disconnected" as const, isLive: false } : s
-            ));
+            await refetchCurrentSessions();
             toast.success(t.admin_session_disconnected);
         } catch (err) {
             toast.error(t.admin_failed_disconnect_session);
@@ -128,9 +173,13 @@ export function SessionMonitor() {
         setActionLoading(sessionId);
         try {
             await api.delete(`/admin/sessions/${sessionId}`);
-            setSessions(prev => prev.filter(s => s._id !== sessionId));
-            setTotal(prev => Math.max(0, prev - 1));
             toast.success(t.admin_session_deleted);
+            const targetPage = sessions.length === 1 && page > 1 ? page - 1 : page;
+            if (targetPage !== page) {
+                setPage(targetPage);
+            } else {
+                await refetchCurrentSessions(targetPage);
+            }
             setConfirmDeleteSessionId(null);
         } catch (err: any) {
             toast.error(err.response?.data?.error || t.admin_failed_delete_session);
@@ -142,29 +191,15 @@ export function SessionMonitor() {
     const handleToggleGroupBroadcast = async (sessionId: string, nextValue: boolean) => {
         setActionLoading(sessionId);
         try {
-            const res = await api.put(`/admin/sessions/${sessionId}`, {
+            await api.put(`/admin/sessions/${sessionId}`, {
                 settings: {
                     groupPromotionBroadcast: nextValue
                 }
             });
-            const updated = res.data.session;
-            setSessions(prev => prev.map(s =>
-                s._id === sessionId
-                    ? {
-                        ...s,
-                        ...updated,
-                        _id: sessionId,
-                        settings: {
-                            ...(s.settings || {}),
-                            ...(updated?.settings || {}),
-                            groupPromotionBroadcast: nextValue
-                        }
-                    }
-                    : s
-            ));
             if (editSession?._id === sessionId) {
                 setEditGroupPromotionBroadcast(nextValue);
             }
+            await refetchCurrentSessions();
             toast.success(nextValue ? t.admin_group_broadcast_enabled : t.admin_group_broadcast_disabled);
         } catch (err: any) {
             toast.error(err.response?.data?.error || t.admin_failed_update_session);
@@ -199,14 +234,8 @@ export function SessionMonitor() {
             };
             payload.expiresAt = editExpiresAt ? new Date(editExpiresAt).toISOString() : null;
 
-            const res = await api.put(`/admin/sessions/${editSession._id}`, payload);
-            const updated = res.data.session;
-
-            setSessions(prev => prev.map(s =>
-                s._id === editSession._id
-                    ? { ...s, ...updated, _id: editSession._id }
-                    : s
-            ));
+            await api.put(`/admin/sessions/${editSession._id}`, payload);
+            await refetchCurrentSessions();
             toast.success(t.admin_session_updated_successfully);
             setEditSession(null);
         } catch (err: any) {
@@ -215,21 +244,6 @@ export function SessionMonitor() {
             setActionLoading(null);
         }
     };
-
-    const filteredSessions = sessions.filter((s) => {
-        const matchesSearch =
-            s.phone.includes(search) ||
-            s.userId?.email?.toLowerCase().includes(search.toLowerCase()) ||
-            s.userId?.name?.toLowerCase().includes(search.toLowerCase());
-
-        const broadcastEnabled = s.settings?.groupPromotionBroadcast === true;
-        const matchesBroadcast =
-            broadcastFilter === "all" ||
-            (broadcastFilter === "on" && broadcastEnabled) ||
-            (broadcastFilter === "off" && !broadcastEnabled);
-
-        return matchesSearch && matchesBroadcast;
-    });
 
     const statuses = ["all", "active", "pairing", "paused", "disconnected", "expired"];
 
@@ -287,8 +301,11 @@ export function SessionMonitor() {
                         type="text"
                         placeholder={t.admin_search_phone_or_user}
                         value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 backdrop-blur-md transition-all uppercase tracking-widest"
+                        onChange={(e) => setSearch(e.target.value.toLowerCase())}
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold lowercase text-white placeholder:text-gray-500 placeholder:normal-case focus:outline-none focus:ring-2 focus:ring-primary/50 backdrop-blur-md transition-all"
                     />
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -296,7 +313,7 @@ export function SessionMonitor() {
                     {statuses.map((s) => (
                         <button
                             key={s}
-                            onClick={() => setStatusFilter(s)}
+                            onClick={() => { setStatusFilter(s); setPage(1); }}
                             className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[8px] sm:text-[9px] font-black uppercase tracking-widest transition-all ${statusFilter === s
                                     ? "bg-primary/20 text-primary border border-primary/30"
                                     : "bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10 hover:text-gray-300"
@@ -308,7 +325,7 @@ export function SessionMonitor() {
                     {(["all", "on", "off"] as const).map((s) => (
                         <button
                             key={`broadcast-${s}`}
-                            onClick={() => setBroadcastFilter(s)}
+                            onClick={() => { setBroadcastFilter(s); setPage(1); }}
                             className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[8px] sm:text-[9px] font-black uppercase tracking-widest transition-all ${broadcastFilter === s
                                     ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
                                     : "bg-white/5 text-gray-500 border border-white/10 hover:bg-white/10 hover:text-gray-300"
@@ -325,16 +342,16 @@ export function SessionMonitor() {
                 <div className="flex justify-center p-12">
                     <Loader2 className="w-6 h-6 text-primary animate-spin" />
                 </div>
-            ) : filteredSessions.length === 0 ? (
+            ) : sessions.length === 0 ? (
                 <div className="p-8 text-center border border-white/10 border-dashed rounded-xl bg-white/5">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">
-                        {search || statusFilter !== "all" ? t.admin_no_sessions_match_filters : t.admin_no_sessions_found}
+                        {searchQuery || statusFilter !== "all" || broadcastFilter !== "all" ? t.admin_no_sessions_match_filters : t.admin_no_sessions_found}
                     </p>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-3">
                     <AnimatePresence>
-                        {filteredSessions.map(session => {
+                        {sessions.map(session => {
                             const st = statusStyles[session.status] || statusStyles.disconnected;
                             const broadcastEnabled = session.settings?.groupPromotionBroadcast === true;
                             return (
@@ -464,6 +481,30 @@ export function SessionMonitor() {
                             );
                         })}
                     </AnimatePresence>
+                </div>
+            )}
+
+            {pages > 1 && !isLoading && (
+                <div className="flex items-center justify-between px-1 py-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">
+                        {t.admin_page} {page} {t.admin_of} {pages} · {total} sessions
+                    </p>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => setPage(page - 1)}
+                            disabled={page <= 1}
+                            className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                            <ChevronLeft className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                        <button
+                            onClick={() => setPage(page + 1)}
+                            disabled={page >= pages}
+                            className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                            <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                        </button>
+                    </div>
                 </div>
             )}
 

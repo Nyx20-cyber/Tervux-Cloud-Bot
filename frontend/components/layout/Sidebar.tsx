@@ -26,14 +26,18 @@ export function Sidebar({ isMobile }: { isMobile?: boolean }) {
         }
     };
 
+    const showHiddenSupportLinks = false;
+
     const links = [
         { href: '/dashboard', label: t.dashboard, icon: LayoutDashboard },
         { href: '/dashboard/pair', label: t.pair, icon: Network },
         { href: '/dashboard/configurations', label: t.configurations, icon: Settings2 },
         { href: '/dashboard/deployments', label: t.deployments, icon: ShieldCheck },
         { href: '/dashboard/tutorials', label: t.tutorials, icon: GraduationCap },
-        { href: '/dashboard/help-center', label: t.help_center, icon: CircleHelp },
-        { href: '/dashboard/earn-money', label: t.earn_money, icon: HandCoins },
+        ...(showHiddenSupportLinks ? [
+            { href: '/dashboard/help-center', label: t.help_center, icon: CircleHelp },
+            { href: '/dashboard/earn-money', label: t.earn_money, icon: HandCoins },
+        ] : []),
         { href: '/dashboard/referrals', label: t.referrals, icon: Users },
         { href: '/dashboard/notifications', label: t.notifications, icon: Activity },
         { href: '/dashboard/billing', label: t.billing, icon: CircleDollarSign },

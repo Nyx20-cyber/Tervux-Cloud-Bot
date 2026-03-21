@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/store/useAuthStore";
 import {
-    Coins, Search, Loader2, Plus, Minus, X, Send, ArrowUpRight, ArrowDownRight, Globe, Zap, CheckCircle2
+    Coins, Search, Loader2, Plus, Minus, X, Send, ArrowUpRight, ArrowDownRight, Globe, Zap, CheckCircle2, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -43,8 +43,13 @@ export function CoinManagement() {
     const token = useAuthStore((state) => state.token);
     const t = translations[language];
     const [users, setUsers] = useState<UserRecord[]>([]);
+    const [totalUsers, setTotalUsers] = useState(0);
+    const [globalUsers, setGlobalUsers] = useState(0);
+    const [page, setPage] = useState(1);
+    const [pages, setPages] = useState(1);
     const [isLoading, setIsLoading] = useState(true);
     const [search, setSearch] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
     const [selectedUser, setSelectedUser] = useState<UserRecord | null>(null);
     const [amount, setAmount] = useState<number>(0);
     const [reason, setReason] = useState("");
@@ -58,13 +63,23 @@ export function CoinManagement() {
     const [sendingBonus, setSendingBonus] = useState(false);
     const [bonusResult, setBonusResult] = useState<{ usersRewarded: number; totalCoinsDistributed: number } | null>(null);
     const [dailyClaimBannerEnabled, setDailyClaimBannerEnabled] = useState(true);
+    const [totalCoins, setTotalCoins] = useState(0);
     const [savingBanner, setSavingBanner] = useState(false);
     const [pendingAction, setPendingAction] = useState<PendingCoinAction | null>(null);
 
-    const fetchUsers = useCallback(async (searchTerm = "") => {
+    const fetchUsers = useCallback(async ({
+        page: nextPage = 1,
+        search: searchTerm = ""
+    }: {
+        page?: number;
+        search?: string;
+    } = {}) => {
         setIsLoading(true);
         try {
-            const params = new URLSearchParams({ all: "true" });
+            const params = new URLSearchParams({
+                page: String(nextPage),
+                limit: "15"
+            });
             const trimmedSearch = searchTerm.trim();
             if (trimmedSearch) {
                 params.set("search", trimmedSearch);
@@ -76,6 +91,7 @@ export function CoinManagement() {
             const mergedUsers = [...fetchedUsers];
             const shouldIncludeCurrentAdmin =
                 currentUser?.role === "admin" &&
+                nextPage === 1 &&
                 !mergedUsers.some((user: UserRecord) => user._id === currentUser._id) &&
                 (
                     !trimmedSearch ||
@@ -96,6 +112,11 @@ export function CoinManagement() {
             }
 
             setUsers(mergedUsers);
+            setTotalUsers(res.data.total || 0);
+            setGlobalUsers(res.data.globalTotal || res.data.total || 0);
+            setTotalCoins(res.data.globalTotalCoins || 0);
+            setPages(res.data.pages || 1);
+            setPage(res.data.page || 1);
         } catch (err) {
             console.error(err);
         } finally {
@@ -105,13 +126,23 @@ export function CoinManagement() {
 
     useEffect(() => {
         const timeoutId = window.setTimeout(() => {
-            fetchUsers(search);
-        }, 200);
+            const nextQuery = search.trim();
+            setSearchQuery(nextQuery);
+            setPage(1);
+        }, 250);
 
         return () => {
             window.clearTimeout(timeoutId);
         };
-    }, [fetchUsers, search]);
+    }, [search]);
+
+    useEffect(() => {
+        void fetchUsers({ page, search: searchQuery });
+    }, [fetchUsers, page, searchQuery]);
+
+    const refetchCurrentUsers = useCallback(async (targetPage = page) => {
+        await fetchUsers({ page: targetPage, search: searchQuery });
+    }, [fetchUsers, page, searchQuery]);
 
     useEffect(() => {
         const fetchBannerSettings = async () => {
@@ -158,8 +189,6 @@ export function CoinManagement() {
         }
     };
 
-    const filteredUsers = users;
-
     const handleSubmit = async () => {
         if (!selectedUser || amount <= 0) {
             toast.error(t.admin_select_user_valid_amount);
@@ -190,6 +219,7 @@ export function CoinManagement() {
                 u._id === selectedUser._id ? { ...u, coins: res.data.newBalance } : u
             ));
             setSelectedUser(prev => prev ? { ...prev, coins: res.data.newBalance } : null);
+            setTotalCoins(prev => prev + adjustAmount);
             toast.success(`${mode === "add" ? t.admin_added : t.admin_removed} ${amount} ${t.coins_word}. ${t.admin_new_balance}: ${res.data.newBalance}`);
             setAmount(0);
             setReason("");
@@ -200,8 +230,6 @@ export function CoinManagement() {
         }
     };
 
-    const totalCoins = users.reduce((sum, u) => sum + u.coins, 0);
-
     const handleBonusAll = async () => {
         const amt = Number(bonusAmount);
         if (!amt || amt <= 0) return toast.error(t.admin_enter_valid_coin_amount);
@@ -209,7 +237,7 @@ export function CoinManagement() {
         setPendingAction({
             type: "bonus",
             amount: amt,
-            usersCount: users.length
+            usersCount: globalUsers
         });
     };
 
@@ -231,7 +259,7 @@ export function CoinManagement() {
             setBonusReason("");
             setBonusMessage("");
             toast.success(`✅ ${res.data.usersRewarded} ${t.users} ${t.admin_received} +${amt} ${t.coins_word}!`);
-            fetchUsers(search);
+            await refetchCurrentUsers();
         } catch (err: any) {
             toast.error(err.response?.data?.error || t.admin_failed_distribute_bonus);
         } finally {
@@ -353,7 +381,7 @@ export function CoinManagement() {
                     {bonusAmount && Number(bonusAmount) > 0 && (
                         <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-black text-emerald-400 uppercase tracking-widest">
                             <Zap className="h-3 w-3" />
-                            {Number(bonusAmount)} {t.coins_word} × {users.length} {t.users} = {Number(bonusAmount) * users.length} {t.admin_total_coins}
+                            {Number(bonusAmount)} {t.coins_word} × {globalUsers} {t.users} = {Number(bonusAmount) * globalUsers} {t.admin_total_coins}
                         </div>
                     )}
                     <button
@@ -446,8 +474,11 @@ export function CoinManagement() {
                                 type="text"
                                 placeholder={t.admin_search_users}
                                 value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 backdrop-blur-md transition-all uppercase tracking-widest"
+                                onChange={(e) => setSearch(e.target.value.toLowerCase())}
+                                autoCapitalize="none"
+                                autoCorrect="off"
+                                spellCheck={false}
+                                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold lowercase text-white placeholder:text-gray-500 placeholder:normal-case focus:outline-none focus:ring-2 focus:ring-yellow-500/50 backdrop-blur-md transition-all"
                             />
                         </div>
                     </div>
@@ -459,7 +490,7 @@ export function CoinManagement() {
                         </div>
                     ) : (
                         <div className="max-h-[400px] overflow-y-auto no-scrollbar divide-y divide-white/5">
-                            {filteredUsers.map(user => (
+                            {users.map(user => (
                                 <button
                                     key={user._id}
                                     onClick={() => setSelectedUser(user)}
@@ -478,11 +509,35 @@ export function CoinManagement() {
                                     </div>
                                 </button>
                             ))}
-                            {filteredUsers.length === 0 && (
+                            {users.length === 0 && (
                                 <div className="p-8 text-center text-[10px] font-bold uppercase tracking-widest text-gray-600">
-                                    {t.admin_no_users_found}
+                                    {searchQuery ? t.admin_no_users_match_search : t.admin_no_users_found}
                                 </div>
                             )}
+                        </div>
+                    )}
+
+                    {pages > 1 && (
+                        <div className="flex items-center justify-between border-t border-white/10 px-4 py-3 bg-white/[0.02]">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">
+                                {t.admin_page} {page} {t.admin_of} {pages} · {totalUsers} {t.users}
+                            </p>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => setPage(page - 1)}
+                                    disabled={page <= 1}
+                                    className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    <ChevronLeft className="w-3.5 h-3.5 text-gray-400" />
+                                </button>
+                                <button
+                                    onClick={() => setPage(page + 1)}
+                                    disabled={page >= pages}
+                                    className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>

@@ -52,6 +52,7 @@ export function PaymentHistory() {
     const [page, setPage] = useState(1);
     const [pages, setPages] = useState(1);
     const [search, setSearch] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [fromDate, setFromDate] = useState("");
     const [toDate, setToDate] = useState("");
@@ -62,21 +63,37 @@ export function PaymentHistory() {
     const [confirmReconcilePaymentId, setConfirmReconcilePaymentId] = useState<string | null>(null);
     const tr = (key: string, fallback: string) => (t as Record<string, string>)[key] || fallback;
 
-    const fetchPayments = useCallback(async (p: number, status?: string, q?: string, from?: string, to?: string) => {
+    const fetchPayments = useCallback(async ({
+        page: nextPage = 1,
+        status = "all",
+        search: query = "",
+        from = "",
+        to = ""
+    }: {
+        page?: number;
+        status?: string;
+        search?: string;
+        from?: string;
+        to?: string;
+    } = {}) => {
         setIsLoading(true);
         try {
-            let url = `/admin/payments?page=${p}&limit=15`;
-            if (status && status !== "all") url += `&status=${status}`;
-            if (q) url += `&search=${encodeURIComponent(q)}`;
-            if (from) url += `&from=${encodeURIComponent(from)}`;
-            if (to) url += `&to=${encodeURIComponent(to)}`;
+            const params = new URLSearchParams({
+                page: String(nextPage),
+                limit: "15"
+            });
 
-            const res = await api.get(url);
-            setPayments(res.data.payments);
-            setTotal(res.data.total);
-            setPages(res.data.pages);
-            setPage(res.data.page);
-            setTotalAmount(res.data.totalAmount);
+            if (status !== "all") params.set("status", status);
+            if (query) params.set("search", query);
+            if (from) params.set("from", from);
+            if (to) params.set("to", to);
+
+            const res = await api.get(`/admin/payments?${params.toString()}`);
+            setPayments(res.data.payments || []);
+            setTotal(res.data.total || 0);
+            setPages(res.data.pages || 1);
+            setPage(res.data.page || 1);
+            setTotalAmount(res.data.totalAmount || 0);
             setFastlipaAmount(res.data.fastlipaAmount || 0);
             setCardAmount(res.data.cardAmount || 0);
         } catch (err) {
@@ -87,8 +104,34 @@ export function PaymentHistory() {
     }, []);
 
     useEffect(() => {
-        fetchPayments(1, statusFilter, search, fromDate, toDate);
-    }, [fetchPayments, statusFilter, search, fromDate, toDate]);
+        const timeoutId = window.setTimeout(() => {
+            const nextQuery = search.trim();
+            setSearchQuery(nextQuery);
+            setPage(1);
+        }, 250);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [search]);
+
+    useEffect(() => {
+        void fetchPayments({
+            page,
+            status: statusFilter,
+            search: searchQuery,
+            from: fromDate,
+            to: toDate
+        });
+    }, [fetchPayments, fromDate, page, searchQuery, statusFilter, toDate]);
+
+    const refetchCurrentPayments = useCallback(async (targetPage = page) => {
+        await fetchPayments({
+            page: targetPage,
+            status: statusFilter,
+            search: searchQuery,
+            from: fromDate,
+            to: toDate
+        });
+    }, [fetchPayments, fromDate, page, searchQuery, statusFilter, toDate]);
 
     useEffect(() => {
         const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -99,27 +142,29 @@ export function PaymentHistory() {
         });
 
         socket.on("admin_payment_deleted", (payload: { paymentId: string }) => {
-            setPayments(prev => prev.filter(p => p._id !== payload.paymentId));
-            setTotal(prev => Math.max(0, prev - 1));
-            fetchPayments(page, statusFilter, search, fromDate, toDate);
+            if (!payload?.paymentId) return;
+            void refetchCurrentPayments();
         });
         socket.on("admin_payment_updated", () => {
-            fetchPayments(page, statusFilter, search, fromDate, toDate);
+            void refetchCurrentPayments();
         });
 
         return () => {
             socket.disconnect();
         };
-    }, [fetchPayments, fromDate, page, search, statusFilter, toDate, token]);
+    }, [refetchCurrentPayments, token]);
 
     const handleDeletePayment = async (paymentId: string) => {
         setDeletingId(paymentId);
         try {
             await api.delete(`/admin/payments/${paymentId}`);
-            setPayments(prev => prev.filter(p => p._id !== paymentId));
-            setTotal(prev => Math.max(0, prev - 1));
             toast.success(t.admin_payment_deleted);
-            fetchPayments(page, statusFilter, search, fromDate, toDate);
+            const targetPage = payments.length === 1 && page > 1 ? page - 1 : page;
+            if (targetPage !== page) {
+                setPage(targetPage);
+            } else {
+                await refetchCurrentPayments(targetPage);
+            }
         } catch (err: any) {
             toast.error(err.response?.data?.error || t.admin_failed_delete_payment);
         } finally {
@@ -142,7 +187,7 @@ export function PaymentHistory() {
                 toast.message(tr("admin_payment_reconcile_pending", "Payment is still pending at provider. Try again shortly."));
             }
 
-            fetchPayments(page, statusFilter, search, fromDate, toDate);
+            await refetchCurrentPayments();
         } catch (err: any) {
             toast.error(err.response?.data?.error || tr("admin_payment_reconcile_error", "Failed to reconcile payment"));
         } finally {
@@ -230,8 +275,11 @@ export function PaymentHistory() {
                             type="text"
                             placeholder={t.admin_search_phone_or_ref}
                             value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 backdrop-blur-md transition-all uppercase tracking-widest"
+                            onChange={(e) => setSearch(e.target.value.toLowerCase())}
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold lowercase text-white placeholder:text-gray-500 placeholder:normal-case focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 backdrop-blur-md transition-all"
                         />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 w-full lg:w-auto">
@@ -390,7 +438,7 @@ export function PaymentHistory() {
                                 {payments.length === 0 && (
                                     <tr>
                                         <td colSpan={9} className="px-5 py-8 text-center text-[10px] font-bold uppercase tracking-widest text-gray-600">
-                                            {search || statusFilter !== "all" ? t.admin_no_payments_match_filters : t.admin_no_payments_found}
+                                            {searchQuery || statusFilter !== "all" || fromDate || toDate ? t.admin_no_payments_match_filters : t.admin_no_payments_found}
                                         </td>
                                     </tr>
                                 )}
@@ -407,14 +455,14 @@ export function PaymentHistory() {
                         </p>
                         <div className="flex items-center gap-1">
                             <button
-                                onClick={() => fetchPayments(page - 1, statusFilter, search)}
+                                onClick={() => setPage(page - 1)}
                                 disabled={page <= 1}
                                 className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                             >
                                 <ChevronLeft className="w-3.5 h-3.5 text-gray-400" />
                             </button>
                             <button
-                                onClick={() => fetchPayments(page + 1, statusFilter, search)}
+                                onClick={() => setPage(page + 1)}
                                 disabled={page >= pages}
                                 className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                             >

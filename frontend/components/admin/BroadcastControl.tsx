@@ -52,7 +52,7 @@ export function BroadcastControl() {
     const fetchSessions = useCallback(async () => {
         setIsLoading(true);
         try {
-            const res = await api.get("/admin/sessions");
+            const res = await api.get("/admin/sessions?all=true");
             const eligible = (res.data.sessions || []).filter((session: BroadcastSession) =>
                 ["active", "paused"].includes(session.status) &&
                 session.expiresAt &&
