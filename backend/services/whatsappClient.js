@@ -14,8 +14,8 @@ import { getSettings } from "../models/SystemSettings.js";
 import { useMongoDBAuthState } from "./mongoAuthState.js";
 import { queueService } from "./queueService.js";
 import { emitToUser, emitUpdate } from "./socketService.js";
-import { loadGroupSettings } from "./groupSettingsService.js";
-import { getGroupParticipantContext } from "../utils/groupUtils.js";
+import { loadGroupSettings, cleanupSessionGroupSettingsCaches } from "./groupSettingsService.js";
+import { getGroupParticipantContext, invalidateGroupMetadataCache } from "../utils/groupUtils.js";
 import {
     DEFAULT_SETTINGS,
     getCachedConfig as getPersistentCachedConfig,
@@ -28,6 +28,8 @@ import {
 // Cache the WhatsApp Web protocol version at module load
 // The version hardcoded in Baileys is outdated and gets rejected with 405
 let cachedWaVersion = null;
+let cachedWaVersionAt = 0;
+const WA_VERSION_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // Refresh every 6 hours
 let cachedWelcomeVideoBuffer = null;
 let cachedLogoBuffer = null;
 let cachedWelcomeVoiceBuffer = null;
@@ -101,14 +103,22 @@ async function getDeploySuccessVoiceBuffer() {
 }
 
 async function getWaVersion() {
-    if (cachedWaVersion) return cachedWaVersion;
+    const now = Date.now();
+    if (cachedWaVersion && (now - cachedWaVersionAt < WA_VERSION_CACHE_TTL_MS)) return cachedWaVersion;
     try {
         const { version } = await fetchLatestWaWebVersion({});
         cachedWaVersion = version;
+        cachedWaVersionAt = now;
         console.log(`[WA Version] Fetched: ${version.join('.')}`);
     } catch (e) {
+        // If we have a previous version, keep using it
+        if (cachedWaVersion) {
+            console.warn(`[WA Version] Refresh failed, keeping current: ${cachedWaVersion.join('.')}`);
+            return cachedWaVersion;
+        }
         console.warn(`[WA Version] Fetch failed, using fallback`);
         cachedWaVersion = [2, 3000, 1034408607]; // Known working version
+        cachedWaVersionAt = now;
     }
     return cachedWaVersion;
 }
@@ -231,7 +241,7 @@ class SessionManager {
         this.RUNTIME_HEALTH_INTERVAL_MS = Number.parseInt(process.env.WA_RUNTIME_HEALTH_INTERVAL_MS || "60000", 10);
         this.RUNTIME_STALE_MS = Number.parseInt(process.env.WA_RUNTIME_STALE_MS || "180000", 10);
         this.SOCKET_CONNECT_GRACE_MS = Number.parseInt(process.env.WA_SOCKET_CONNECT_GRACE_MS || "45000", 10);
-        this.RECONNECT_CONCURRENCY_LIMIT = Number.parseInt(process.env.WA_RECONNECT_CONCURRENCY_LIMIT || "3", 10);
+        this.RECONNECT_CONCURRENCY_LIMIT = Number.parseInt(process.env.WA_RECONNECT_CONCURRENCY_LIMIT || "6", 10);
         this.LOW_PRIORITY_BACKLOG_LIMIT = Number.parseInt(process.env.WA_LOW_PRIORITY_BACKLOG_LIMIT || "25", 10);
         this.LOW_PRIORITY_DEFER_MS = Number.parseInt(process.env.WA_LOW_PRIORITY_DEFER_MS || "150", 10);
         this.HEALTH_SKIP_AFTER_COMMAND_MS = Number.parseInt(process.env.WA_HEALTH_SKIP_AFTER_COMMAND_MS || "60000", 10);
@@ -239,10 +249,11 @@ class SessionManager {
         this.AMBIENT_QUEUE_WARN_DEPTH = Number.parseInt(process.env.WA_AMBIENT_QUEUE_WARN_DEPTH || "8", 10);
         this.GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT = Number.parseInt(process.env.WA_GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT || "12", 10);
         this.GLOBAL_LOW_PRIORITY_QUEUE_LIMIT = Number.parseInt(process.env.WA_GLOBAL_LOW_PRIORITY_QUEUE_LIMIT || "180", 10);
-        this.LOAD_SHED_SESSION_THRESHOLD = Number.parseInt(process.env.WA_LOAD_SHED_SESSION_THRESHOLD || "220", 10);
+        this.LOAD_SHED_SESSION_THRESHOLD = Number.parseInt(process.env.WA_LOAD_SHED_SESSION_THRESHOLD || "450", 10);
         this.LOAD_SHED_LOW_PRIORITY_DEPTH = Number.parseInt(process.env.WA_LOAD_SHED_LOW_PRIORITY_DEPTH || "90", 10);
         this.HEARTBEAT_INTERVAL_MS = Number.parseInt(process.env.WA_HEARTBEAT_INTERVAL_MS || "60000", 10);
         this.HEARTBEAT_JITTER_MS = Number.parseInt(process.env.WA_HEARTBEAT_JITTER_MS || "15000", 10);
+        this.LOGGED_OUT_CONFIRM_WINDOW_MS = Number.parseInt(process.env.WA_LOGGED_OUT_CONFIRM_WINDOW_MS || "180000", 10);
         this.pairingRecoveryAttempts = new Map();
         this.pairingRunTokens = new Map();
         this.cancelledPairingUsers = new Set();
@@ -265,6 +276,7 @@ class SessionManager {
         this.lowPriorityPermitWaiters = [];
         this.lowPriorityPermitsInUse = 0;
         this.globalLowPriorityQueued = 0;
+        this.loggedOutConfirmationState = new Map();
         this.metrics = {
             hotPathMongoReads: 0,
             sessionConfigCacheHits: 0,
@@ -356,6 +368,33 @@ class SessionManager {
         };
         entry.configCacheTime = Date.now();
         return nextSnapshot;
+    }
+
+    _registerLoggedOutConfirmation(sessionId) {
+        const sid = String(sessionId);
+        const now = Date.now();
+        const existing = this.loggedOutConfirmationState.get(sid);
+        if (existing && now - existing.firstSeenAt <= this.LOGGED_OUT_CONFIRM_WINDOW_MS) {
+            const nextState = {
+                firstSeenAt: existing.firstSeenAt,
+                count: existing.count + 1,
+                lastSeenAt: now
+            };
+            this.loggedOutConfirmationState.set(sid, nextState);
+            return nextState;
+        }
+
+        const nextState = {
+            firstSeenAt: now,
+            count: 1,
+            lastSeenAt: now
+        };
+        this.loggedOutConfirmationState.set(sid, nextState);
+        return nextState;
+    }
+
+    _resetLoggedOutConfirmation(sessionId) {
+        this.loggedOutConfirmationState.delete(String(sessionId));
     }
 
     async primeSessionRuntimeFromDocument(session) {
@@ -573,8 +612,7 @@ class SessionManager {
                 entry.processedMessageIds.delete(msgId);
             }
         }
-
-        const maxEntries = 3000;
+        const maxEntries = 1000;
         while (entry.processedMessageIds.size > maxEntries) {
             const oldestKey = entry.processedMessageIds.keys().next().value;
             if (!oldestKey) break;
@@ -738,6 +776,13 @@ class SessionManager {
                 autoReconnectDisabled: { $ne: true }
             }).select("_id status userId autoReconnectDisabled");
 
+            // Batch-fetch auth creds for all candidates in ONE query
+            const candidateIds = runtimeCandidates.map(s => s._id.toString());
+            const authDocs = candidateIds.length > 0
+                ? await WhatsAppAuth.find({ sessionId: { $in: candidateIds }, type: "creds" }).select("sessionId").lean()
+                : [];
+            const sessionsWithAuth = new Set(authDocs.map(d => d.sessionId));
+
             for (const session of runtimeCandidates) {
                 const sessionId = session._id.toString();
                 const existing = this.sessions.get(sessionId);
@@ -747,8 +792,7 @@ class SessionManager {
                 if (existing?.lastCommandSuccessAt && (Date.now() - existing.lastCommandSuccessAt) < this.HEALTH_SKIP_AFTER_COMMAND_MS) {
                     continue;
                 }
-                const hasAuth = await WhatsAppAuth.exists({ sessionId, type: "creds" });
-                if (!hasAuth) {
+                if (!sessionsWithAuth.has(sessionId)) {
                     continue;
                 }
                 const reconnectAttempts = this.reconnectAttempts.get(sessionId) || 0;
@@ -1289,9 +1333,9 @@ class SessionManager {
                 logger: pino({ level: "silent" }),
                 auth: state,
                 version: waVersion,
-                browser: Browsers.ubuntu("Chrome"),
+                browser: Browsers.windows("Desktop"),
                 syncFullHistory: false,
-                defaultQueryTimeoutMs: 180000,
+                defaultQueryTimeoutMs: 60000,
                 keepAliveIntervalMs: 25000,
                 retryRequestDelayMs: 3000,
                 qrTimeout: 60000,
@@ -1378,6 +1422,7 @@ class SessionManager {
                     if (entry) entry.connectionState = "open";
                     this._resetReconnectState(sessionId);
                     this._resetConflictRecovery(sessionId);
+                    this._resetLoggedOutConfirmation(sessionId);
                     try {
                         await saveCreds();
                     } catch (error) {
@@ -1387,9 +1432,10 @@ class SessionManager {
                     // Update DB safely, maintaining paused state if it exists
                     const phone = sock.user?.id?.split(":")[0] || sock.user?.id?.split("@")[0];
                     const liveDbSession = await WhatsAppSession.findById(sessionId);
+                    const sessionUserId = liveDbSession?.userId?.toString?.() || String(liveDbSession?.userId || dbSession.userId || "");
 
                     const dbUpdates = {
-                        phone: phone || dbSession.phone,
+                        phone: phone || (liveDbSession?.phone || dbSession.phone),
                         name: sock.user?.name || "Bot User",
                         lastConnected: new Date(),
                         autoReconnectDisabled: false,
@@ -1409,11 +1455,11 @@ class SessionManager {
                         }
                     );
                     await this.primeSessionRuntimeFromDocument(updatedSession || {
-                        ...dbSession.toObject(),
+                        ...(liveDbSession?.toObject?.() || dbSession.toObject()),
                         ...dbUpdates,
                         status: liveDbSession?.status === "paused" ? "paused" : "active"
                     });
-                    emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
+                    emitToUser(sessionUserId, "session_update", {
                         sessionId,
                         status: updatedSession?.status || (liveDbSession?.status === "paused" ? "paused" : "active"),
                         isLive: true
@@ -1505,45 +1551,82 @@ class SessionManager {
 
                     console.log(`❌ [${sessionId}] Connection closed. Code: ${statusCode}`);
 
+                    // Resolve userId freshly for socket events instead of using stale dbSession closure
+                    const closeDbSession = await WhatsAppSession.findById(sessionId).select("userId");
+                    const closeUserId = closeDbSession?.userId?.toString?.() || String(closeDbSession?.userId || dbSession.userId || "");
+
                     if (isLoggedOut) {
-                        console.log(`🔓 [${sessionId}] Logged out session. Clearing stored auth state.`);
-                        const updatedSession = await WhatsAppSession.findByIdAndUpdate(
-                            sessionId,
-                            {
-                                status: "disconnected",
-                                autoReconnectDisabled: true,
-                                disconnectIntent: "logged_out",
-                                lastDisconnectedAt: new Date()
-                            },
-                            {
-                                returnDocument: "after",
-                                select: "phone name status expiresAt settings userId autoReconnectDisabled disconnectIntent lastDisconnectedAt"
-                            }
-                        );
-                        if (updatedSession) {
-                            await primeSessionCachesFromDocument(updatedSession);
-                        } else {
+                        const runtimeMeta = await this.getSessionRuntimeMeta(sessionId, { forceRefresh: true });
+                        const hasActiveDeployment = !!(runtimeMeta?.expiresAt && new Date(runtimeMeta.expiresAt) > new Date());
+                        const hasSavedCreds = await WhatsAppAuth.exists({ sessionId: String(sessionId), type: "creds" });
+                        const logoutSignal = this._registerLoggedOutConfirmation(sessionId);
+
+                        if (hasActiveDeployment && hasSavedCreds && logoutSignal.count === 1) {
+                            const preservedStatus = runtimeMeta?.status === "paused" ? "paused" : "active";
+                            console.warn(`🛡️ [${sessionId}] First logged-out signal detected for deployed session. Preserving auth and confirming via reconnect before terminal cleanup.`);
                             await mergeCachedRuntimeSnapshot(sessionId, {
-                                status: "disconnected",
-                                isPaused: false,
-                                autoReconnectDisabled: true,
-                                disconnectIntent: "logged_out",
+                                status: preservedStatus,
+                                isPaused: preservedStatus === "paused",
+                                isDeployed: true,
+                                autoReconnectDisabled: false,
+                                disconnectIntent: "none",
                                 lastDisconnectedAt: new Date()
                             });
+                            emitToUser(closeUserId, "session_update", {
+                                sessionId,
+                                status: preservedStatus,
+                                isLive: false,
+                                reconnecting: true
+                            });
+                            emitUpdate("admin_session_updated", {
+                                sessionId,
+                                status: preservedStatus,
+                                isLive: false,
+                                reconnecting: true
+                            });
+                            this.sessions.delete(sessionId);
+                            this._scheduleReconnect(sessionId, { minDelayMs: 15_000 });
+                        } else {
+                            console.log(`🔓 [${sessionId}] Logged out session confirmed. Clearing stored auth state.`);
+                            const updatedSession = await WhatsAppSession.findByIdAndUpdate(
+                                sessionId,
+                                {
+                                    status: "disconnected",
+                                    autoReconnectDisabled: true,
+                                    disconnectIntent: "logged_out",
+                                    lastDisconnectedAt: new Date()
+                                },
+                                {
+                                    returnDocument: "after",
+                                    select: "phone name status expiresAt settings userId autoReconnectDisabled disconnectIntent lastDisconnectedAt"
+                                }
+                            );
+                            if (updatedSession) {
+                                await primeSessionCachesFromDocument(updatedSession);
+                            } else {
+                                await mergeCachedRuntimeSnapshot(sessionId, {
+                                    status: "disconnected",
+                                    isPaused: false,
+                                    autoReconnectDisabled: true,
+                                    disconnectIntent: "logged_out",
+                                    lastDisconnectedAt: new Date()
+                                });
+                            }
+                            await WhatsAppAuth.deleteMany({ sessionId: String(sessionId) });
+                            emitToUser(closeUserId, "session_update", {
+                                sessionId,
+                                status: "disconnected",
+                                isLive: false
+                            });
+                            emitUpdate("admin_session_updated", {
+                                sessionId,
+                                status: "disconnected"
+                            });
+                            this._resetReconnectState(sessionId);
+                            this._resetConflictRecovery(sessionId);
+                            this._resetLoggedOutConfirmation(sessionId);
+                            this.sessions.delete(sessionId);
                         }
-                        await WhatsAppAuth.deleteMany({ sessionId: String(sessionId) });
-                        emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
-                            sessionId,
-                            status: "disconnected",
-                            isLive: false
-                        });
-                        emitUpdate("admin_session_updated", {
-                            sessionId,
-                            status: "disconnected"
-                        });
-                        this._resetReconnectState(sessionId);
-                        this._resetConflictRecovery(sessionId);
-                        this.sessions.delete(sessionId);
                     } else if (isConflict) {
                         const runtimeMeta = await this.getSessionRuntimeMeta(sessionId, { forceRefresh: true });
                         const hasActiveDeployment = !!(runtimeMeta?.expiresAt && new Date(runtimeMeta.expiresAt) > new Date());
@@ -1559,7 +1642,7 @@ class SessionManager {
                                 autoReconnectDisabled: false,
                                 disconnectIntent: "none"
                             });
-                            emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
+                            emitToUser(closeUserId, "session_update", {
                                 sessionId,
                                 status: preservedStatus,
                                 isLive: false,
@@ -1599,7 +1682,7 @@ class SessionManager {
                                     lastDisconnectedAt: new Date()
                                 });
                             }
-                            emitToUser(dbSession.userId?.toString?.() || String(dbSession.userId), "session_update", {
+                            emitToUser(closeUserId, "session_update", {
                                 sessionId,
                                 status: "disconnected",
                                 isLive: false
@@ -1759,7 +1842,7 @@ ${footer}`
                     ];
                     if (validTypes.includes(msgType)) {
                         entry.messageCache.set(m.key.id, m);
-                        if (entry.messageCache.size > 500) {
+                        if (entry.messageCache.size > 200) {
                             const firstKey = entry.messageCache.keys().next().value;
                             entry.messageCache.delete(firstKey);
                         }
@@ -1830,7 +1913,7 @@ ${footer}`
                     let messageAgeMs = 0;
                     if (tsSeconds > 0) {
                         messageAgeMs = Date.now() - (tsSeconds * 1000);
-                        if (messageAgeMs > 5 * 60 * 1000) continue;
+                        if (messageAgeMs > 10 * 60 * 1000) continue;
                     }
 
                     const messageText = extractIncomingCommandText(m.message);
@@ -1901,7 +1984,7 @@ Only the owner can execute commands here.
                         const runtimeMeta = await this.getSessionRuntimeMeta(sessionId);
                         if (!runtimeMeta) {
                             await sock.sendMessage(m.key.remoteJid, {
-                                text: "❌ Session runtime state is unavailable right now. Please try again in a moment."
+                                text: `⚠️ Bot is temporarily loading. Please try *${prefix}${commandName}* again in a few seconds.`
                             }, { quoted: m });
                             continue;
                         }
@@ -1967,6 +2050,12 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
                                 text: `❌ Error executing command: ${err.message}`
                             });
                         }
+                    } else {
+                        // Unknown command — let user know
+                        const footer = await getCommandFooterText();
+                        await sock.sendMessage(m.key.remoteJid, {
+                            text: `❌ Command *${prefix}${commandName}* haipo.\n\n💡 Tumia *${prefix}help* kuona commands zote zinazopatikana.\n\n${footer}`
+                        }, { quoted: m });
                     }
 
                     this.queueAmbientMessageTasks(sessionId, sock, m, config);
@@ -2043,12 +2132,41 @@ ${text}
     }
 
     /**
+     * Purge all cooldown/state Map entries for a session to prevent memory leaks
+     */
+    _cleanupSessionMaps(sessionId) {
+        const sid = String(sessionId);
+        this.cryptoRepairCooldowns.delete(sid);
+        this.cryptoRepairInFlight.delete(sid);
+        this.delayedCommandHealCooldowns.delete(sid);
+        this.delayedCommandHealInFlight.delete(sid);
+        this.conflictRecoveryState.delete(sid);
+        this.loggedOutConfirmationState.delete(sid);
+        this.commandLanes.delete(sid);
+        this.commandLaneDepths.delete(sid);
+        this.lowPriorityLanes.delete(sid);
+        this.lowPriorityLaneDepths.delete(sid);
+        this.pairingRecoveryAttempts.delete(sid);
+        this.pairingRunTokens.delete(sid);
+        // Clean ambient task cooldowns for this session
+        for (const key of this.ambientTaskCooldowns.keys()) {
+            if (key.startsWith(`${sid}:`)) {
+                this.ambientTaskCooldowns.delete(key);
+            }
+        }
+    }
+
+    /**
      * Disconnect a session socket gracefully
      */
     async disconnectSession(sessionId) {
         await mergeCachedRuntimeSnapshot(sessionId, { status: "disconnected", isPaused: false });
+        this._resetLoggedOutConfirmation(sessionId);
         this._resetReconnectState(sessionId);
         this._resetConflictRecovery(sessionId);
+        this._cleanupSessionMaps(sessionId);
+        cleanupSessionGroupSettingsCaches(sessionId);
+        invalidateGroupMetadataCache(sessionId, null);
         const timer = this.communityJoinTimers.get(String(sessionId));
         if (timer) {
             clearTimeout(timer);
@@ -2087,9 +2205,11 @@ ${text}
     async repairCryptoSession(sessionId) {
         const sid = String(sessionId);
         await this.disconnectSession(sid);
+        // Only delete volatile session keys — keep sender-key and sender-key-memory
+        // to avoid WhatsApp treating this as a new device
         const result = await WhatsAppAuth.deleteMany({
             sessionId: sid,
-            type: { $in: ["session", "sender-key-memory", "sender-key"] }
+            type: "session"
         });
         await this.connectSession(sid, { useReconnectPermit: true, reconnectReason: "crypto_repair" });
         return result?.deletedCount || 0;
@@ -2184,13 +2304,27 @@ ${text}
             console.log(`🔄 [Reconnect] Current Time: ${now.toISOString()}`);
             console.log(`🔄 Found ${activeSessions.length} eligible session(s) to reconnect.`);
 
+            // Batch-fetch all user IDs and ban statuses in ONE query
+            const User = (await import("../models/User.js")).default;
+            const userIds = [...new Set(activeSessions.map(s => s.userId).filter(Boolean))];
+            const users = userIds.length > 0
+                ? await User.find({ _id: { $in: userIds } }).select("_id isBanned").lean()
+                : [];
+            const userMap = new Map(users.map(u => [u._id.toString(), u]));
+
+            // Batch-check which sessions have auth creds in ONE query
+            const sessionIds = activeSessions.map(s => s._id.toString());
+            const authDocs = sessionIds.length > 0
+                ? await WhatsAppAuth.find({ sessionId: { $in: sessionIds }, type: "creds" }).select("sessionId").lean()
+                : [];
+            const sessionsWithAuth = new Set(authDocs.map(d => d.sessionId));
+
             for (const session of activeSessions) {
-                // Skip reconnect for banned/deleted users
-                const User = (await import("../models/User.js")).default;
-                const user = await User.findById(session.userId);
+                const sid = session._id.toString();
+                const user = userMap.get(session.userId?.toString());
 
                 if (!user || user.isBanned) {
-                    console.log(`⏭️ [${session._id}] Skipping — user banned or deleted.`);
+                    console.log(`⏭️ [${sid}] Skipping — user banned or deleted.`);
                     session.status = "disconnected";
                     session.autoReconnectDisabled = true;
                     session.disconnectIntent = "banned";
@@ -2202,7 +2336,7 @@ ${text}
 
                 // Check if session deployment has expired
                 if (session.expiresAt && new Date(session.expiresAt) <= new Date()) {
-                    console.log(`⏭️ [${session._id}] Skipping — deployment expired.`);
+                    console.log(`⏭️ [${sid}] Skipping — deployment expired.`);
                     session.status = "expired";
                     session.autoReconnectDisabled = true;
                     session.disconnectIntent = "expired";
@@ -2212,10 +2346,9 @@ ${text}
                     continue;
                 }
 
-                // Check auth directory exists
-                const hasAuth = await WhatsAppAuth.findOne({ sessionId: session._id.toString(), type: "creds" });
-                if (!hasAuth) {
-                    console.log(`⏭️ [${session._id}] Skipping — no Mongo Auth creds found.`);
+                // Check auth directory exists (using batch result)
+                if (!sessionsWithAuth.has(sid)) {
+                    console.log(`⏭️ [${sid}] Skipping — no Mongo Auth creds found.`);
                     session.status = "disconnected";
                     session.autoReconnectDisabled = true;
                     session.disconnectIntent = "logged_out";
@@ -2225,12 +2358,12 @@ ${text}
                     continue;
                 }
 
-                console.log(`🔌 [${session._id}] Reconnecting session for ${session.phone}...`);
+                console.log(`🔌 [${sid}] Reconnecting session for ${session.phone}...`);
                 try {
                     await this.primeSessionRuntimeFromDocument(session);
-                    await this.connectSession(session._id.toString(), { useReconnectPermit: true, reconnectReason: "startup_reconnect" });
+                    await this.connectSession(sid, { useReconnectPermit: true, reconnectReason: "startup_reconnect" });
                 } catch (err) {
-                    console.error(`❌ [${session._id}] Reconnect failed:`, err.message);
+                    console.error(`❌ [${sid}] Reconnect failed:`, err.message);
                 }
 
                 // Stagger reconnections
@@ -2292,7 +2425,7 @@ ${text}
             logger: pino({ level: "silent" }),
             auth: state,
             version: waVersion,
-            browser: Browsers.ubuntu("Chrome"),
+            browser: Browsers.windows("Desktop"),
             printQRInTerminal: false,
             markOnlineOnConnect: false,
             generateHighQualityLinkPreview: false,

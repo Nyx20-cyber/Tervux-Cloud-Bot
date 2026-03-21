@@ -192,6 +192,19 @@ export async function invalidateGroupSettingsCache(sessionId, groupJid) {
     await delKey(key);
 }
 
+/**
+ * Purge ALL group settings cache entries for a session (on session destroy/disconnect).
+ */
+export function cleanupSessionGroupSettingsCaches(sessionId) {
+    if (!sessionId) return;
+    const prefix = `group_settings:${sessionId}:`;
+    for (const key of groupSettingsCache.keys()) {
+        if (key.startsWith(prefix)) {
+            groupSettingsCache.delete(key);
+        }
+    }
+}
+
 export async function primeGroupSettingsCache(sessionId, groupJid, settings) {
     if (!sessionId || !groupJid) return null;
     const key = buildCacheKey(sessionId, groupJid);

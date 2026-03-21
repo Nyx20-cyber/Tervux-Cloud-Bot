@@ -27,6 +27,26 @@ const pendingGroupStats = new Map();
 const pendingGroupStatsTimers = new Map();
 const GROUP_STATS_FLUSH_DELAY_MS = Number(process.env.WA_GROUP_STATS_FLUSH_DELAY_MS || 8000);
 
+// Periodic eviction for module-level Maps to prevent memory leaks at scale
+setInterval(() => {
+    const now = Date.now();
+    // Evict stale spamTracker entries (older than 60s)
+    for (const [key, timestamps] of spamTracker) {
+        const fresh = timestamps.filter(ts => now - ts <= 60_000);
+        if (fresh.length === 0) {
+            spamTracker.delete(key);
+        } else {
+            spamTracker.set(key, fresh);
+        }
+    }
+    // Evict stale admin requirement notice cooldowns (older than 60s)
+    for (const [key, sentAt] of adminRequirementNoticeCooldowns) {
+        if (now - sentAt > 60_000) {
+            adminRequirementNoticeCooldowns.delete(key);
+        }
+    }
+}, 5 * 60 * 1000);
+
 function unwrapGroupMessageContent(message = {}) {
     let content = message;
     for (let i = 0; i < 8; i++) {

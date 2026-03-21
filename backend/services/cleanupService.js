@@ -77,11 +77,11 @@ async function cleanUndeployedSessions() {
         const hasAuth = await WhatsAppAuth.exists({ sessionId, type: "creds" });
 
         try {
-            if (hasAuth && !sessionManager.isConnected(sessionId)) {
-                await sessionManager.connectSession(sessionId);
+            // Only send farewell if session is ALREADY connected — don't reconnect just for this
+            if (sessionManager.isConnected(sessionId)) {
+                await sessionManager.sendUndeployedSessionRemovalMessage(sessionId, { removedAt: new Date() });
+                await new Promise((r) => setTimeout(r, 1200));
             }
-            await sessionManager.sendUndeployedSessionRemovalMessage(sessionId, { removedAt: new Date() });
-            await new Promise((r) => setTimeout(r, 1200));
         } catch (e) {
             console.warn(`   ⚠️ [Undeployed] Failed to send removal notice for ${sessionId}:`, e.message);
         }
@@ -142,6 +142,10 @@ async function healUnresponsiveLiveSessions() {
         const connectedRecently = lastConnectedMs > 0 && (Date.now() - lastConnectedMs) < 2 * 60 * 1000;
         if (connectedRecently) continue;
 
+        // Also skip if session manager already has a reconnect timer scheduled
+        const reconnectTimerExists = sessionManager.reconnectTimers?.has(sid);
+        if (reconnectTimerExists) continue;
+
         const hasAuth = await WhatsAppAuth.exists({ sessionId: sid, type: "creds" });
         if (!hasAuth) continue;
 
@@ -176,13 +180,12 @@ async function cleanExpiredBots() {
         const userId = session.userId?.toString?.() || String(session.userId);
         const hasAuth = await WhatsAppAuth.exists({ sessionId, type: "creds" });
 
-        // Best effort: send final expiry message before session shutdown/deletion.
+        // Best effort: send final expiry message only if session is ALREADY connected.
         try {
-            if (hasAuth && !sessionManager.isConnected(sessionId)) {
-                await sessionManager.connectSession(sessionId);
+            if (sessionManager.isConnected(sessionId)) {
+                await sessionManager.sendDeploymentExpiredMessage(sessionId, { expiredAt: session.expiresAt });
+                await new Promise((r) => setTimeout(r, 1200));
             }
-            await sessionManager.sendDeploymentExpiredMessage(sessionId, { expiredAt: session.expiresAt });
-            await new Promise((r) => setTimeout(r, 1200));
         } catch (e) {
             console.warn(`   ⚠️ [Expired] Failed to send final expiry message for ${sessionId}:`, e.message);
         }
