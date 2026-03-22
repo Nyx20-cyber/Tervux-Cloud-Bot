@@ -202,22 +202,58 @@ function extractIncomingCommandText(message = {}) {
     );
 }
 
+function normalizeIdentityCandidate(value = "") {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const normalized = (raw.includes("@") || raw.includes(":")) ? jidNormalizedUser(raw) : raw;
+    return normalized.split(":")[0].split("@")[0].replace(/\s+/g, "");
+}
+
+function collectIdentityCandidates(...values) {
+    const candidates = new Set();
+    for (const value of values.flat()) {
+        const normalized = normalizeIdentityCandidate(value);
+        if (normalized) {
+            candidates.add(normalized);
+        }
+    }
+    return candidates;
+}
+
+function identitySetsOverlap(left, right) {
+    for (const value of left) {
+        if (right.has(value)) return true;
+    }
+    return false;
+}
+
 function isOwnerCommandMessage(sock, message, config) {
     const senderRaw = message?.key?.participant || message?.participant || message?.key?.remoteJid || "";
     const senderJid = senderRaw ? jidNormalizedUser(senderRaw) : "";
     const botRaw = sock?.user?.id || "";
     const botJid = botRaw ? jidNormalizedUser(botRaw) : "";
+    const botLid = sock?.user?.lid || "";
     const ownerJid = config?.ownerJid ? jidNormalizedUser(config.ownerJid) : "";
-    const ownerNumber = String(config?.ownerNumber || "").replace(/\D/g, "");
-    const senderNumber = senderJid ? senderJid.split("@")[0].split(":")[0] : "";
-    const botNumber = botJid ? botJid.split("@")[0].split(":")[0] : "";
+    const senderCandidates = collectIdentityCandidates(
+        message?.key?.participant,
+        message?.participant,
+        message?.key?.participantPn,
+        message?.participantPn,
+        message?.key?.remoteJid
+    );
+    const ownerCandidates = collectIdentityCandidates(
+        botJid,
+        botLid,
+        ownerJid,
+        config?.ownerNumber,
+        config?.phone
+    );
 
     return Boolean(
         message?.key?.fromMe ||
         (senderJid && botJid && areJidsSameUser(senderJid, botJid)) ||
         (ownerJid && senderJid && areJidsSameUser(senderJid, ownerJid)) ||
-        (ownerNumber && senderNumber === ownerNumber) ||
-        (botNumber && senderNumber === botNumber)
+        identitySetsOverlap(senderCandidates, ownerCandidates)
     );
 }
 // Pre-fetch on module load
