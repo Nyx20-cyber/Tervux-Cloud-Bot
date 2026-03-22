@@ -2580,7 +2580,7 @@ ${text}
                     const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
                     const footerText = await getCommandFooterText();
                     const welcomeMsg = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*🤖 TERVUX CLOUD BOT*
+*🤖 TERVUX CLOUD BOT 🇹🇿 🇰🇪 🇺🇬*
 *✅ YOUR NUMBER HAS BEEN CONNECTED SUCCESSFULLY*
 *🌐 bot.tervux.com*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3079,116 +3079,98 @@ ${footer}`;
         const prefix = config?.prefix || "!";
 
         const swCaption = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*🤖 TERVUX CLOUD BOT*
-*🏆 BOT BORA EAST AFRICA*
-*🇹🇿 🇰🇪 🇺🇬 🇷🇼 🇧🇮 🇸🇸 🇪🇹 🇸🇴*
+*🤖 TERVUX CLOUD BOT 🇹🇿 🇰🇪 🇺🇬*
+*✨ FANYA WHATSAPP YAKO IWE SAFE NA SMART*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-*WEWE NI GROUP OWNER AU ADMIN?*
+👁️ *${prefix}vv*  
+Fungua view once na uione kama meseji ya kawaida.
 
-Linda group lako dhidi ya spam, stickers, voice notes, picha, video, forwarded messages, polls na mass mentions kwa commands mpya za protection 🔥
-
-*ANTI-COMMANDS MPYA ZA KUVUTIA:*
-
-🛡️ *${prefix}antispam on*  
-Zuia message flood na spam za haraka.
+🔗 *${prefix}antilink on*  
+Zuia watu kutuma link kwenye *group* lako tu.
 
 🎭 *${prefix}antisticker kick*  
-Futa sticker na umtoe aliyetuma.
+Zuia sticker za usumbufu kwenye *group* lako tu.
 
 📣 *${prefix}antitagall on*  
-Zuia *@all* na mass mentions zisizo na mpangilio.
+Zuia mass mentions kwenye *group* lako tu.
 
 🎙️ *${prefix}antivoice on*  
-Zuia voice notes kwenye group.
+Zuia voice notes kwenye *group* lako tu.
 
-🖼️ *${prefix}antiimage on*  
-Zuia picha zisizo hitajika.
-
-🎬 *${prefix}antivideo on*  
-Zuia videos za spam.
-
-📄 *${prefix}antidocument on*  
-Zuia documents na files.
-
-↪️ *${prefix}antiforward on*  
-Zuia forwarded messages.
-
-📝 *${prefix}antilongtext on 600*  
-Zuia meseji ndefu kupita kiasi.
-
-📊 *${prefix}antipoll on*  
-Zuia polls zisizohitajika.
-
-✨ Pia bado unapata:
-👁️ *${prefix}vv*  
 🛡️ *${prefix}antidelete on*  
-📵 *${prefix}anticall on*
+Ona meseji zilizofutwa.
 
+📵 *${prefix}anticall on*  
+Zuia calls zisizosumbue.
+
+❤️ *${prefix}autolikestatus on*  
+Like status kiotomatiki.
+
+👀 *${prefix}autoviewstatus on*  
+View status kiotomatiki.
+
+📩 *${prefix}autoread on*  
+Soma meseji kiotomatiki.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *🌐 WEBSITE:*
 https://bot.tervux.com
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1️⃣ Ingia kwenye website
+1️⃣ Fungua website
 
 2️⃣ Tengeneza account
 
 3️⃣ Login
 
-4️⃣ Deploy bot yako
+4️⃣ Link number yako
 
-*ANZA SASA HIVI, LINDA GROUP LAKO KAMA PRO.*
+5️⃣ Deploy bot yako
+
+*ANZA SASA NA UFURAHIE BOT YENYE ULINZI ZAIDI* 💚
 
 ${footer}`;
 
         const enCaption = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*🤖 TERVUX CLOUD BOT*
-*🏆 THE BEST BOT IN EAST AFRICA*
-*🇹🇿 🇰🇪 🇺🇬 🇷🇼 🇧🇮 🇸🇸 🇪🇹 🇸🇴*
+*🤖 TERVUX CLOUD BOT 🇹🇿 🇰🇪 🇺🇬*
+*✨ MAKE YOUR WHATSAPP SAFE AND SMART*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-*ARE YOU A GROUP OWNER OR ADMIN?*
+👁️ *${prefix}vv*  
+Open view once so it appears like a normal message.
 
-Protect your group from spam, stickers, voice notes, images, videos, forwarded messages, polls, and mass mentions with the new protection commands 🔥
-
-*NEW ANTI-COMMANDS GROUP OWNERS WILL LOVE:*
-
-🛡️ *${prefix}antispam on*  
-Stop fast message floods and spam.
+🔗 *${prefix}antilink on*  
+Block people from sending links in your *group* only.
 
 🎭 *${prefix}antisticker kick*  
-Delete stickers and remove the sender.
+Stop annoying stickers in your *group* only.
 
 📣 *${prefix}antitagall on*  
-Block chaotic *@all* and mass mentions.
+Block messy mass mentions in your *group* only.
 
 🎙️ *${prefix}antivoice on*  
-Block voice notes in your group.
+Block unwanted voice notes in your *group* only.
 
-🖼️ *${prefix}antiimage on*  
-Block unwanted images.
-
-🎬 *${prefix}antivideo on*  
-Block spam videos.
-
-📄 *${prefix}antidocument on*  
-Block files and documents.
-
-↪️ *${prefix}antiforward on*  
-Block forwarded messages.
-
-📝 *${prefix}antilongtext on 600*  
-Block very long spam texts.
-
-📊 *${prefix}antipoll on*  
-Block unwanted polls.
-
-✨ You still also get:
-👁️ *${prefix}vv*  
 🛡️ *${prefix}antidelete on*  
-📵 *${prefix}anticall on*
+See deleted messages.
 
+📵 *${prefix}anticall on*  
+Block disturbing calls.
+
+❤️ *${prefix}autolikestatus on*  
+Auto-like statuses.
+
+👀 *${prefix}autoviewstatus on*  
+Auto-view statuses.
+
+📩 *${prefix}autoread on*  
+Auto-read messages.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *🌐 WEBSITE:*
 https://bot.tervux.com
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1️⃣ Open the website
 
@@ -3196,9 +3178,11 @@ https://bot.tervux.com
 
 3️⃣ Log in
 
-4️⃣ Deploy your bot
+4️⃣ Link your number
 
-*START NOW AND PROTECT YOUR GROUP LIKE A PRO.*
+5️⃣ Deploy your bot
+
+*START NOW AND ENJOY A MORE PROTECTED BOT* 💚
 
 ${footer}`;
 
