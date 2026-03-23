@@ -17,7 +17,7 @@ async function processAudio(sock, m, filter) {
     // Check if it's audio
     const isAudio = !!quoted.audioMessage;
     if (!isAudio) {
-        return `⚠️ This command changes the sound of a replied audio or voice note.\n\nReply to an audio or voice note, then use an effect command.\n\n*Example:* ${p}bass`;
+        return `⚠️ This command changes the sound of a replied audio or voice note.\n\nReply to an audio or voice note or any other audio, then use an effect command.\n\n*Example:* ${p}bass`;
     }
 
     try {
