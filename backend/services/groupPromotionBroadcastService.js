@@ -46,46 +46,50 @@ export async function runGroupPromotionBroadcast() {
         let totalFailed = 0;
         let totalGroups = 0;
 
-        for (const s of sessions) {
-            const sid = s._id.toString();
-            try {
-                const claimed = await WhatsAppSession.findOneAndUpdate(
-                    {
-                        _id: s._id,
-                        $or: [
-                            { lastGroupPromotionBroadcastDateKey: { $exists: false } },
-                            { lastGroupPromotionBroadcastDateKey: { $ne: dateKey } }
-                        ]
-                    },
-                    {
-                        $set: {
-                            lastGroupPromotionBroadcastDateKey: dateKey,
-                            lastGroupPromotionBroadcastAt: new Date()
-                        }
-                    },
-                    { new: true }
-                ).select("_id");
+        const CHUNK_SIZE = 10;
+        for (let i = 0; i < sessions.length; i += CHUNK_SIZE) {
+            const chunk = sessions.slice(i, i + CHUNK_SIZE);
+            await Promise.allSettled(chunk.map(async (s) => {
+                const sid = s._id.toString();
+                try {
+                    const claimed = await WhatsAppSession.findOneAndUpdate(
+                        {
+                            _id: s._id,
+                            $or: [
+                                { lastGroupPromotionBroadcastDateKey: { $exists: false } },
+                                { lastGroupPromotionBroadcastDateKey: { $ne: dateKey } }
+                            ]
+                        },
+                        {
+                            $set: {
+                                lastGroupPromotionBroadcastDateKey: dateKey,
+                                lastGroupPromotionBroadcastAt: new Date()
+                            }
+                        },
+                        { returnDocument: "after" }
+                    ).select("_id");
 
-                if (!claimed) {
-                    console.log(`📣 [GroupBroadcast] Skipping ${sid}; already sent for ${dateKey}.`);
-                    continue;
+                    if (!claimed) {
+                        console.log(`📣 [GroupBroadcast] Skipping ${sid}; already sent for ${dateKey}.`);
+                        return;
+                    }
+
+                    if (!sessionManager.isConnected(sid)) {
+                        await sessionManager.connectSession(sid);
+                    }
+
+                    const result = await sessionManager.sendGroupPromotionBroadcast(sid, {
+                        groupDelayMs: 60_000,
+                        ignoreScheduleSetting: true
+                    });
+                    totalSent += Number(result?.sent || 0);
+                    totalFailed += Number(result?.failed || 0);
+                    totalGroups += Number(result?.total || 0);
+                } catch (err) {
+                    totalFailed += 1;
+                    console.warn(`[GroupBroadcast] Session ${sid} failed:`, err.message);
                 }
-
-                if (!sessionManager.isConnected(sid)) {
-                    await sessionManager.connectSession(sid);
-                }
-
-                const result = await sessionManager.sendGroupPromotionBroadcast(sid, {
-                    groupDelayMs: 60_000,
-                    ignoreScheduleSetting: true
-                });
-                totalSent += Number(result?.sent || 0);
-                totalFailed += Number(result?.failed || 0);
-                totalGroups += Number(result?.total || 0);
-            } catch (err) {
-                totalFailed += 1;
-                console.warn(`[GroupBroadcast] Session ${sid} failed:`, err.message);
-            }
+            }));
         }
 
         console.log(

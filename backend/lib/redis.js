@@ -34,7 +34,10 @@ export const initRedis = async () => {
             url: REDIS_URL,
             socket: {
                 connectTimeout: 5000,
-                reconnectStrategy: false
+                reconnectStrategy: (retries) => {
+                    if (retries > 10) return false; // stop after 10 retries
+                    return Math.min(retries * 500, 5000); // exponential backoff, max 5s
+                }
             }
         });
 

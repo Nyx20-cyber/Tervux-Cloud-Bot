@@ -234,10 +234,6 @@ async function start() {
         }, 5 * 60 * 1000);
         // Immediate startup cleanup pass
         await runCleanup();
-        // Keep cron as secondary safety trigger
-        cron.schedule("*/5 * * * *", () => {
-            runCleanup().catch(err => console.error("Cleanup cron error:", err));
-        });
 
         // 8. Weekly Referral King Ceremony — every Sunday at 00:00
         cron.schedule("0 0 * * 0", () => {
@@ -253,10 +249,10 @@ async function start() {
         await runDailySchedulers();
         console.log(`📣 Daily schedulers active (Group: 00:00-00:${GROUP_BROADCAST_WINDOW_END_MINUTE} EAT, Reseller: 08:00-08:${RESELLER_NUDGE_WINDOW_END_MINUTE} EAT, Deploy Reminder: 10:00-10:${DEPLOY_REMINDER_WINDOW_END_MINUTE} EAT, Referral Reminder: 14:00-14:${REFERRAL_REMINDER_WINDOW_END_MINUTE} EAT, Re-engagement: 01/06/11/16/21 within first ${REENGAGEMENT_WINDOW_MINUTES}m, tz=${EAT_TIMEZONE}).`);
 
-        // 7. Check pending payments every 15 seconds for near-instant user feedback
+        // 7. Check pending payments every 30 seconds for near-instant user feedback
         setInterval(() => {
             verifyPendingPayments().catch(err => console.error("Payment verify error:", err));
-        }, 15000);
+        }, 30000);
 
         console.log("✅ All systems operational.");
 

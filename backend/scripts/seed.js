@@ -48,7 +48,7 @@ async function seed() {
             await Plan.findOneAndUpdate(
                 { slug: plan.slug },
                 plan,
-                { upsert: true, new: true }
+                { upsert: true, returnDocument: "after" }
             );
             console.log(`  ✅ Plan: ${plan.name} (${plan.price} TZS / ${plan.coinsAmount} Coins)`);
         }

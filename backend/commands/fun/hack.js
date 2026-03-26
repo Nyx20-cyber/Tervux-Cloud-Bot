@@ -1,3 +1,5 @@
+import { launchBackgroundSequence, sleep } from "./background.js";
+
 const hackSteps = [
     "🔓 Initializing hack sequence...",
     "📡 Connecting to target device...",
@@ -22,16 +24,15 @@ export const hack = async (sock, m, args) => {
 ⏳ Starting hack sequence...`
     });
 
-    // Send animated steps with delays
-    for (const step of hackSteps) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        await sock.sendMessage(chatJid, { text: step });
-    }
+    launchBackgroundSequence(sock, "hack-sequence", async () => {
+        for (const step of hackSteps) {
+            await sleep(1500);
+            await sock.sendMessage(chatJid, { text: step });
+        }
 
-    // Final reveal
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    await sock.sendMessage(chatJid, {
-        text: `╔══════════════════════════════════╗
+        await sleep(2000);
+        await sock.sendMessage(chatJid, {
+            text: `╔══════════════════════════════════╗
 ║   ✅ *ℍ𝔸ℂ𝕂 ℂ𝕆𝕄ℙ𝕃𝔼𝕋𝔼* ✅           ║
 ╚══════════════════════════════════╝
 
@@ -49,8 +50,8 @@ export const hack = async (sock, m, args) => {
 
 😂 _Just kidding! This is a prank!_
 🛡️ _No one was actually hacked._`
+        });
     });
 
-    // Return null since we handled sending manually
     return null;
 };

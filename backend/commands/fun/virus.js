@@ -1,3 +1,5 @@
+import { launchBackgroundSequence, sleep } from "./background.js";
+
 const virusSteps = [
     "⚠️ *SECURITY ALERT* ⚠️",
     "🔴 Malware detected in system...",
@@ -21,15 +23,16 @@ export const virus = async (sock, m, args) => {
 📱 Initializing remote access...`
     });
 
-    for (const step of virusSteps) {
-        await new Promise(resolve => setTimeout(resolve, 1200));
-        await sock.sendMessage(chatJid, { text: step });
-    }
+    launchBackgroundSequence(sock, "virus-sequence", async () => {
+        for (const step of virusSteps) {
+            await sleep(1200);
+            await sock.sendMessage(chatJid, { text: step });
+        }
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
+        await sleep(2000);
 
-    await sock.sendMessage(chatJid, {
-        text: `╔══════════════════════════════════╗
+        await sock.sendMessage(chatJid, {
+            text: `╔══════════════════════════════════╗
 ║  💀 *𝔻𝔼𝕍𝕀ℂ𝔼 ℂ𝕆𝕄ℙℝ𝕆𝕄𝕀𝕊𝔼𝔻* 💀      ║
 ╚══════════════════════════════════╝
 
@@ -58,6 +61,7 @@ _No data was accessed or stolen_ ✅
 ╔══════════════════════════════════╗
 ║    💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏* 💠    ║
 ╚══════════════════════════════════╝`
+        });
     });
 
     return null;

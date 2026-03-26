@@ -41,7 +41,7 @@ export async function updateSessionSettings(sessionId, settings) {
     return WhatsAppSession.findByIdAndUpdate(
         sessionId,
         { $set: updates },
-        { new: true }
+        { returnDocument: "after" }
     );
 }
 

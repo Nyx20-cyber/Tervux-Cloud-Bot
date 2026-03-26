@@ -33,6 +33,7 @@ export function UserManagement() {
     const [page, setPage] = useState(1);
     const [pages, setPages] = useState(1);
     const [search, setSearch] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
     const [isLoading, setIsLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [pendingAction, setPendingAction] = useState<{
@@ -44,10 +45,19 @@ export function UserManagement() {
         isBanned?: boolean;
     } | null>(null);
 
-    const fetchUsers = useCallback(async (p: number) => {
+    const fetchUsers = useCallback(async (p: number, query: string = "") => {
         setIsLoading(true);
         try {
-            const res = await api.get(`/admin/users?page=${p}&limit=10`);
+            const params = new URLSearchParams({
+                page: String(p),
+                limit: "10"
+            });
+
+            if (query) {
+                params.set("search", query);
+            }
+
+            const res = await api.get(`/admin/users?${params.toString()}`);
             setUsers(res.data.users);
             setTotal(res.data.total);
             setPages(res.data.pages);
@@ -58,11 +68,21 @@ export function UserManagement() {
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [t.admin_failed_fetch_users]);
 
     useEffect(() => {
-        fetchUsers(1);
-    }, [fetchUsers]);
+        const timeoutId = window.setTimeout(() => {
+            const nextQuery = search.trim();
+            setSearchQuery(nextQuery);
+            setPage(1);
+        }, 250);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [search]);
+
+    useEffect(() => {
+        fetchUsers(page, searchQuery);
+    }, [fetchUsers, page, searchQuery]);
 
     useEffect(() => {
         const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -77,16 +97,13 @@ export function UserManagement() {
             if (!updatedUser?._id) return;
 
             setUsers(prev => {
-                let found = false;
-                const next = prev.map(u => {
-                    if (u._id === updatedUser._id) {
-                        found = true;
-                        return { ...u, ...updatedUser };
-                    }
-                    return u;
-                });
-                if (!found) fetchUsers(page);
-                return next;
+                const found = prev.some(user => user._id === updatedUser._id);
+                if (!found) {
+                    void fetchUsers(page, searchQuery);
+                    return prev;
+                }
+
+                return prev.map(user => (user._id === updatedUser._id ? { ...user, ...updatedUser } : user));
             });
         });
 
@@ -94,20 +111,13 @@ export function UserManagement() {
             const deletedUserId = payload?.userId;
             if (!deletedUserId) return;
 
-            setUsers(prev => prev.filter(user => user._id !== deletedUserId));
-            setTotal(prev => Math.max(0, prev - 1));
+            void fetchUsers(page, searchQuery);
         });
 
         return () => {
             socket.disconnect();
         };
-    }, [fetchUsers, page, token]);
-
-    const filteredUsers = users.filter(u =>
-        u.email.toLowerCase().includes(search.toLowerCase()) ||
-        u.name.toLowerCase().includes(search.toLowerCase()) ||
-        u.phone.includes(search)
-    );
+    }, [fetchUsers, page, searchQuery, token]);
 
     const handleBan = async (userId: string, isBanned: boolean) => {
         setActionLoading(userId);
@@ -143,7 +153,7 @@ export function UserManagement() {
             toast.success(t.admin_user_deleted);
 
             const targetPage = users.length === 1 && page > 1 ? page - 1 : page;
-            await fetchUsers(targetPage);
+            await fetchUsers(targetPage, searchQuery);
         } catch (err: any) {
             toast.error(err?.response?.data?.error || t.admin_failed_delete_user);
         } finally {
@@ -185,8 +195,11 @@ export function UserManagement() {
                         type="text"
                         placeholder={t.admin_search_users}
                         value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-bold text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 backdrop-blur-md transition-all uppercase tracking-widest"
+                        onChange={(e) => setSearch(e.target.value.toLowerCase())}
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold lowercase text-white placeholder:text-gray-500 placeholder:normal-case focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 backdrop-blur-md transition-all"
                     />
                 </div>
             </div>
@@ -213,7 +226,7 @@ export function UserManagement() {
                             </thead>
                             <tbody className="divide-y divide-white/5">
                                 <AnimatePresence>
-                                    {filteredUsers.map((user) => (
+                                    {users.map((user) => (
                                         <motion.tr
                                             key={user._id}
                                             initial={{ opacity: 0 }}
@@ -301,7 +314,7 @@ export function UserManagement() {
                                         </motion.tr>
                                     ))}
                                 </AnimatePresence>
-                                {filteredUsers.length === 0 && (
+                                {users.length === 0 && (
                                     <tr>
                                         <td colSpan={7} className="px-5 py-8 text-center text-[10px] font-bold uppercase tracking-widest text-gray-600">
                                             {search ? t.admin_no_users_match_search : t.admin_no_users_found}
@@ -321,14 +334,14 @@ export function UserManagement() {
                         </p>
                         <div className="flex items-center gap-1">
                             <button
-                                onClick={() => fetchUsers(page - 1)}
+                                onClick={() => setPage(page - 1)}
                                 disabled={page <= 1}
                                 className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                             >
                                 <ChevronLeft className="w-3.5 h-3.5 text-gray-400" />
                             </button>
                             <button
-                                onClick={() => fetchUsers(page + 1)}
+                                onClick={() => setPage(page + 1)}
                                 disabled={page >= pages}
                                 className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                             >

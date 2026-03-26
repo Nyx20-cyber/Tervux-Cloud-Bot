@@ -7,7 +7,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon --expose-gc server.js",
-    "start": "node --expose-gc --max-old-space-size=460 server.js",
+    "start": "node --expose-gc --max-old-space-size=768 server.js",
     "seed": "node scripts/seed.js",
     "tts:generate": "node scripts/generate-tts-audio.js"
   },

@@ -1,3 +1,5 @@
+import { launchBackgroundSequence, sleep } from "./background.js";
+
 const fakeLocations = [
     "Bathroom, scrolling TikTok 🚽📱",
     "Kitchen, eating leftovers at 3am 🍕",
@@ -58,22 +60,23 @@ export const detective = async (sock, m, args) => {
         "📂 Compiling investigation report..."
     ];
 
-    for (const step of steps) {
-        await new Promise(resolve => setTimeout(resolve, 1200));
-        await sock.sendMessage(chatJid, { text: step });
-    }
+    launchBackgroundSequence(sock, "detective-sequence", async () => {
+        for (const step of steps) {
+            await sleep(1200);
+            await sock.sendMessage(chatJid, { text: step });
+        }
 
-    const location = fakeLocations[Math.floor(Math.random() * fakeLocations.length)];
-    const search = fakeSearches[Math.floor(Math.random() * fakeSearches.length)];
-    const secret = fakeSecrets[Math.floor(Math.random() * fakeSecrets.length)];
-    const iq = Math.floor(Math.random() * 60) + 40;
-    const crush = Math.floor(Math.random() * 100);
-    const chill = Math.floor(Math.random() * 100);
+        const location = fakeLocations[Math.floor(Math.random() * fakeLocations.length)];
+        const search = fakeSearches[Math.floor(Math.random() * fakeSearches.length)];
+        const secret = fakeSecrets[Math.floor(Math.random() * fakeSecrets.length)];
+        const iq = Math.floor(Math.random() * 60) + 40;
+        const crush = Math.floor(Math.random() * 100);
+        const chill = Math.floor(Math.random() * 100);
 
-    await new Promise(resolve => setTimeout(resolve, 1500));
+        await sleep(1500);
 
-    await sock.sendMessage(chatJid, {
-        text: `╔══════════════════════════════════╗
+        await sock.sendMessage(chatJid, {
+            text: `╔══════════════════════════════════╗
 ║  📋 *𝕀ℕ𝕍𝔼𝕊𝕋𝕀𝔾𝔸𝕋𝕀𝕆ℕ ℝ𝔼ℙ𝕆ℝ𝕋* 📋    ║
 ╚══════════════════════════════════╝
 
@@ -103,6 +106,7 @@ ${secret}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 😂 _This is a prank! No actual_
 _investigation was conducted._ 🎭`
+        });
     });
 
     return null;

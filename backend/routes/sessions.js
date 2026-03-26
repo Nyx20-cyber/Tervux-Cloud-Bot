@@ -352,6 +352,9 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
 
         // Set session to active with absolute expiration date
         session.status = "active";
+        session.autoReconnectDisabled = false;
+        session.disconnectIntent = "none";
+        session.lastDisconnectedAt = null;
         session.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
         await session.save();
         await sessionManager.primeSessionRuntimeFromDocument(session);
@@ -454,7 +457,7 @@ router.put("/:id/settings", authenticate, async (req, res) => {
         const session = await WhatsAppSession.findOneAndUpdate(
             { _id: req.params.id, userId: req.user._id },
             { $set: updates },
-            { new: true }
+            { returnDocument: "after" }
         );
 
         if (!session) {
@@ -489,11 +492,13 @@ router.post("/:id/disconnect", authenticate, async (req, res) => {
             return res.status(404).json({ error: "Session not found" });
         }
 
-        await sessionManager.disconnectSession(session._id.toString());
-
         session.status = "disconnected";
+        session.autoReconnectDisabled = true;
+        session.disconnectIntent = "manual";
+        session.lastDisconnectedAt = new Date();
         await session.save();
         await sessionManager.primeSessionRuntimeFromDocument(session);
+        await sessionManager.destroySession(session._id.toString());
 
         emitUpdate("admin_session_updated", {
             sessionId: session._id.toString(),
@@ -568,6 +573,9 @@ router.post("/:id/resume", authenticate, async (req, res) => {
 
         // Subscription checks out, resume
         session.status = "active";
+        session.autoReconnectDisabled = false;
+        session.disconnectIntent = "none";
+        session.lastDisconnectedAt = null;
         await session.save();
         await sessionManager.primeSessionRuntimeFromDocument(session);
 

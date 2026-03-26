@@ -5,12 +5,9 @@ export const save = async (sock, m, args, ctx = {}) => {
     const config = ctx.config || await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     
-    // Safety check: only the owner can use this (or the bot itself)
-    const senderRaw = m.key.participant || m.key.remoteJid || "";
-    const senderJid = senderRaw ? jidNormalizedUser(senderRaw) : "";
     const botJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : "";
-    
-    if (senderJid !== botJid) {
+
+    if (ctx.isOwner !== true) {
         return "🚫 This is a private utility tool for the bot owner only.";
     }
 

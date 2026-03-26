@@ -4,7 +4,7 @@
  *           groupinfo, grouplink, revoke, antilink, setwelcome, setgoodbye
  */
 
-import { isAdmin, isBotAdmin } from "../../utils/groupUtils.js";
+import { isAdmin, isBotAdmin, getGroupMetadata, getGroupParticipantContext } from "../../utils/groupUtils.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { getCachedConfig } from "../../services/configService.js";
 import {
@@ -48,6 +48,24 @@ async function ensureGroupProtectionAccess(sock, remoteJid, sender, featureName,
     }
 
     return null;
+}
+
+async function getCommandConfig(sock, ctx) {
+    return ctx?.config || await getCachedConfig(sock.sessionId);
+}
+
+async function getCommandGroupContext(sock, m, ctx) {
+    if (ctx?.getGroupContext) {
+        const context = await ctx.getGroupContext();
+        if (context) return context;
+    }
+    return getGroupParticipantContext(sock, m.key.remoteJid, m.key.participant || m.key.remoteJid);
+}
+
+async function getCommandGroupMetadata(sock, m, ctx) {
+    const context = await getCommandGroupContext(sock, m, ctx);
+    if (context?.metadata) return context.metadata;
+    return getGroupMetadata(sock, m.key.remoteJid);
 }
 
 async function handleSimpleProtectionToggle({
@@ -101,7 +119,7 @@ async function handleSimpleProtectionToggle({
 /**
  * !hidetag <message> - Tag all members without showing mentions (stealth tag)
  */
-export async function hidetag(sock, m, args) {
+export async function hidetag(sock, m, args, ctx) {
     const remoteJid = m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
@@ -115,7 +133,7 @@ This command only works in groups.`;
     const message = args.join(" ") || "📢 Attention everyone!";
 
     try {
-        const metadata = await sock.groupMetadata(remoteJid);
+        const metadata = await getCommandGroupMetadata(sock, m, ctx);
         const participants = metadata.participants.map(p => p.id);
 
         await sock.sendMessage(remoteJid, {
@@ -132,7 +150,7 @@ This command only works in groups.`;
 /**
  * !tagall - Tag all members with visible list
  */
-export async function tagall(sock, m, args) {
+export async function tagall(sock, m, args, ctx) {
     const remoteJid = m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
@@ -142,7 +160,7 @@ export async function tagall(sock, m, args) {
     const customMessage = args.join(" ") || "";
 
     try {
-        const metadata = await sock.groupMetadata(remoteJid);
+        const metadata = await getCommandGroupMetadata(sock, m, ctx);
         const participants = metadata.participants;
 
         let tagList = `╔══════════════════════════════════╗
@@ -172,14 +190,15 @@ ${customMessage ? `💬 *Message:* ${customMessage}\n\n` : ""}━━━━━━
 /**
  * !kick @user - Remove a member from the group
  */
-export async function kick(sock, m, args) {
+export async function kick(sock, m, args, ctx) {
     const remoteJid = m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
         return `⚠️ This command only works in groups.`;
     }
 
-    if (!await isBotAdmin(sock, remoteJid)) {
+    const groupContext = await getCommandGroupContext(sock, m, ctx);
+    if (!groupContext?.botIsAdmin) {
         return `⚠️ Bot must be an admin to remove members.`;
     }
 
@@ -189,7 +208,7 @@ export async function kick(sock, m, args) {
     const target = mentioned || quoted;
 
     if (!target) {
-        const config = await getCachedConfig(sock.sessionId);
+        const config = await getCommandConfig(sock, ctx);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  🦶 *𝕂𝕀ℂ𝕂 𝕄𝔼𝕄𝔹𝔼ℝ* 🦶  ║
@@ -213,19 +232,20 @@ This command removes a member from the group.
 /**
  * !add <number> - Add a member to the group
  */
-export async function add(sock, m, args) {
+export async function add(sock, m, args, ctx) {
     const remoteJid = m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
         return `⚠️ This command only works in groups.`;
     }
 
-    if (!await isBotAdmin(sock, remoteJid)) {
+    const groupContext = await getCommandGroupContext(sock, m, ctx);
+    if (!groupContext?.botIsAdmin) {
         return `⚠️ Bot must be an admin to add members.`;
     }
 
     if (!args[0]) {
-        const config = await getCachedConfig(sock.sessionId);
+        const config = await getCommandConfig(sock, ctx);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  ➕ *𝔸𝔻𝔻 𝕄𝔼𝕄𝔹𝔼ℝ* ➕  ║
@@ -255,14 +275,15 @@ Include country code without + or spaces.`;
 /**
  * !promote @user - Make someone an admin
  */
-export async function promote(sock, m, args) {
+export async function promote(sock, m, args, ctx) {
     const remoteJid = m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
         return `⚠️ This command only works in groups.`;
     }
 
-    if (!await isBotAdmin(sock, remoteJid)) {
+    const groupContext = await getCommandGroupContext(sock, m, ctx);
+    if (!groupContext?.botIsAdmin) {
         return `⚠️ Bot must be an admin to promote members.`;
     }
 
@@ -271,7 +292,7 @@ export async function promote(sock, m, args) {
     const target = mentioned || quoted;
 
     if (!target) {
-        const config = await getCachedConfig(sock.sessionId);
+        const config = await getCommandConfig(sock, ctx);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  👑 *ℙℝ𝕆𝕄𝕆𝕋𝔼 𝕋𝕆 𝔸𝔻𝕄𝕀ℕ* 👑  ║
@@ -295,14 +316,15 @@ This command gives admin rights to a group member.
 /**
  * !demote @user - Remove admin status
  */
-export async function demote(sock, m, args) {
+export async function demote(sock, m, args, ctx) {
     const remoteJid = m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
         return `⚠️ This command only works in groups.`;
     }
 
-    if (!await isBotAdmin(sock, remoteJid)) {
+    const groupContext = await getCommandGroupContext(sock, m, ctx);
+    if (!groupContext?.botIsAdmin) {
         return `⚠️ Bot must be an admin to demote members.`;
     }
 
@@ -311,7 +333,7 @@ export async function demote(sock, m, args) {
     const target = mentioned || quoted;
 
     if (!target) {
-        const config = await getCachedConfig(sock.sessionId);
+        const config = await getCommandConfig(sock, ctx);
         const p = config.prefix || "!";
         return `╔══════════════════════════════════╗
 ║  📉 *𝔻𝔼𝕄𝕆𝕋𝔼 𝔸𝔻𝕄𝕀ℕ* 📉  ║
@@ -393,7 +415,7 @@ Everyone can now send messages.`;
 /**
  * !groupinfo - Display group information
  */
-export async function groupinfo(sock, m, args) {
+export async function groupinfo(sock, m, args, ctx) {
     const remoteJid = m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
@@ -401,7 +423,7 @@ export async function groupinfo(sock, m, args) {
     }
 
     try {
-        const metadata = await sock.groupMetadata(remoteJid);
+        const metadata = await getCommandGroupMetadata(sock, m, ctx);
         const admins = metadata.participants.filter(p => p.admin);
         const superAdmins = admins.filter(p => p.admin === "superadmin");
         const regularAdmins = admins.filter(p => p.admin === "admin");
@@ -435,14 +457,15 @@ ${metadata.desc || "_No description_"}
 /**
  * !grouplink - Get group invite link
  */
-export async function grouplink(sock, m, args) {
+export async function grouplink(sock, m, args, ctx) {
     const remoteJid = m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
         return `⚠️ This command only works in groups.`;
     }
 
-    if (!await isBotAdmin(sock, remoteJid)) {
+    const groupContext = await getCommandGroupContext(sock, m, ctx);
+    if (!groupContext?.botIsAdmin) {
         return `⚠️ Bot must be an admin to get the invite link.`;
     }
 
@@ -463,14 +486,15 @@ Share this link to invite people!`;
 /**
  * !revoke - Reset/revoke group invite link
  */
-export async function revoke(sock, m, args) {
+export async function revoke(sock, m, args, ctx) {
     const remoteJid = m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
         return `⚠️ This command only works in groups.`;
     }
 
-    if (!await isBotAdmin(sock, remoteJid)) {
+    const groupContext = await getCommandGroupContext(sock, m, ctx);
+    if (!groupContext?.botIsAdmin) {
         return `⚠️ Bot must be an admin to revoke the link.`;
     }
 
@@ -741,13 +765,20 @@ You are member #{count} in {group}!`;
 
     const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     settings.welcome.message = message;
-    settings.welcome.enabled = true;
     await saveGroupSettings(sock.sessionId, remoteJid, settings);
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
 
     return `✅ Welcome message updated!
 
+*Status:* ${settings.welcome.enabled === true ? "✅ Enabled" : "❌ Still disabled"}
+
 *Preview:*
-${message.replace("@user", "@newmember")}`;
+${message.replace("@user", "@newmember")}
+
+${settings.welcome.enabled === true
+            ? ""
+            : `\n💡 Welcome messages are still OFF. Use *${p}welcome on* when you are ready to send them.`}`;
 }
 
 /**
@@ -843,13 +874,20 @@ We'll miss you in {group}!`;
 
     const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     settings.goodbye.message = message;
-    settings.goodbye.enabled = true;
     await saveGroupSettings(sock.sessionId, remoteJid, settings);
+    const config = await getCachedConfig(sock.sessionId);
+    const p = config.prefix || "!";
 
     return `✅ Goodbye message updated!
 
+*Status:* ${settings.goodbye.enabled === true ? "✅ Enabled" : "❌ Still disabled"}
+
 *Preview:*
-${message.replace("@user", "@leavingmember")}`;
+${message.replace("@user", "@leavingmember")}
+
+${settings.goodbye.enabled === true
+            ? ""
+            : `\n💡 Goodbye messages are still OFF. Use *${p}goodbye on* when you are ready to send them.`}`;
 }
 
 /**

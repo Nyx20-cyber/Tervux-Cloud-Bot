@@ -17,6 +17,20 @@ const whatsAppSessionSchema = new mongoose.Schema({
         default: "pairing",
         index: true
     },
+    autoReconnectDisabled: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
+    disconnectIntent: {
+        type: String,
+        enum: ["none", "manual", "logged_out", "expired", "banned"],
+        default: "none"
+    },
+    lastDisconnectedAt: {
+        type: Date,
+        default: null
+    },
     expiresAt: {
         type: Date,
         default: null

@@ -13,6 +13,8 @@ interface AdminStatsProps {
         activeSessions: number;
         liveConnections: number;
         totalRevenue: number;
+        accountBalance?: number | null;
+        accountBalanceLive?: boolean;
         currency: string;
     } | null;
 }
@@ -70,14 +72,14 @@ const getCards = (t: any) => [
         format: (v: number) => v.toLocaleString(),
     },
     {
-        key: "totalRevenue",
-        label: t.total_revenue,
+        key: "accountBalance",
+        label: t.admin_fastlipa_total,
         icon: CreditCard,
         gradient: "from-primary/20 to-primary/5",
         border: "border-primary/30",
         text: "text-primary",
         iconColor: "text-primary",
-        format: (v: number) => `${v.toLocaleString()} TZS`,
+        format: (v: number | null | undefined) => Number.isFinite(Number(v)) ? `${Number(v).toLocaleString()} TZS` : "N/A",
     },
 ];
 
@@ -107,7 +109,7 @@ export function AdminStats({ stats }: AdminStatsProps) {
         >
             {cards.map((card) => {
                 const Icon = card.icon;
-                const value = (stats as any)[card.key] ?? 0;
+                const value = Object.prototype.hasOwnProperty.call(stats, card.key) ? (stats as any)[card.key] : 0;
                 return (
                     <motion.div
                         key={card.key}

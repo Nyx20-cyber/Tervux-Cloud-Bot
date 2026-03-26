@@ -1,28 +1,63 @@
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { existsSync } from "fs";
+import { readFile } from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
 import { getCachedConfig } from "../../services/configService.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const HELP_LOGO_PATH = path.join(__dirname, "../../assets/tervux-logo.png");
+let cachedHelpLogoBuffer = null;
+let warnedMissingHelpLogo = false;
+
+async function getHelpLogoBuffer() {
+  if (cachedHelpLogoBuffer) return cachedHelpLogoBuffer;
+  if (!existsSync(HELP_LOGO_PATH)) {
+    if (!warnedMissingHelpLogo) {
+      console.warn(`[Help] Missing logo file: ${HELP_LOGO_PATH}`);
+      warnedMissingHelpLogo = true;
+    }
+    return null;
+  }
+
+  cachedHelpLogoBuffer = await readFile(HELP_LOGO_PATH);
+  return cachedHelpLogoBuffer;
+}
 
 export const help = async (sock, m, args, ctx = {}) => {
   const config = ctx.config || await getCachedConfig(sock.sessionId);
+  const runtime = ctx.runtime || null;
   const p = config.prefix || "!";
-
-  // Load Logo securely
-  let logoBuffer = null;
-  try {
-    const logoPath = join(process.cwd(), "assets", "tervux-logo.png");
-    if (existsSync(logoPath)) {
-      logoBuffer = readFileSync(logoPath);
-    }
-  } catch (e) {
-    console.error("❌ Failed to load logo for help command:", e.message);
-  }
+  const now = new Date();
+  const currentDate = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Dar_es_Salaam",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  }).format(now);
+  const currentTime = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Dar_es_Salaam",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).format(now);
+  const ownerName = sock?.user?.name || runtime?.name || config.name || "Bot Owner";
+  const ownerNumber = String(runtime?.ownerNumber || config.ownerNumber || config.phone || "").replace(/\D/g, "");
+  const totalCommands = Number(ctx.totalCommands || 0);
+  const botStatus = runtime?.status ? String(runtime.status).toUpperCase() : "ACTIVE";
+  const deploymentState = runtime?.isDeployed === false ? "Not Deployed" : "Deployed";
 
   const caption = `╭───『 🤖 *𝕋𝔼ℝ𝕍𝕌𝕏 ℂ𝕃𝕆𝕌𝔻 𝔹𝕆𝕋* 』───╮
 │
 │ ✨ *Prefix:* ${p}
-│ 📅 *Date:* ${new Date().toLocaleDateString()}
-│ 👑 *Creator:* Nyaganya Malima
-│ 🌐 *Portfolio:* nyaganya.tervux.com
+│ 👑 *Owner:* ${ownerName}
+│ 📱 *Owner Number:* ${ownerNumber ? `+${ownerNumber}` : "Private"}
+│ 📅 *Date:* ${currentDate}
+│ ⏰ *Time:* ${currentTime} EAT
+│ 📦 *Status:* ${botStatus} • ${deploymentState}
+│ 🧠 *Total Commands:* ${totalCommands || "Many"}
+│ 🔐 *Mode:* Private Owner Bot
 ╰──────────────────────────────╯
 
 ╭───『 🎮 *𝔽𝕌ℕ ℤ𝕆ℕ𝔼* 』───╮
@@ -200,8 +235,14 @@ export const help = async (sock, m, args, ctx = {}) => {
 
 `;
 
+  const logoBuffer = await getHelpLogoBuffer();
   if (logoBuffer) {
-    return { image: logoBuffer, caption, linkPreview: null };
+    return {
+      image: logoBuffer,
+      caption,
+      linkPreview: null
+    };
   }
+
   return caption;
 };

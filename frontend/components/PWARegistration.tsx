@@ -29,10 +29,19 @@ function uint8ArraysEqual(a: Uint8Array | null, b: Uint8Array) {
 async function ensureServiceWorkerRegistration() {
   const existingRegistration = await navigator.serviceWorker.getRegistration();
   if (existingRegistration) {
+    await existingRegistration.update().catch(() => {});
+    if (existingRegistration.waiting) {
+      existingRegistration.waiting.postMessage({ type: "SKIP_WAITING" });
+    }
     return existingRegistration;
   }
 
-  const newRegistration = await navigator.serviceWorker.register("/sw.js");
+  const newRegistration = await navigator.serviceWorker.register("/sw.js", {
+    updateViaCache: "none",
+  });
+  if (newRegistration.waiting) {
+    newRegistration.waiting.postMessage({ type: "SKIP_WAITING" });
+  }
   return newRegistration;
 }
 
@@ -105,12 +114,27 @@ export default function PWARegistration() {
 
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      const controllerChangeKey = "tervux-sw-controllerchange-reload";
       const registerSW = () => {
         navigator.serviceWorker
-          .register("/sw.js")
-          .then((reg) => console.log("SW registered:", reg))
+          .register("/sw.js", { updateViaCache: "none" })
+          .then(async (reg) => {
+            await reg.update().catch(() => {});
+            if (reg.waiting) {
+              reg.waiting.postMessage({ type: "SKIP_WAITING" });
+            }
+            console.log("SW registered:", reg);
+          })
           .catch((err) => console.error("SW error:", err));
       };
+
+      const handleControllerChange = () => {
+        if (sessionStorage.getItem(controllerChangeKey) === "1") return;
+        sessionStorage.setItem(controllerChangeKey, "1");
+        window.location.reload();
+      };
+
+      navigator.serviceWorker.addEventListener("controllerchange", handleControllerChange);
 
       if (document.readyState === "complete") {
         registerSW();
@@ -127,6 +151,7 @@ export default function PWARegistration() {
 
       return () => {
         window.removeEventListener("load", registerSW);
+        navigator.serviceWorker.removeEventListener("controllerchange", handleControllerChange);
         window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
       };
     }

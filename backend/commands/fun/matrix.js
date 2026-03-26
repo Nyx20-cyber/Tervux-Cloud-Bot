@@ -1,3 +1,5 @@
+import { launchBackgroundSequence, sleep } from "./background.js";
+
 const matrixChars = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789".split("");
 
 function generateMatrixLine(width = 30) {
@@ -18,36 +20,36 @@ _Entering the Matrix..._
 _Wake up, Neo..._`
     });
 
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    launchBackgroundSequence(sock, "matrix-sequence", async () => {
+        await sleep(1500);
 
-    // Send 4 waves of matrix rain
-    for (let i = 0; i < 4; i++) {
-        const lines = [];
-        for (let j = 0; j < 6; j++) {
-            lines.push(generateMatrixLine(28));
+        for (let i = 0; i < 4; i++) {
+            const lines = [];
+            for (let j = 0; j < 6; j++) {
+                lines.push(generateMatrixLine(28));
+            }
+            await sock.sendMessage(chatJid, {
+                text: `\`\`\`\n${lines.join("\n")}\n\`\`\``
+            });
+            await sleep(800);
         }
+
+        await sleep(1000);
+
+        const secretMessages = [
+            "The Matrix has you...",
+            "Follow the white rabbit 🐇",
+            "There is no spoon 🥄",
+            "Free your mind 🧠",
+            "I know kung fu 🥋",
+            "Red pill or blue pill? 💊",
+            "The One has arrived ⚡"
+        ];
+
+        const msg = secretMessages[Math.floor(Math.random() * secretMessages.length)];
+
         await sock.sendMessage(chatJid, {
-            text: `\`\`\`\n${lines.join("\n")}\n\`\`\``
-        });
-        await new Promise(resolve => setTimeout(resolve, 800));
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    const secretMessages = [
-        "The Matrix has you...",
-        "Follow the white rabbit 🐇",
-        "There is no spoon 🥄",
-        "Free your mind 🧠",
-        "I know kung fu 🥋",
-        "Red pill or blue pill? 💊",
-        "The One has arrived ⚡"
-    ];
-
-    const msg = secretMessages[Math.floor(Math.random() * secretMessages.length)];
-
-    await sock.sendMessage(chatJid, {
-        text: `╔══════════════════════════════════╗
+            text: `╔══════════════════════════════════╗
 ║  🟢 *𝕄𝔸𝕋ℝ𝕀𝕏 𝔻𝔼ℂ𝕆𝔻𝔼𝔻* 🟢           ║
 ╚══════════════════════════════════╝
 
@@ -58,6 +60,7 @@ _Wake up, Neo..._`
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 _You've been unplugged_ 🔌
 _Welcome to the real world_ 🌍`
+        });
     });
 
     return null;
