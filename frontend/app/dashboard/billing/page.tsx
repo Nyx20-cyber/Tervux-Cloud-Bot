@@ -33,6 +33,7 @@ function BillingContent() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
     const [paymentMarket, setPaymentMarket] = useState<"tanzania" | "international">("tanzania");
+    const [minipayInstructions, setMinipayInstructions] = useState<string | null>(null);
     const resumePollRef = useRef<string | null>(null);
     const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -173,7 +174,7 @@ function BillingContent() {
     useEffect(() => {
         const paymentId = searchParams.get("paymentId");
         const provider = searchParams.get("provider");
-        if (!paymentId || (provider !== "bongopay" && provider !== "zenopay") || resumePollRef.current === paymentId) return;
+        if (!paymentId || (provider !== "bongopay" && provider !== "zenopay" && provider !== "minipay") || resumePollRef.current === paymentId) return;
 
         resumePollRef.current = paymentId;
         setIsProcessing(true);
@@ -186,8 +187,9 @@ function BillingContent() {
         const normalizedPhone = rawPhone.replace(/\D/g, "");
 
         if (paymentMarket === "international") {
-            if (!isValidInternationalPhone(rawPhone)) {
-                toast.error(t.billing_card_phone_invalid);
+            // MiniPay: phone is optional for manual flow, but we still validate if provided
+            if (normalizedPhone && normalizedPhone.length < 10) {
+                toast.error(t.enter_valid_phone);
                 return;
             }
         } else if (!normalizedPhone || normalizedPhone.length < 10) {
@@ -198,18 +200,15 @@ function BillingContent() {
         setIsProcessing(true);
         try {
             if (paymentMarket === "international") {
-                const res = await api.post("/subscription/checkout/card", {
+                const res = await api.post("/subscription/checkout/minipay", {
                     planSlug: selectedPlan.slug,
-                    buyerPhone: normalizedPhone
+                    buyerPhone: normalizedPhone || "000000000000"
                 });
 
-                if (res.data?.paymentUrl) {
-                    if (res.data?.paymentId) setActivePaymentId(res.data.paymentId);
-                    toast.success(t.billing_card_redirecting_to_checkout);
-                    window.location.href = res.data.paymentUrl;
-                    return;
-                }
-                throw new Error(t.billing_card_start_failed);
+                if (res.data?.paymentId) setActivePaymentId(res.data.paymentId);
+                setMinipayInstructions(res.data?.instructions || null);
+                toast.success("MiniPay payment created! Follow the instructions below.");
+                setIsProcessing(false);
             } else {
                 const res = await api.post("/subscription/checkout", {
                     planSlug: selectedPlan.slug,
@@ -223,15 +222,13 @@ function BillingContent() {
         } catch (error: any) {
             if (error.response?.status === 409 && error.response?.data?.paymentId) {
                 setActivePaymentId(error.response.data.paymentId);
-                toast.warning(error.response?.data?.error || (paymentMarket === "international" ? t.billing_card_redirecting_to_checkout : t.payment_request_sent));
-                if (paymentMarket === "international" && error.response?.data?.paymentUrl) {
-                    window.location.href = error.response.data.paymentUrl;
-                    return;
+                toast.warning(error.response?.data?.error || t.payment_request_sent);
+                if (paymentMarket !== "international") {
+                    pollPaymentStatus(error.response.data.paymentId);
                 }
-                pollPaymentStatus(error.response.data.paymentId);
                 return;
             }
-            toast.error(error.response?.data?.error || (paymentMarket === "international" ? t.billing_card_start_failed : t.failed_initiate_payment));
+            toast.error(error.response?.data?.error || t.failed_initiate_payment);
             setIsProcessing(false);
         }
     };
@@ -247,6 +244,7 @@ function BillingContent() {
             stopPaymentTracking();
             setIsProcessing(false);
             setActivePaymentId(null);
+            setMinipayInstructions(null);
             setIsCheckoutOpen(false);
             toast.success(t.payment_cancelled_removed);
         } catch (error: any) {
@@ -365,7 +363,7 @@ function BillingContent() {
             </div>
 
             {/* Checkout Dialog */}
-            <Dialog open={isCheckoutOpen} onOpenChange={setIsCheckoutOpen}>
+            <Dialog open={isCheckoutOpen} onOpenChange={(open) => { setIsCheckoutOpen(open); if (!open) setMinipayInstructions(null); }}>
                 <DialogContent className="w-[calc(100vw-1rem)] max-w-lg max-h-[90vh] overflow-y-auto bg-zinc-950 border-white/10 backdrop-blur-2xl rounded-2xl sm:rounded-3xl p-0">
                     <div className="p-6 sm:p-8 bg-gradient-to-b from-white/[0.03] to-transparent">
                     <DialogHeader>
@@ -447,41 +445,55 @@ function BillingContent() {
                                 </div>
                             ) : (
                                 <div className="flex flex-wrap gap-2 mb-2">
-                                    <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-sky-500/10 text-sky-300 border border-sky-500/30 uppercase tracking-[0.1em]">Visa</span>
-                                    <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-sky-500/10 text-sky-300 border border-sky-500/30 uppercase tracking-[0.1em]">Mastercard</span>
+                                    <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 uppercase tracking-[0.1em]">MiniPay</span>
+                                    <span className="px-2 py-0.5 text-[8px] font-black rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 uppercase tracking-[0.1em]">Celo cUSD</span>
                                 </div>
                             )}
-                            <Input
-                                placeholder={paymentMarket === "international" ? t.billing_card_phone_placeholder : t.billing_phone_placeholder}
-                                value={phoneNumber}
-                                inputMode={paymentMarket === "international" ? "numeric" : "tel"}
-                                maxLength={paymentMarket === "international" ? 13 : 10}
-                                onChange={(e) => {
-                                    const nextValue = e.target.value;
-                                    if (paymentMarket === "international") {
-                                        setPhoneNumber(formatInternationalPhoneInput(nextValue));
-                                        return;
-                                    }
-                                    setPhoneNumber(normalizeTanzaniaPhoneInput(nextValue));
-                                }}
-                                className="bg-black/50 border-white/10 text-white placeholder:text-gray-700 focus-visible:ring-primary h-12 sm:h-14 rounded-xl sm:rounded-2xl font-mono text-base sm:text-lg tracking-widest"
-                            />
-                            <p className="text-[9px] font-bold uppercase tracking-widest text-gray-600">
-                                {paymentMarket === "international" ? t.billing_card_secure_checkout : t.billing_secure_checkout}
-                            </p>
-                            {paymentMarket === "international" && (
-                                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-3">
-                                    <p className="text-[10px] font-bold tracking-wider text-amber-100">
-                                        {t.billing_card_tax_notice}
+                            {paymentMarket === "tanzania" && (
+                                <Input
+                                    placeholder={t.billing_phone_placeholder}
+                                    value={phoneNumber}
+                                    inputMode="tel"
+                                    maxLength={10}
+                                    onChange={(e) => {
+                                        setPhoneNumber(normalizeTanzaniaPhoneInput(e.target.value));
+                                    }}
+                                    className="bg-black/50 border-white/10 text-white placeholder:text-gray-700 focus-visible:ring-primary h-12 sm:h-14 rounded-xl sm:rounded-2xl font-mono text-base sm:text-lg tracking-widest"
+                                />
+                            )}
+                            {paymentMarket === "tanzania" && (
+                                <p className="text-[9px] font-bold uppercase tracking-widest text-gray-600">
+                                    {t.billing_secure_checkout}
+                                </p>
+                            )}
+                            {paymentMarket === "international" && !minipayInstructions && (
+                                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 space-y-3">
+                                    <p className="text-[11px] font-bold tracking-wider text-emerald-100">
+                                        📱 Pay using <strong>MiniPay</strong> (Celo stablecoin wallet)
                                     </p>
+                                    <ol className="list-decimal list-inside space-y-1.5 text-[10px] font-bold tracking-wider text-gray-300">
+                                        <li>Click <strong>&quot;Pay with MiniPay&quot;</strong> below</li>
+                                        <li>Open MiniPay app and send the amount to <strong>+255 629 360 383</strong></li>
+                                        <li>Take a <strong>screenshot</strong> of the transaction</li>
+                                        <li>Send screenshot + your <strong>account email</strong> to WhatsApp <strong>+255 629 360 383</strong></li>
+                                        <li>Coins credited within <strong>30 minutes</strong> ✅</li>
+                                    </ol>
+                                </div>
+                            )}
+                            {paymentMarket === "international" && minipayInstructions && (
+                                <div className="rounded-2xl border border-primary/30 bg-primary/10 p-4 space-y-3">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-primary">✅ Payment Created</p>
+                                    <div className="text-[11px] font-bold tracking-wider text-gray-200 whitespace-pre-line leading-relaxed">
+                                        {minipayInstructions}
+                                    </div>
                                 </div>
                             )}
                         </div>
                     </div>
 
                     <div className="sticky bottom-0 z-10 flex flex-col gap-3 border-t border-white/10 bg-zinc-950/95 px-1 pt-4 pb-1 backdrop-blur">
-                        <Button onClick={handleCheckout} disabled={isProcessing} className="w-full h-12 sm:h-14 bg-primary text-black hover:bg-primary/90 font-black uppercase tracking-[0.16em] sm:tracking-[0.2em] text-[10px] sm:text-[11px] rounded-xl sm:rounded-2xl shadow-xl shadow-primary/20">
-                            {isProcessing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {t.processing}</> : (paymentMarket === "international" ? t.billing_continue_to_card : t.pay_now)}
+                        <Button onClick={handleCheckout} disabled={isProcessing || !!minipayInstructions} className="w-full h-12 sm:h-14 bg-primary text-black hover:bg-primary/90 font-black uppercase tracking-[0.16em] sm:tracking-[0.2em] text-[10px] sm:text-[11px] rounded-xl sm:rounded-2xl shadow-xl shadow-primary/20">
+                            {isProcessing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {t.processing}</> : (paymentMarket === "international" ? (minipayInstructions ? "Instructions Sent ✅" : "Pay with MiniPay 💚") : t.pay_now)}
                         </Button>
                         <Button
                             variant="ghost"
