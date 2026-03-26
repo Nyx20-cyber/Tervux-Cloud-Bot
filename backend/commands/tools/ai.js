@@ -3,12 +3,15 @@ import { formatMarkdown } from "../../utils/markdownToWhatsApp.js";
 import { getCachedConfig } from "../../services/configService.js";
 import { AI_API_KEY, AI_API_BASE_URL } from "../../env.js";
 
-const client = new OpenAI({
+const client = AI_API_KEY ? new OpenAI({
     apiKey: AI_API_KEY,
     baseURL: AI_API_BASE_URL
-});
+}) : null;
 
 export const ai = async (sock, m, args) => {
+    if (!client) {
+        return `❌ *AI features are currently unavailable.* The system administrator has not configured the AI API key.`;
+    }
     const config = await getCachedConfig(sock.sessionId);
     const p = config.prefix || "!";
     const chatJid = m.key.remoteJid;
