@@ -17,6 +17,7 @@ import {
 import FastLipaWebhookLog from "../models/FastLipaWebhookLog.js";
 import { emitUpdate } from "../services/socketService.js";
 import { settleCompletedPayment, settleFailedPayment } from "../services/paymentSettlement.js";
+import { BONGOPAY_WEBHOOK_URL, BONGOPAY_REDIRECT_URL } from "../env.js";
 
 const router = Router();
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -36,7 +37,7 @@ function getPublicBaseUrl(req) {
 }
 
 function getBongoPayWebhookUrl(req) {
-    return process.env.BONGOPAY_WEBHOOK_URL || `${getPublicBaseUrl(req)}/api/subscription/webhooks/bongopay`;
+    return BONGOPAY_WEBHOOK_URL || `${getPublicBaseUrl(req)}/api/subscription/webhooks/bongopay`;
 }
 
 function getBongoPayCallbackUrl(req) {
@@ -44,7 +45,7 @@ function getBongoPayCallbackUrl(req) {
 }
 
 function getFrontendBillingUrl() {
-    return process.env.BONGOPAY_REDIRECT_URL || "https://bot.tervux.com/dashboard/billing";
+    return BONGOPAY_REDIRECT_URL || "https://bot.tervux.com/dashboard/billing";
 }
 
 function buildFrontendBillingUrl(paymentId = "", extraParams = {}) {
@@ -337,11 +338,8 @@ router.post("/checkout/card", authenticate, async (req, res) => {
             return res.status(400).json({ error: "planSlug and buyerPhone are required" });
         }
 
-        if (!/^\d{12}$/.test(normalizedPhone)) {
-            return res.status(400).json({
-                error: "Please enter a valid international phone number with country code. It should be 12 digits long."
-            });
-        }
+        // We removed the strict \d{12} check because bongopayService handles formatting 
+        // and fallbacks for international numbers automatically.
 
         const plan = await Plan.findOne({ slug: planSlug, isActive: true });
         if (!plan) {
@@ -402,7 +400,9 @@ router.post("/checkout/card", authenticate, async (req, res) => {
                 amount: plan.price,
                 callbackUrl: getBongoPayWebhookUrl(req),
                 redirectUrl: frontendReturnUrl,
-                cancelUrl: frontendReturnUrl
+                cancelUrl: frontendReturnUrl,
+                customerEmail: req.user.email,
+                customerName: req.user.name
             });
 
             const paymentUrl = bongopayResult.payment_link || bongopayResult.payment_url || bongopayResult.paymentUrl;

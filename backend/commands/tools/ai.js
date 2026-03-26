@@ -1,10 +1,11 @@
 import OpenAI from "openai";
 import { formatMarkdown } from "../../utils/markdownToWhatsApp.js";
 import { getCachedConfig } from "../../services/configService.js";
+import { AI_API_KEY, AI_API_BASE_URL } from "../../env.js";
 
 const client = new OpenAI({
-    apiKey: "4e9fb363e4f2431cab69e20da6ac7047.PVKzsV6Vz9wjDiRZ",
-    baseURL: "https://open.bigmodel.cn/api/paas/v4/"
+    apiKey: AI_API_KEY,
+    baseURL: AI_API_BASE_URL
 });
 
 export const ai = async (sock, m, args) => {

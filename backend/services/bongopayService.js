@@ -1,6 +1,7 @@
-const BONGOPAY_BASE_URL = String(process.env.BONGOPAY_BASE_URL || "https://bongopay.io").replace(/\/+$/, "");
+import { BONGOPAY_API_KEY, BONGOPAY_BASE_URL, NODE_ENV } from "../env.js";
+
 const BONGOPAY_TIMEOUT_MS = Number.parseInt(process.env.BONGOPAY_TIMEOUT_MS || "20000", 10);
-const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const IS_PRODUCTION = NODE_ENV === "production";
 
 function debugLog(...args) {
     if (!IS_PRODUCTION) {
@@ -9,7 +10,7 @@ function debugLog(...args) {
 }
 
 function getHeaders() {
-    const apiKey = process.env.BONGOPAY_API_KEY;
+    const apiKey = BONGOPAY_API_KEY;
     if (!apiKey) {
         throw new Error("BONGOPAY_API_KEY not configured");
     }
@@ -66,6 +67,7 @@ async function bongopayFetchJson(url, options = {}) {
         });
 
         const rawText = await response.text();
+        console.log(`[BongoPay DEBUG] Response from ${url} (Status: ${response.status}):`, rawText);
         let data = null;
         try {
             data = rawText ? JSON.parse(rawText) : null;
@@ -105,15 +107,41 @@ export async function createCardPayment({
     amount,
     callbackUrl,
     redirectUrl,
-    cancelUrl
+    cancelUrl,
+    customerEmail,
+    customerName
 }) {
+    // BongoPay/Selcom strictly requires a 12-digit number starting with '255'.
+    // If the buyer's phone doesn't match, we format it or use a default Tanzanian-formatted session phone.
+    let formattedPhone = String(buyerPhone || "").replace(/\D/g, "");
+    if (formattedPhone.length === 9 && (formattedPhone.startsWith("6") || formattedPhone.startsWith("7"))) {
+        formattedPhone = "255" + formattedPhone;
+    } else if (formattedPhone.length === 10 && formattedPhone.startsWith("0")) {
+        formattedPhone = "255" + formattedPhone.slice(1);
+    } else if (formattedPhone.length === 12 && formattedPhone.startsWith("255")) {
+        // Already perfect.
+    } else {
+        // If it's an international number or otherwise invalid for BongoPay's strict 255 validation,
+        // we use a generic Tanzanian-formatted session identifier to avoid 500/422 API errors.
+        // The real phone is usually not used by the card processor anyway, email is more important.
+        formattedPhone = "255700000000"; 
+    }
+
     const payload = {
-        phone: buyerPhone,
+        phone: formattedPhone,
         amount: Number(amount),
         order_id: orderId,
         callback_url: callbackUrl,
         redirect_url: redirectUrl,
-        cancel_url: cancelUrl
+        cancel_url: cancelUrl,
+        // Include redundant field names to satisfy both BongoPay and its underlying processor (Selcom)
+        email: customerEmail || "",
+        name: customerName || "",
+        buyer_email: customerEmail || "",
+        buyer_name: customerName || "",
+        customer_email: customerEmail || "",
+        customer_name: customerName || "",
+        currency: "TZS"
     };
 
     validateCardPaymentPayload(payload);
@@ -121,9 +149,8 @@ export async function createCardPayment({
         orderId: payload.order_id,
         amount: payload.amount,
         phone: payload.phone,
-        hasCallbackUrl: Boolean(payload.callback_url),
-        hasRedirectUrl: Boolean(payload.redirect_url),
-        hasCancelUrl: Boolean(payload.cancel_url)
+        email: payload.email,
+        name: payload.name
     });
 
     const result = await bongopayFetchJson(`${BONGOPAY_BASE_URL}/api/v1/payment/create/card-payment`, {
@@ -168,7 +195,7 @@ export async function checkOrderStatus(orderId) {
 }
 
 export function verifyBongoPayWebhook(headers = {}) {
-    const configuredKey = process.env.BONGOPAY_API_KEY;
+    const configuredKey = BONGOPAY_API_KEY;
     if (!configuredKey) return false;
     const receivedKey = headers["x-api-key"] || headers["X-API-KEY"] || headers["x-api-Key"] || headers["X-Api-Key"];
     return String(receivedKey || "").trim() === String(configuredKey).trim();

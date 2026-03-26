@@ -61,6 +61,7 @@ import { zodiac } from "./media/zodiac.js";
 import { wallpaper } from "./media/wallpaper.js";
 import { waifu } from "./media/waifu.js";
 import { vv } from "./media/vv.js";
+import { vvp } from "./media/vvp.js";
 import { convert } from "./media/convert.js";
 import {
     avec,
@@ -163,7 +164,8 @@ import {
     resetwarn,
     rejoin,
     groupantidelete,
-    botToggle
+    botToggle,
+    groupstatus
 } from "./group/group.js";
 
 export const commands = {
@@ -232,6 +234,7 @@ export const commands = {
     wallpaper,
     waifu,
     vv,
+    vvp,
     convert,
     avec,
     bass,
@@ -329,5 +332,6 @@ export const commands = {
     resetwarn,
     rejoin,
     groupantidelete,
-    bot: botToggle
+    bot: botToggle,
+    groupstatus
 };

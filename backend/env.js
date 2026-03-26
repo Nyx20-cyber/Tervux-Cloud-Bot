@@ -26,3 +26,13 @@ if (shouldLoadDeployFallback) {
 
 export const NODE_ENV = process.env.NODE_ENV || "development";
 export const PORT = process.env.PORT || 5000;
+
+// AI Configuration
+export const AI_API_KEY = process.env.AI_API_KEY;
+export const AI_API_BASE_URL = process.env.AI_API_BASE_URL || "https://open.bigmodel.cn/api/paas/v4/";
+
+// BongoPay Configuration
+export const BONGOPAY_API_KEY = process.env.BONGOPAY_API_KEY;
+export const BONGOPAY_BASE_URL = process.env.BONGOPAY_BASE_URL || "https://bongopay.io";
+export const BONGOPAY_WEBHOOK_URL = process.env.BONGOPAY_WEBHOOK_URL;
+export const BONGOPAY_REDIRECT_URL = process.env.BONGOPAY_REDIRECT_URL || "https://bot.tervux.com/dashboard/billing";

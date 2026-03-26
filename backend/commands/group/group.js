@@ -5,6 +5,7 @@
  */
 
 import { isAdmin, isBotAdmin } from "../../utils/groupUtils.js";
+import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { getCachedConfig } from "../../services/configService.js";
 import {
     loadGroupSettings,
@@ -1731,4 +1732,99 @@ export async function grouplock(sock, m, args) {
     await saveGroupSettings(sock.sessionId, remoteJid, settings);
 
     return `🔒 *𝔾ℝ𝕆𝕌ℙ 𝕃𝕆ℂ𝕂𝔼𝔻* 🔒\n\nGroup is locked for non-admins for *${durationStr}*.\n\n⏰ Unlocks at: ${until.toLocaleTimeString()}`;
+}
+
+/**
+ * !groupstatus <text> - Post a WhatsApp Status visible to the group members
+ */
+export async function groupstatus(sock, m, args) {
+    const remoteJid = m.key.remoteJid;
+
+    if (!remoteJid.endsWith("@g.us")) {
+        return `⚠️ This command only works in groups.`;
+    }
+
+    const isOwner = m.key.fromMe || m.key.participant === sock.user.id || m.key.remoteJid === sock.user.id;
+    const adminCheck = await isAdmin(sock, remoteJid, m.key.participant || m.key.remoteJid);
+
+    if (!isOwner && !adminCheck) {
+        return `⚠️ Only the bot owner or group admins can use this command.`;
+    }
+
+    const text = args.join(" ");
+    const quotedMessage = m.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+    
+    // Get group members to set visibility
+    let participants = [];
+    try {
+        const metadata = await sock.groupMetadata(remoteJid);
+        participants = metadata.participants.map(p => p.id);
+    } catch (err) {
+        console.error("Group metadata error:", err.message);
+    }
+
+    const statusOptions = {
+        backgroundColor: '#000000', // Default background for text status
+        font: 1 // Default font
+    };
+
+    try {
+        if (quotedMessage) {
+            const type = Object.keys(quotedMessage)[0];
+            const validMediaTypes = ['imageMessage', 'videoMessage'];
+
+            if (validMediaTypes.includes(type)) {
+                const buffer = await downloadMediaMessage(
+                    { message: quotedMessage },
+                    "buffer",
+                    {},
+                    { logger: console, reuploadRequest: sock.updateMediaMessage }
+                );
+
+                if (!buffer) throw new Error("Failed to download media buffer.");
+
+                const mediaMsg = quotedMessage[type];
+                const caption = text || mediaMsg.caption || "";
+
+                if (type === 'imageMessage') {
+                    await sock.sendMessage('status@broadcast', {
+                        image: buffer,
+                        caption
+                    }, { statusJidList: participants });
+                } else if (type === 'videoMessage') {
+                    await sock.sendMessage('status@broadcast', {
+                        video: buffer,
+                        caption
+                    }, { statusJidList: participants });
+                }
+
+                return `✅ *Status Posted!* Media status is now visible to the group members.`;
+            } else if (type === 'conversation' || type === 'extendedTextMessage') {
+                const msgText = quotedMessage.conversation || quotedMessage.extendedTextMessage?.text;
+                const finalText = text ? `${text}\n\n${msgText}` : msgText;
+                
+                await sock.sendMessage('status@broadcast', {
+                    text: finalText,
+                    ...statusOptions
+                }, { statusJidList: participants });
+
+                return `✅ *Status Posted!* Text status is now visible to the group members.`;
+            } else {
+                return `❌ *Error:* Unsupported message type. Reply to text, image, or video.`;
+            }
+        } else if (text) {
+            await sock.sendMessage('status@broadcast', {
+                text: text,
+                ...statusOptions
+            }, { statusJidList: participants });
+
+            return `✅ *Status Posted!* Text status is now visible to the group members.`;
+        } else {
+            const config = await getCachedConfig(sock.sessionId);
+            const p = config.prefix || "!";
+            return `╔══════════════════════════════════╗\n║  📢 *𝔾ℝ𝕆𝕌ℙ 𝕊𝕋𝔸𝕋𝕌𝕊* 📢  ║\n╚══════════════════════════════════╝\n\nPost a WhatsApp Status visible only to group members.\n\n*Usage:*\n${p}groupstatus <text>\n*Alt:* Reply to an image/video with ${p}groupstatus <optional caption>`;
+        }
+    } catch (err) {
+        return `❌ Failed to post status: ${err.message}`;
+    }
 }

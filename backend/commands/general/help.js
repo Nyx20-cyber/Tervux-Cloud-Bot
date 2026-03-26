@@ -98,6 +98,7 @@ export const help = async (sock, m, args, ctx = {}) => {
 │ 🖼️ ➾ *${p}wallpaper* <theme>
 │ 🌸 ➾ *${p}waifu* <category>
 │ 👁️ ➾ *${p}vv* (reply to view once)
+│ 👁️ ➾ *${p}vvp* (reply to view once to private)
 │ 🔄 ➾ *${p}convert* <format>
 ╰──────────────────────────────╯
 
@@ -156,6 +157,7 @@ export const help = async (sock, m, args, ctx = {}) => {
 ╭───『 👥 *𝔾ℝ𝕆𝕌ℙ 𝕄𝔸ℕ𝔸𝔾𝔼𝕄𝔼ℕ𝕋* 』───╮
 │ 📢 ➾ *${p}hidetag* <msg>
 │ 🏷️ ➾ *${p}tagall* <msg>
+│ 📢 ➾ *${p}groupstatus* <msg>
 │ 👑 ➾ *${p}admins*
 │ 📊 ➾ *${p}groupinfo*
 │ 🔗 ➾ *${p}grouplink* / *${p}revoke*
