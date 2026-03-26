@@ -48,6 +48,7 @@ import { unblock } from "./general/unblock.js";
 import { creator } from "./general/creator.js";
 import { quote } from "./general/quote.js";
 import { bible, quran, verse } from "./general/religion.js";
+import { billing } from "./general/billing.js";
 
 // Media Commands
 import { movie } from "./media/movie.js";
@@ -218,6 +219,7 @@ export const commands = {
     unblock,
     creator,
     quote,
+    billing,
     bible,
     quran,
     verse,

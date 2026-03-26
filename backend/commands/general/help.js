@@ -119,6 +119,7 @@ export const help = async (sock, m, args, ctx = {}) => {
 │ ℹ️ ➾ *${p}help*
 │ 💎 ➾ *${p}creator*
 │ 💫 ➾ *${p}quote*
+│ 💳 ➾ *${p}billing* _(payment info)_
 ╰──────────────────────────────╯
 
 ╭───『 🎬 *𝕄𝔼𝔻𝕀𝔸* 』───╮

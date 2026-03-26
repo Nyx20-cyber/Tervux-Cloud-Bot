@@ -17,6 +17,7 @@ import {
 import FastLipaWebhookLog from "../models/FastLipaWebhookLog.js";
 import { emitUpdate } from "../services/socketService.js";
 import { settleCompletedPayment, settleFailedPayment } from "../services/paymentSettlement.js";
+import { getSettings } from "../models/SystemSettings.js";
 import { BONGOPAY_WEBHOOK_URL, BONGOPAY_REDIRECT_URL } from "../env.js";
 
 const router = Router();
@@ -325,11 +326,11 @@ router.post("/checkout", authenticate, async (req, res) => {
 });
 
 /**
- * POST /api/subscription/checkout/card
- * Initiate hosted Visa/Mastercard checkout via BongoPay
+ * POST /api/subscription/checkout/minipay
+ * Provide manual MiniPay payment instructions
  * Body: { planSlug, buyerPhone }
  */
-router.post("/checkout/card", authenticate, async (req, res) => {
+router.post("/checkout/minipay", authenticate, async (req, res) => {
     try {
         const { planSlug, buyerPhone } = req.body;
         const normalizedPhone = normalizeBongoPayPhone(buyerPhone);
@@ -338,42 +339,19 @@ router.post("/checkout/card", authenticate, async (req, res) => {
             return res.status(400).json({ error: "planSlug and buyerPhone are required" });
         }
 
-        // We removed the strict \d{12} check because bongopayService handles formatting 
-        // and fallbacks for international numbers automatically.
-
         const plan = await Plan.findOne({ slug: planSlug, isActive: true });
         if (!plan) {
             return res.status(404).json({ error: "Plan not found" });
         }
-
-        const pendingCutoff = new Date(Date.now() - 15 * 60 * 1000);
-        const existingPending = await Payment.findOne({
-            userId: req.user._id,
-            planId: plan._id,
-            provider: "bongopay",
-            paymentMethod: "card",
-            payerPhone: normalizedPhone,
-            status: "pending",
-            createdAt: { $gt: pendingCutoff }
-        }).sort({ createdAt: -1 });
-
-        const existingPaymentUrl = existingPending?.gatewayResponse?.payment_link || existingPending?.gatewayResponse?.payment_url;
-        if (existingPaymentUrl) {
-            return res.status(409).json({
-                error: "You already have a pending card payment. Complete or wait for it to expire before trying again.",
-                paymentId: existingPending._id,
-                orderId: existingPending._id.toString(),
-                paymentUrl: existingPaymentUrl
-            });
-        }
-
+        
+        // Create local draft first so every checkout attempt has an auditable DB record.
         const payment = await Payment.create({
             userId: req.user._id,
             planId: plan._id,
             amount: plan.price,
-            provider: "bongopay",
-            paymentMethod: "card",
-            currency: "TZS",
+            provider: "minipay",
+            paymentMethod: "manual_minipay",
+            currency: "USD",
             status: "pending",
             payerPhone: normalizedPhone,
             gatewayResponse: {
@@ -386,118 +364,25 @@ router.post("/checkout/card", authenticate, async (req, res) => {
             status: "pending"
         });
 
-        try {
-            const frontendReturnUrl = buildFrontendBillingUrl(payment._id.toString());
-            debugLog("[BongoPay checkout] Creating payment session:", {
-                paymentId: payment._id.toString(),
-                userId: req.user._id.toString(),
-                normalizedPhone,
-                amount: plan.price
-            });
-            const bongopayResult = await createCardPayment({
-                orderId: payment._id.toString(),
-                buyerPhone: normalizedPhone,
-                amount: plan.price,
-                callbackUrl: getBongoPayWebhookUrl(req),
-                redirectUrl: frontendReturnUrl,
-                cancelUrl: frontendReturnUrl,
-                customerEmail: req.user.email,
-                customerName: req.user.name
-            });
+        const settings = await getSettings();
+        const supportPhone = settings.supportPhone || "+255629360383";
 
-            const paymentUrl = bongopayResult.payment_link || bongopayResult.payment_url || bongopayResult.paymentUrl;
-            const txRef = String(bongopayResult.tx_ref || bongopayResult.reference || "").trim();
-            const resultCode = String(bongopayResult.resultcode || "").trim();
-            const resultStatus = String(bongopayResult.result_status || bongopayResult.result || bongopayResult.status || "").toUpperCase();
-            const gatewayMessage = String(bongopayResult.gateway_message || bongopayResult.message || "").trim();
-
-            debugLog("[BongoPay checkout] Gateway response received:", {
-                paymentId: payment._id.toString(),
-                resultcode: resultCode,
-                result: resultStatus,
-                message: gatewayMessage,
-                keys: Object.keys(bongopayResult || {})
-            });
-
-            const isGatewaySuccess = resultCode === "000" || resultStatus === "SUCCESS";
-            if (!isGatewaySuccess) {
-                payment.status = "failed";
-                payment.failureReason = gatewayMessage || `BongoPay returned non-success response (${resultCode || resultStatus || "unknown"}).`;
-                payment.gatewayResponse = bongopayResult;
-                await payment.save();
-                console.error("[BongoPay checkout] Non-success gateway response:", {
-                    paymentId: payment._id.toString(),
-                    resultcode: resultCode,
-                    result: resultStatus,
-                    message: gatewayMessage,
-                    response: bongopayResult
-                });
-                return res.status(502).json({
-                    error: payment.failureReason,
-                    gateway: {
-                        resultcode: resultCode || null,
-                        result: resultStatus || null,
-                        message: gatewayMessage || null
-                    },
-                    paymentId: payment._id
-                });
-            }
-
-            if (!paymentUrl) {
-                payment.status = "failed";
-                payment.failureReason = gatewayMessage || "BongoPay did not return a checkout payment link.";
-                payment.gatewayResponse = bongopayResult;
-                await payment.save();
-                console.error("[BongoPay checkout] Missing payment link in gateway response:", {
-                    paymentId: payment._id.toString(),
-                    keys: Object.keys(bongopayResult || {}),
-                    resultcode: resultCode,
-                    result: resultStatus,
-                    message: gatewayMessage
-                });
-                return res.status(502).json({
-                    error: payment.failureReason,
-                    paymentId: payment._id
-                });
-            }
-
-            if (txRef) {
-                payment.gatewayReference = txRef;
-            }
-            payment.gatewayResponse = bongopayResult;
-            await payment.save();
-
-            res.json({
-                success: true,
-                paymentId: payment._id,
-                txRef,
-                paymentUrl,
-                amount: plan.price,
-                currency: "TZS",
-                plan: plan.name
-            });
-        } catch (gatewayError) {
-            payment.status = "failed";
-            payment.failureReason = gatewayError.message || "Card payment initiation failed";
-            payment.gatewayResponse = {
-                gatewayError: payment.failureReason
-            };
-            await payment.save();
-            emitUpdate("admin_payment_updated", {
-                paymentId: payment._id.toString(),
-                status: "failed"
-            });
-
-            return res.status(502).json({
-                error: payment.failureReason,
-                paymentId: payment._id
-            });
-        }
+        res.json({
+            success: true,
+            paymentId: payment._id,
+            provider: "minipay",
+            amount: plan.price,
+            currency: "USD",
+            instructions: `To pay via MiniPay:\n1. Open MiniPay app.\n2. Send funds to ${supportPhone}.\n3. Take a screenshot of the successful transaction.\n4. Send the screenshot and your email (${req.user.email}) to WhatsApp ${supportPhone}.\n5. We will credit your coins manually within 30 minutes.`,
+            supportPhone: supportPhone,
+            plan: plan.name
+        });
     } catch (error) {
-        console.error("Card checkout error:", error);
-        res.status(500).json({ error: error.message || "Card payment initiation failed" });
+        console.error("MiniPay checkout error:", error);
+        res.status(500).json({ error: error.message || "MiniPay payment initiation failed" });
     }
 });
+
 
 router.get("/bongopay/callback", async (req, res) => {
     const frontendBillingUrl = new URL(getFrontendBillingUrl());
@@ -676,7 +561,9 @@ router.get("/payment-status/:paymentId", authenticate, async (req, res) => {
 
         res.json({
             status: "pending",
-            message: payment.provider === "bongopay"
+            message: payment.provider === "minipay"
+                ? "Your MiniPay payment is awaiting manual verification. Please send your transaction screenshot and account email to WhatsApp +255629360383."
+                : payment.provider === "bongopay"
                 ? (paymentAge > 120000
                     ? "Card payment is still being verified. Keep this page open or check again shortly."
                     : "Waiting for card payment confirmation...")

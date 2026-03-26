@@ -24,13 +24,13 @@ const paymentSchema = new mongoose.Schema({
     },
     provider: {
         type: String,
-        enum: ["fastlipa", "bongopay"],
+        enum: ["fastlipa", "bongopay", "minipay"],
         default: "fastlipa",
         index: true
     },
     paymentMethod: {
         type: String,
-        enum: ["mobile_money_tz", "card"],
+        enum: ["mobile_money_tz", "card", "manual_minipay"],
         default: "mobile_money_tz"
     },
     currency: {
