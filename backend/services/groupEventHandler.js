@@ -82,6 +82,55 @@ function extractGroupMessageText(content = {}) {
     );
 }
 
+function collectMessageLinkSources(content = {}) {
+    const sources = [
+        extractGroupMessageText(content),
+        content?.extendedTextMessage?.canonicalUrl,
+        content?.extendedTextMessage?.matchedText,
+        content?.imageMessage?.canonicalUrl,
+        content?.imageMessage?.matchedText,
+        content?.videoMessage?.canonicalUrl,
+        content?.videoMessage?.matchedText,
+        content?.documentMessage?.canonicalUrl,
+        content?.documentMessage?.matchedText
+    ];
+
+    for (const invitePayload of [content?.groupInviteMessage, content?.groupInviteMessageV2]) {
+        if (!invitePayload) continue;
+
+        const inviteCode = String(invitePayload.inviteCode || "").trim();
+        if (inviteCode) {
+            sources.push(`https://chat.whatsapp.com/${inviteCode}`);
+        }
+
+        sources.push(
+            invitePayload.inviteLink,
+            invitePayload.caption,
+            invitePayload.groupName
+        );
+    }
+
+    return sources
+        .map((value) => String(value || "").trim())
+        .filter(Boolean);
+}
+
+function extractDetectedLinksFromContent(content = {}) {
+    const seen = new Set();
+    const detected = [];
+
+    for (const source of collectMessageLinkSources(content)) {
+        for (const candidate of extractDetectedLinks(source)) {
+            const normalized = sanitizeLinkCandidate(candidate).toLowerCase();
+            if (!normalized || seen.has(normalized)) continue;
+            seen.add(normalized);
+            detected.push(candidate);
+        }
+    }
+
+    return detected;
+}
+
 function extractContextInfo(content = {}) {
     return (
         content?.extendedTextMessage?.contextInfo ||
@@ -639,7 +688,7 @@ export async function handleGroupMessage(sock, m) {
         ? settings.badwords.some((word) => msgText.includes(String(word).toLowerCase()))
         : false;
     const hasGrouplock = fastPathProfile.hasGrouplock === true;
-    const detectedLinks = settings.antilink?.enabled ? extractDetectedLinks(msgTextRaw) : [];
+    const detectedLinks = settings.antilink?.enabled ? extractDetectedLinksFromContent(content) : [];
     const hasUrl = detectedLinks.length > 0;
     const shouldTrackSpam = settings.antispam?.enabled === true;
     const spamTriggered = shouldTrackSpam ? isSpamTriggered(sock.sessionId, remoteJid, sender, settings.antispam) : false;
