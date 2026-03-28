@@ -1,4 +1,5 @@
 import { Router } from "express";
+import mongoose from "../lib/db.js";
 import { authenticate } from "../middleware/auth.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import WhatsAppAuth from "../models/WhatsAppAuth.js";
@@ -16,6 +17,11 @@ import {
     VIP_TOTAL_COINS_SPENT_THRESHOLD,
     VIP_TOTAL_REFERRALS_THRESHOLD
 } from "../services/gamificationService.js";
+import {
+    getDeploymentCost,
+    getDeploymentDurationMs,
+    isValidDeploymentDuration
+} from "../utils/deploymentPricing.js";
 
 const router = Router();
 
@@ -276,127 +282,177 @@ router.get("/pair/latest-qr", authenticate, async (req, res) => {
 
 /**
  * POST /api/sessions/:id/deploy
- * Deploy a bot by spending 50 coins
+ * Deploy a bot using one of the supported duration options
  */
 router.post("/:id/deploy", authenticate, async (req, res) => {
+    const dbSession = await mongoose.startSession();
     try {
-        const session = await WhatsAppSession.findOne({
-            _id: req.params.id,
-            userId: req.user._id
+        const durationDays = Number(req.body?.durationDays);
+        if (!isValidDeploymentDuration(durationDays)) {
+            return res.status(400).json({ error: "Choose a valid deployment duration: 1, 3, or 7 days." });
+        }
+
+        const fail = (statusCode, message) => {
+            const error = new Error(message);
+            error.statusCode = statusCode;
+            throw error;
+        };
+
+        let deploymentResult = null;
+
+        await dbSession.withTransaction(async () => {
+            const waSession = await WhatsAppSession.findOne({
+                _id: req.params.id,
+                userId: req.user._id
+            }).session(dbSession);
+
+            if (!waSession) {
+                fail(404, "Session not found");
+            }
+
+            if (waSession.expiresAt && new Date(waSession.expiresAt) > new Date()) {
+                fail(400, "Session is already deployed and active");
+            }
+
+            const user = await User.findById(req.user._id).session(dbSession);
+            if (!user) {
+                fail(404, "User not found");
+            }
+
+            syncVipFlagOnUser(user);
+
+            const cost = getDeploymentCost(durationDays, user.isVIP);
+            if (!Number.isFinite(cost)) {
+                fail(400, "Invalid deployment pricing option.");
+            }
+
+            if (user.coins < cost) {
+                fail(402, `Insufficient coins. You need ${cost} coins to deploy.`);
+            }
+
+            user.coins -= cost;
+            user.totalDeployments = (user.totalDeployments || 0) + 1;
+            user.totalCoinsSpent = (user.totalCoinsSpent || 0) + cost;
+
+            let earnedBotMaster = false;
+            let earnedVIP = false;
+
+            if (user.totalDeployments >= BOT_MASTER_DEPLOYMENT_THRESHOLD && !user.badges.includes("bot_master")) {
+                user.badges.push("bot_master");
+                user.badges = user.badges.filter((b) => b !== "pioneer");
+                earnedBotMaster = true;
+            }
+
+            if (shouldHaveVip({
+                totalDeployments: user.totalDeployments,
+                totalCoinsSpent: user.totalCoinsSpent,
+                totalReferrals: user.totalReferrals
+            }) && !user.isVIP) {
+                user.isVIP = true;
+                earnedVIP = true;
+            }
+
+            const deployedAt = new Date();
+            const expiresAt = new Date(deployedAt.getTime() + getDeploymentDurationMs(durationDays));
+
+            waSession.status = "active";
+            waSession.autoReconnectDisabled = false;
+            waSession.disconnectIntent = "none";
+            waSession.lastDisconnectedAt = null;
+            waSession.deployedAt = deployedAt;
+            waSession.deploymentDurationDays = durationDays;
+            waSession.deploymentCostCoins = cost;
+            waSession.expiresAt = expiresAt;
+
+            await user.save({ session: dbSession });
+            await waSession.save({ session: dbSession });
+
+            deploymentResult = {
+                sessionId: waSession._id.toString(),
+                sessionPhone: waSession.phone || "your device",
+                sessionStatus: waSession.status,
+                userId: user._id.toString(),
+                coins: user.coins,
+                cost,
+                durationDays,
+                deployedAt,
+                expiresAt,
+                earnedBotMaster,
+                earnedVIP
+            };
         });
 
-        if (!session) {
-            return res.status(404).json({ error: "Session not found" });
+        if (!deploymentResult) {
+            throw new Error("Deployment transaction did not complete.");
         }
 
-        if (session.expiresAt && new Date(session.expiresAt) > new Date()) {
-            return res.status(400).json({ error: "Session is already deployed and active" });
-        }
-
-        const user = await User.findById(req.user._id);
-        if (syncVipFlagOnUser(user)) {
-            await user.save();
-        }
-        const cost = user.isVIP ? 45 : 50;
-
-        if (!user || user.coins < cost) {
-            return res.status(402).json({ error: `Insufficient coins. You need ${cost} coins to deploy.` });
-        }
-
-        // Deduct coins and track gamification
-        user.coins -= cost;
-        user.totalDeployments = (user.totalDeployments || 0) + 1;
-        user.totalCoinsSpent = (user.totalCoinsSpent || 0) + cost;
-
-        let earnedBotMaster = false;
-        let earnedVIP = false;
-
-        if (user.totalDeployments >= BOT_MASTER_DEPLOYMENT_THRESHOLD && !user.badges.includes("bot_master")) {
-            user.badges.push("bot_master");
-            user.badges = user.badges.filter(b => b !== "pioneer");
-            earnedBotMaster = true;
-        }
-
-        if (shouldHaveVip({
-            totalDeployments: user.totalDeployments,
-            totalCoinsSpent: user.totalCoinsSpent,
-            totalReferrals: user.totalReferrals
-        }) && !user.isVIP) {
-            user.isVIP = true;
-            earnedVIP = true;
-        }
-
-        await user.save();
-        emitToUser(user._id, "balance_update", {
-            coins: user.coins,
-            delta: -cost,
+        emitToUser(deploymentResult.userId, "balance_update", {
+            coins: deploymentResult.coins,
+            delta: -deploymentResult.cost,
             reason: "deployment_cost"
         });
 
-        // Notification for coin deduction
         try {
-            let badgeMsg = earnedBotMaster ? "\n\nYou unlocked the 'Bot Master' badge! 🤖" : "";
-            let vipMsg = earnedVIP
+            const badgeMsg = deploymentResult.earnedBotMaster ? "\n\nYou unlocked the 'Bot Master' badge! 🤖" : "";
+            const vipMsg = deploymentResult.earnedVIP
                 ? `\n\n🎉 You have unlocked VIP Status! Earn it with ${VIP_DEPLOYMENT_THRESHOLD} deployments, ${VIP_TOTAL_COINS_SPENT_THRESHOLD} coins spent, or ${VIP_TOTAL_REFERRALS_THRESHOLD} referrals. 💎`
                 : "";
 
             await Notification.create({
-                userId: user._id,
+                userId: deploymentResult.userId,
                 title: "Coins Spent 🪙",
-                message: `Spent ${cost} coins to deploy bot for ${session.phone || "your device"}. Your new balance is ${user.coins} coins.${badgeMsg}${vipMsg}`,
+                message: `Spent ${deploymentResult.cost} coins to deploy bot for ${deploymentResult.sessionPhone} for ${deploymentResult.durationDays} day(s). Your new balance is ${deploymentResult.coins} coins.${badgeMsg}${vipMsg}`,
                 type: "info"
             });
         } catch (err) {
             console.error("Failed to create deployment notification:", err);
         }
 
-        // Set session to active with absolute expiration date
-        session.status = "active";
-        session.autoReconnectDisabled = false;
-        session.disconnectIntent = "none";
-        session.lastDisconnectedAt = null;
-        session.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
-        await session.save();
-        await sessionManager.primeSessionRuntimeFromDocument(session);
-
-        emitUpdate("admin_session_updated", {
-            sessionId: session._id.toString(),
-            status: session.status
-        });
-
-        // Connect session Manager
-        if (!sessionManager.isConnected(session._id.toString())) {
-            sessionManager.connectSession(session._id.toString(), { useReconnectPermit: true, reconnectReason: "deploy" });
+        const savedSession = await WhatsAppSession.findById(deploymentResult.sessionId);
+        if (savedSession) {
+            await sessionManager.primeSessionRuntimeFromDocument(savedSession);
         }
 
-        const deployedSessionId = session._id.toString();
-        const deployedAt = new Date();
-        const deployedUntil = new Date(session.expiresAt);
+        emitUpdate("admin_session_updated", {
+            sessionId: deploymentResult.sessionId,
+            status: deploymentResult.sessionStatus
+        });
+
+        if (!sessionManager.isConnected(deploymentResult.sessionId)) {
+            sessionManager.connectSession(deploymentResult.sessionId, { useReconnectPermit: true, reconnectReason: "deploy" });
+        }
+
+        const deployedSessionId = deploymentResult.sessionId;
         setTimeout(async () => {
             try {
                 if (!sessionManager.isConnected(deployedSessionId)) {
                     await sessionManager.connectSession(deployedSessionId, { useReconnectPermit: true, reconnectReason: "deployment_message" });
                 }
                 await sessionManager.sendDeploymentSuccessMessage(deployedSessionId, {
-                    cost,
-                    startAt: deployedAt,
-                    endAt: deployedUntil
-                });
-                await new Promise((resolve) => setTimeout(resolve, 60_000));
-                await sessionManager.ensureOfficialCommunityMembership(deployedSessionId, {
-                    groupInviteLink: "https://chat.whatsapp.com/CAmxN3oOVxwGmoyYO0NfQv",
-                    channelLink: "https://whatsapp.com/channel/0029Vb6z2Hp7YSczTRHtmr0N",
-                    delayMs: 60_000
+                    cost: deploymentResult.cost,
+                    durationDays: deploymentResult.durationDays,
+                    startAt: deploymentResult.deployedAt,
+                    endAt: deploymentResult.expiresAt
                 });
             } catch (msgErr) {
                 console.warn(`[${deployedSessionId}] Failed to send deployment success DM:`, msgErr.message);
             }
         }, 1500);
 
-        res.json({ success: true, message: "Bot deployed successfully!", coins: user.coins });
+        res.json({
+            success: true,
+            message: "Bot deployed successfully!",
+            coins: deploymentResult.coins,
+            expiresAt: deploymentResult.expiresAt.toISOString(),
+            deploymentDurationDays: deploymentResult.durationDays,
+            deploymentCostCoins: deploymentResult.cost
+        });
     } catch (error) {
         console.error("Deploy bot error:", error);
-        res.status(500).json({ error: "Failed to deploy bot" });
+        const statusCode = Number(error?.statusCode || 500);
+        res.status(statusCode).json({ error: statusCode === 500 ? "Failed to deploy bot" : error.message });
+    } finally {
+        await dbSession.endSession();
     }
 });
 
@@ -440,7 +496,7 @@ router.put("/:id/settings", authenticate, async (req, res) => {
             "prefix", "alwaysOnline", "autoLikeStatus", "autoViewStatus",
             "antiDelete", "antiCall", "antiViewOnce", "antiRemove",
             "autoReadMessages", "alwaysTyping", "alwaysRecording",
-            "groupPromotionBroadcast", "officialGroupJoined", "officialChannelFollowed"
+            "groupPromotionBroadcast"
         ];
 
         const updates = {};

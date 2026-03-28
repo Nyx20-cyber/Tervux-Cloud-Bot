@@ -34,8 +34,7 @@ interface UserRecord {
 
 type PendingCoinAction =
     | { type: "adjust"; userName: string; amount: number; mode: "add" | "remove" }
-    | { type: "bonus"; amount: number; usersCount: number }
-    | { type: "banner"; enabled: boolean };
+    | { type: "bonus"; amount: number; usersCount: number };
 
 export function CoinManagement() {
     const { language } = useLocaleStore();
@@ -62,9 +61,7 @@ export function CoinManagement() {
     const [bonusMessage, setBonusMessage] = useState("");
     const [sendingBonus, setSendingBonus] = useState(false);
     const [bonusResult, setBonusResult] = useState<{ usersRewarded: number; totalCoinsDistributed: number } | null>(null);
-    const [dailyClaimBannerEnabled, setDailyClaimBannerEnabled] = useState(true);
     const [totalCoins, setTotalCoins] = useState(0);
-    const [savingBanner, setSavingBanner] = useState(false);
     const [pendingAction, setPendingAction] = useState<PendingCoinAction | null>(null);
 
     const fetchUsers = useCallback(async ({
@@ -145,19 +142,6 @@ export function CoinManagement() {
     }, [fetchUsers, page, searchQuery]);
 
     useEffect(() => {
-        const fetchBannerSettings = async () => {
-            try {
-                const res = await api.get("/admin/settings");
-                setDailyClaimBannerEnabled(res.data?.settings?.dailyClaimBannerEnabled !== false);
-            } catch (error) {
-                console.error("Failed to fetch coin banner settings:", error);
-            }
-        };
-
-        fetchBannerSettings();
-    }, []);
-
-    useEffect(() => {
         if (!token) return;
 
         const backendUrl = process.env.NEXT_PUBLIC_SOCKET_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
@@ -167,27 +151,10 @@ export function CoinManagement() {
             auth: { token }
         });
 
-        socket.on("admin_settings_updated", (payload: { settings?: any }) => {
-            if (!payload?.settings) return;
-            setDailyClaimBannerEnabled(payload.settings.dailyClaimBannerEnabled !== false);
-        });
-
         return () => {
             socket.disconnect();
         };
     }, [token]);
-
-    const saveDailyClaimBannerSettings = async () => {
-        setSavingBanner(true);
-        try {
-            await api.put("/admin/settings", { dailyClaimBannerEnabled });
-            toast.success(t.admin_banner_settings_saved);
-        } catch (error: any) {
-            toast.error(error?.response?.data?.error || t.admin_failed_save_banner_settings);
-        } finally {
-            setSavingBanner(false);
-        }
-    };
 
     const handleSubmit = async () => {
         if (!selectedUser || amount <= 0) {
@@ -267,13 +234,6 @@ export function CoinManagement() {
         }
     };
 
-    const openDailyClaimBannerConfirm = () => {
-        setPendingAction({
-            type: "banner",
-            enabled: dailyClaimBannerEnabled
-        });
-    };
-
     const runPendingAction = async () => {
         if (!pendingAction) return;
 
@@ -285,10 +245,6 @@ export function CoinManagement() {
             await performBonusAll();
         }
 
-        if (pendingAction.type === "banner") {
-            await saveDailyClaimBannerSettings();
-        }
-
         setPendingAction(null);
     };
 
@@ -296,12 +252,6 @@ export function CoinManagement() {
         ? language === "sw"
             ? `${pendingAction.mode === "add" ? t.admin_add : t.admin_remove} ${pendingAction.amount} ${t.coins_word} ${pendingAction.mode === "add" ? "kwa" : "kutoka kwa"} ${pendingAction.userName}?`
             : `${pendingAction.mode === "add" ? t.admin_add : t.admin_remove} ${pendingAction.amount} ${t.coins_word} ${pendingAction.mode === "add" ? "for" : "from"} ${pendingAction.userName}?`
-        : "";
-
-    const bannerActionDescription = pendingAction?.type === "banner"
-        ? language === "sw"
-            ? `${pendingAction.enabled ? "Onesha" : "Ficha"} ${t.admin_daily_claim_banner.toLowerCase()} kwenye dashboard sasa?`
-            : `${pendingAction.enabled ? "Show" : "Hide"} ${t.admin_daily_claim_banner.toLowerCase()} on the dashboard now?`
         : "";
 
     return (
@@ -421,45 +371,6 @@ export function CoinManagement() {
                     <span className="text-[10px] font-black uppercase tracking-widest text-yellow-500">
                         {totalCoins.toLocaleString()} {t.admin_total_coins_in_circulation}
                     </span>
-                </div>
-            </div>
-
-            <div className="rounded-xl sm:rounded-2xl border border-yellow-500/20 bg-yellow-500/5 p-4 sm:p-5 backdrop-blur-xl">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                        <div className="inline-flex items-center gap-2 rounded-full border border-yellow-500/20 bg-yellow-500/10 px-3 py-1 text-[9px] font-black uppercase tracking-widest text-yellow-400">
-                            <Coins className="h-3.5 w-3.5" />
-                            {t.admin_daily_claim_banner}
-                        </div>
-                        <p className="mt-2 text-sm font-semibold text-white">{t.admin_daily_claim_banner_desc}</p>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                        <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-4 py-3 min-w-[220px]">
-                            <div>
-                                <p className="text-[10px] font-black uppercase tracking-widest text-white">{t.admin_daily_claim_banner}</p>
-                                <p className="mt-1 text-[10px] font-semibold text-gray-400">
-                                    {dailyClaimBannerEnabled ? t.admin_active : t.admin_hidden}
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setDailyClaimBannerEnabled((prev) => !prev)}
-                                className={`w-10 h-5 rounded-full transition-all relative ${dailyClaimBannerEnabled ? "bg-emerald-500/40" : "bg-white/10"}`}
-                            >
-                                <div className={`absolute top-1 w-3 h-3 rounded-full transition-all ${dailyClaimBannerEnabled ? "right-1 bg-emerald-400" : "left-1 bg-gray-500"}`} />
-                            </button>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={openDailyClaimBannerConfirm}
-                            disabled={savingBanner}
-                            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-black text-[10px] uppercase tracking-widest transition-all disabled:opacity-50"
-                        >
-                            {savingBanner ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coins className="h-4 w-4" />}
-                            {t.admin_save_banner_settings}
-                        </button>
-                    </div>
                 </div>
             </div>
 
@@ -655,9 +566,7 @@ export function CoinManagement() {
                     ? "border-red-500/20 bg-[#12090a]"
                     : pendingAction?.type === "adjust"
                         ? "border-emerald-500/20 bg-[#09120d]"
-                        : pendingAction?.type === "bonus"
-                            ? "border-emerald-500/20 bg-[#09120d]"
-                            : "border-amber-500/20 bg-[#120f09]"
+                        : "border-emerald-500/20 bg-[#09120d]"
             }`}>
                 <AlertDialogHeader>
                     <AlertDialogMedia className={
@@ -665,9 +574,7 @@ export function CoinManagement() {
                             ? "bg-red-500/15 text-red-300 border border-red-500/20"
                             : pendingAction?.type === "adjust"
                                 ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"
-                                : pendingAction?.type === "bonus"
-                                    ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"
-                                    : "bg-amber-500/15 text-amber-300 border border-amber-500/20"
+                                : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/20"
                     }>
                         <Coins className="w-8 h-8" />
                     </AlertDialogMedia>
@@ -676,14 +583,14 @@ export function CoinManagement() {
                             ? `${pendingAction.mode === "add" ? t.admin_add : t.admin_remove} ${t.coins_word}`
                             : pendingAction?.type === "bonus"
                                 ? t.admin_give_bonus_all
-                                : t.admin_save_banner_settings}
+                                : ""}
                     </AlertDialogTitle>
                     <AlertDialogDescription className="text-sm text-gray-300 leading-relaxed">
                         {pendingAction?.type === "adjust"
                             ? adjustActionDescription
                             : pendingAction?.type === "bonus"
                                 ? `${t.admin_confirm_give_bonus_prefix} +${pendingAction.amount} ${t.coins_word} ${t.admin_confirm_give_bonus_suffix}`
-                                : bannerActionDescription}
+                                : ""}
                     </AlertDialogDescription>
                     {pendingAction?.type === "bonus" && (
                         <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left">
@@ -705,9 +612,7 @@ export function CoinManagement() {
                                 ? "bg-red-500/20 border border-red-500/30 text-red-300 hover:bg-red-500/30 hover:text-white"
                                 : pendingAction?.type === "adjust"
                                     ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 hover:text-white"
-                                    : pendingAction?.type === "bonus"
-                                        ? "bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 hover:text-white"
-                                        : "bg-amber-500/20 border border-amber-500/30 text-amber-300 hover:bg-amber-500/30 hover:text-white"
+                                    : "bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30 hover:text-white"
                         }`}
                     >
                         {t.confirm}

@@ -18,9 +18,24 @@ const paymentSchema = new mongoose.Schema({
         ref: "Plan",
         required: true
     },
+    planName: {
+        type: String,
+        default: null
+    },
+    planSlug: {
+        type: String,
+        lowercase: true,
+        default: null
+    },
+    planCoinsAmount: {
+        type: Number,
+        min: 1,
+        default: null
+    },
     amount: {
         type: Number,
-        required: true
+        required: true,
+        min: 1
     },
     provider: {
         type: String,

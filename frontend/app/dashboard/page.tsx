@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Activity, ShieldCheck, RefreshCcw, Network, Coins, Rocket, Megaphone, Info, AlertTriangle, Wrench, Sparkles, Tag, GraduationCap, PlayCircle, ExternalLink, CheckCircle2 } from "lucide-react";
+import { Activity, ShieldCheck, RefreshCcw, Network, Coins, Rocket, Megaphone, Info, AlertTriangle, Wrench, Sparkles, Tag, GraduationCap, PlayCircle, ExternalLink, CheckCircle2, Users, Radio } from "lucide-react";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { io } from "socket.io-client";
@@ -12,9 +12,9 @@ import { api } from "@/store/useAuthStore";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
-import { DailyCheckIn } from "@/components/dashboard/DailyCheckIn";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 import { Loader2, TrendingUp, CreditCard, UserPlus, Bell, Settings, ArrowUpRight, History } from "lucide-react";
+import { FaWhatsapp } from "react-icons/fa";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useOnboardingUIStore } from "@/store/useOnboardingUIStore";
@@ -43,6 +43,11 @@ interface TutorialRecord {
     youtubeVideoId: string;
 }
 
+const OFFICIAL_GROUP_LINK =
+    process.env.NEXT_PUBLIC_OFFICIAL_GROUP_INVITE_LINK || "https://chat.whatsapp.com/CAmxN3oOVxwGmoyYO0NfQv";
+const OFFICIAL_CHANNEL_LINK =
+    process.env.NEXT_PUBLIC_OFFICIAL_CHANNEL_LINK || "https://whatsapp.com/channel/0029Vb6z2Hp7YSczTRHtmr0N";
+
 export default function DashboardPage() {
     const { sessions, isLoading, fetchSessions, updateSessionLocally } = useSessionStore();
     const { user, token, authReady, isAuthenticated, setUser } = useAuthStore();
@@ -67,7 +72,6 @@ export default function DashboardPage() {
     const [hasEvaluatedTutorialPrompt, setHasEvaluatedTutorialPrompt] = useState(false);
     const [hasLoadedTutorials, setHasLoadedTutorials] = useState(false);
     const [tutorialBannerEnabled, setTutorialBannerEnabled] = useState(true);
-    const [dailyClaimBannerEnabled, setDailyClaimBannerEnabled] = useState(true);
     const [tutorialBannerTutorialId, setTutorialBannerTutorialId] = useState<string | null>(null);
     const isMaintenanceError = (err: any) => err?.response?.status === 503 && err?.response?.data?.maintenance;
     const tutorialPromptCopy = language === "sw"
@@ -158,7 +162,6 @@ export default function DashboardPage() {
             try {
                 const res = await api.get("/config");
                 setTutorialBannerEnabled(res.data?.tutorialBannerEnabled !== false);
-                setDailyClaimBannerEnabled(res.data?.dailyClaimBannerEnabled !== false);
                 setTutorialBannerTutorialId(res.data?.tutorialBannerTutorialId || null);
             } catch (err) {
                 if (!(err as any)?.authHandled && !isMaintenanceError(err)) {
@@ -189,14 +192,10 @@ export default function DashboardPage() {
 
         socket.on("platform_settings_updated", (payload: {
             tutorialBannerEnabled?: boolean;
-            dailyClaimBannerEnabled?: boolean;
             tutorialBannerTutorialId?: string | null;
         }) => {
             if (typeof payload?.tutorialBannerEnabled === "boolean") {
                 setTutorialBannerEnabled(payload.tutorialBannerEnabled);
-            }
-            if (typeof payload?.dailyClaimBannerEnabled === "boolean") {
-                setDailyClaimBannerEnabled(payload.dailyClaimBannerEnabled);
             }
             if (payload?.tutorialBannerTutorialId !== undefined) {
                 setTutorialBannerTutorialId(payload.tutorialBannerTutorialId || null);
@@ -517,8 +516,75 @@ export default function DashboardPage() {
                     </motion.div>
                 </div>
 
-                {tutorialBannerEnabled && featuredTutorial && (
                 <motion.div variants={itemVariants}>
+                    <div className="relative overflow-hidden rounded-[26px] p-[1.5px] shadow-[0_0_40px_rgba(37,211,102,0.08)]">
+                        <motion.div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-0 rounded-[26px]"
+                            style={{
+                                background: "conic-gradient(from 0deg, rgba(37,211,102,0.10), rgba(37,211,102,1), rgba(16,185,129,0.55), rgba(37,211,102,0.14), rgba(37,211,102,0.10))"
+                            }}
+                            animate={{ rotate: 360 }}
+                            transition={{ duration: 5.5, repeat: Infinity, ease: "linear" }}
+                        />
+                        <div className="relative overflow-hidden rounded-[25px] border border-emerald-400/15 bg-gradient-to-r from-[#0d1f16] via-[#0a1510] to-[#07120d] backdrop-blur-2xl px-4 py-4 sm:px-5 sm:py-4.5">
+                            <div className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/60 to-transparent" />
+                            <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-emerald-400/10 blur-3xl" />
+                            <div className="pointer-events-none absolute -left-10 bottom-0 h-24 w-24 rounded-full bg-emerald-500/10 blur-3xl" />
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                <div className="flex items-start gap-3">
+                                    <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/12 p-2.5 text-emerald-300 shrink-0 shadow-[0_0_22px_rgba(34,197,94,0.16)]">
+                                        <FaWhatsapp className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
+                                            <Radio className="h-3.5 w-3.5" />
+                                            <span className="inline-flex items-center gap-1.5">
+                                                <FaWhatsapp className="h-3.5 w-3.5" />
+                                                WhatsApp
+                                            </span>
+                                            {t.community_badge_label}
+                                        </div>
+                                        <h2 className="mt-2 text-sm sm:text-base font-black tracking-tight text-white">
+                                            {t.community_badge_title}
+                                        </h2>
+                                        <p className="mt-1 text-xs sm:text-sm leading-relaxed text-gray-300 max-w-2xl">
+                                            {t.community_badge_desc}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
+                                    <a
+                                        href={OFFICIAL_GROUP_LINK}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/12 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-300 shadow-[0_0_18px_rgba(34,197,94,0.12)] hover:bg-emerald-400/18"
+                                    >
+                                        <FaWhatsapp className="h-3.5 w-3.5" />
+                                        {t.join_whatsapp_group}
+                                    </a>
+                                    <a
+                                        href={OFFICIAL_CHANNEL_LINK}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl border border-emerald-400/25 bg-white/[0.03] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-white hover:bg-white/[0.06]"
+                                    >
+                                        <FaWhatsapp className="h-3.5 w-3.5 text-emerald-300" />
+                                        {t.follow_whatsapp_channel}
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </motion.div>
+
+                {tutorialBannerEnabled && featuredTutorial && (
+                <motion.div
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.28, ease: "easeOut" }}
+                >
                     <div className="rounded-3xl border border-primary/25 bg-gradient-to-r from-primary/12 via-emerald-500/8 to-transparent backdrop-blur-2xl px-3.5 py-3.5 sm:px-4 sm:py-3.5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                             <div className="flex min-w-0 items-start gap-3">
@@ -571,12 +637,6 @@ export default function DashboardPage() {
                             </div>
                         </div>
                     </div>
-                </motion.div>
-                )}
-
-                {dailyClaimBannerEnabled && (
-                <motion.div variants={itemVariants}>
-                    <DailyCheckIn />
                 </motion.div>
                 )}
 

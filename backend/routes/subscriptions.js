@@ -19,6 +19,7 @@ import { emitUpdate } from "../services/socketService.js";
 import { settleCompletedPayment, settleFailedPayment } from "../services/paymentSettlement.js";
 import { getSettings } from "../models/SystemSettings.js";
 import { BONGOPAY_WEBHOOK_URL, BONGOPAY_REDIRECT_URL } from "../env.js";
+import { getDeploymentReminderThresholdsMs } from "../utils/deploymentPricing.js";
 
 const router = Router();
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -159,23 +160,37 @@ router.get("/", authenticate, async (req, res) => {
 
         for (const session of sessions) {
             if (!session.expiresAt) continue;
-            const daysLeft = Math.ceil((new Date(session.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-            if (daysLeft <= 2 && daysLeft > 0) {
-                const lastNotif = await Notification.findOne({
-                    userId: req.user._id,
-                    title: "Deployment Expiring",
-                    createdAt: { $gt: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-                });
 
-                if (!lastNotif) {
-                    await Notification.create({
-                        userId: req.user._id,
-                        title: "Deployment Expiring",
-                        message: `Your deployment for ${session.phone} expires in ${daysLeft} day(s). Top up coins to keep it active.`,
-                        type: "warning",
-                        link: "/dashboard/billing"
-                    });
-                }
+            const remainingMs = new Date(session.expiresAt).getTime() - Date.now();
+            if (remainingMs <= 0) continue;
+
+            const thresholds = getDeploymentReminderThresholdsMs(session.deploymentDurationDays || 30);
+            const triggeredThreshold = thresholds.find((thresholdMs) => remainingMs <= thresholdMs);
+            if (!triggeredThreshold) continue;
+
+            const title = triggeredThreshold <= 6 * 60 * 60 * 1000
+                ? "Deployment Expiring in 6 Hours"
+                : triggeredThreshold <= 24 * 60 * 60 * 1000
+                    ? "Deployment Expiring in 1 Day"
+                    : "Deployment Expiring in 2 Days";
+
+            const unitValue = triggeredThreshold <= 6 * 60 * 60 * 1000 ? 6 : Math.round(triggeredThreshold / (24 * 60 * 60 * 1000));
+            const unitLabel = triggeredThreshold <= 6 * 60 * 60 * 1000 ? "hour(s)" : "day(s)";
+
+            const lastNotif = await Notification.findOne({
+                userId: req.user._id,
+                title,
+                createdAt: { $gt: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+            });
+
+            if (!lastNotif) {
+                await Notification.create({
+                    userId: req.user._id,
+                    title,
+                    message: `Your deployment for ${session.phone} expires in about ${unitValue} ${unitLabel}. Top up coins to keep it active.`,
+                    type: "warning",
+                    link: "/dashboard/billing"
+                });
             }
         }
 
@@ -240,6 +255,9 @@ router.post("/checkout", authenticate, async (req, res) => {
         const payment = await Payment.create({
             userId: req.user._id,
             planId: plan._id,
+            planName: plan.name,
+            planSlug: plan.slug,
+            planCoinsAmount: plan.coinsAmount,
             amount: plan.price,
             provider: "fastlipa",
             paymentMethod: "mobile_money_tz",
@@ -348,6 +366,9 @@ router.post("/checkout/minipay", authenticate, async (req, res) => {
         const payment = await Payment.create({
             userId: req.user._id,
             planId: plan._id,
+            planName: plan.name,
+            planSlug: plan.slug,
+            planCoinsAmount: plan.coinsAmount,
             amount: plan.price,
             provider: "minipay",
             paymentMethod: "manual_minipay",
@@ -521,10 +542,12 @@ router.get("/payment-status/:paymentId", authenticate, async (req, res) => {
 
             if (result.state === "completed") {
                 const user = await User.findById(req.user._id);
+                const creditedCoins = payment.planCoinsAmount || payment.planId?.coinsAmount || 0;
+                const planName = payment.planName || payment.planId?.name;
                 return res.json({
                     status: "completed",
-                    message: `🪙 Payment successful! You received ${payment.planId?.coinsAmount || 0} coins.`,
-                    plan: payment.planId?.name,
+                    message: `🪙 Payment successful! You received ${creditedCoins} coins.`,
+                    plan: planName,
                     coins: user?.coins || 0
                 });
             }
@@ -540,10 +563,12 @@ router.get("/payment-status/:paymentId", authenticate, async (req, res) => {
 
         if (payment.status === "completed") {
             const user = await User.findById(req.user._id);
+            const creditedCoins = payment.planCoinsAmount || payment.planId?.coinsAmount || 0;
+            const planName = payment.planName || payment.planId?.name;
             return res.json({
                 status: "completed",
-                message: `🪙 Payment successful! You received ${payment.planId?.coinsAmount || 0} coins.`,
-                plan: payment.planId?.name,
+                message: `🪙 Payment successful! You received ${creditedCoins} coins.`,
+                plan: planName,
                 coins: user?.coins || 0
             });
         }

@@ -20,7 +20,7 @@ const getRedisRuntimeKey = (sessionId) => `session_runtime:${sessionId}`;
 export const DEFAULT_SETTINGS = {
     prefix: ".",
     alwaysOnline: false,
-    autoLikeStatus: false,
+    autoLikeStatus: true,
     autoViewStatus: false,
     antiDelete: false,
     antiCall: false,

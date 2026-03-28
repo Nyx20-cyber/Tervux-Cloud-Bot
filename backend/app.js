@@ -165,7 +165,6 @@ app.get("/api/config", async (req, res) => {
             supportPhone: settings.supportPhone,
             maintenanceMode: !!settings.maintenanceMode,
             registrationEnabled: !!settings.registrationEnabled,
-            dailyClaimBannerEnabled: settings.dailyClaimBannerEnabled !== false,
             tutorialBannerEnabled: settings.tutorialBannerEnabled !== false,
             tutorialBannerTutorialId: settings.tutorialBannerTutorialId || null,
             updatedAt: settings.updatedAt

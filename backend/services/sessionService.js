@@ -17,7 +17,7 @@ export async function getSessionData(sessionId) {
         name: session.name,
         prefix: session.settings?.prefix || "!",
         alwaysOnline: session.settings?.alwaysOnline || false,
-        autoLikeStatus: session.settings?.autoLikeStatus || false,
+        autoLikeStatus: session.settings?.autoLikeStatus ?? true,
         autoViewStatus: session.settings?.autoViewStatus || false,
         antiDelete: session.settings?.antiDelete || false,
         antiCall: session.settings?.antiCall || false,

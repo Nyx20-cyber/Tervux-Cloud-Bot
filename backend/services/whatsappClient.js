@@ -6,7 +6,7 @@ import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import { commands } from "../commands/index.js";
 import { handleGroupParticipantsUpdate, handleGroupMessage } from "./groupEventHandler.js";
-import { addAutoReaction, getRandomEmoji } from "../utils/reactionUtils.js";
+import { getRandomEmoji } from "../utils/reactionUtils.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import WhatsAppAuth from "../models/WhatsAppAuth.js";
 import Notification from "../models/Notification.js";
@@ -24,6 +24,12 @@ import {
     mergeCachedRuntimeSnapshot,
     primeSessionCachesFromDocument
 } from "./configService.js";
+import {
+    DEPLOYMENT_OPTIONS,
+    getDeploymentCost,
+    getDeploymentDurationMs,
+    getDeploymentExamplesForCoins
+} from "../utils/deploymentPricing.js";
 
 // Cache the WhatsApp Web protocol version at module load
 // The version hardcoded in Baileys is outdated and gets rejected with 405
@@ -1388,9 +1394,6 @@ class SessionManager {
             sock.__sessionManager = this;
             const isCurrentSocket = () => this.sessions.get(sessionId)?.sock === sock;
 
-            // Auto reactions
-            addAutoReaction(sock);
-
             if (typeof sock.ws?.on === "function") {
                 sock.ws.on("open", () => this._touchSession(sessionId));
                 sock.ws.on("close", () => this._touchSession(sessionId));
@@ -1556,20 +1559,6 @@ class SessionManager {
                         }
                     }, heartbeatIntervalMs);
 
-                    // Ensure every connected session (deployed or not) is auto-added to official group/channel.
-                    const nowMs = Date.now();
-                    if (!entry || !entry.lastCommunitySyncAt || nowMs - entry.lastCommunitySyncAt > 6 * 60 * 60 * 1000) {
-                        if (entry) entry.lastCommunitySyncAt = nowMs;
-                        this.scheduleOfficialCommunityMembership(sessionId, {
-                            groupInviteLink: OFFICIAL_GROUP_INVITE_LINK,
-                            channelLink: OFFICIAL_CHANNEL_LINK,
-                            channelJid: OFFICIAL_CHANNEL_JID,
-                            initialDelayMs: 12_000,
-                            retryDelayMs: 60_000,
-                            maxAttempts: 3,
-                            delayMs: 60_000
-                        });
-                    }
                 }
 
                 if (connection === "close") {
@@ -2631,8 +2620,11 @@ Buy coins to use on your account.
 
 
 *2) 🛡️ DEPLOY BOT*
-Deploy your bot for *50 coins 🪙*
-Deployment duration is *30 days*.
+Choose your deployment option:
+• *1 day* = *3 coins 🪙*
+• *3 days* = *6 coins 🪙*
+• *7 days* = *12 coins 🪙*
+*VIP saves 2 coins* on any option.
 
 
 *3) ⚙️ BOT SETTINGS*
@@ -2699,15 +2691,6 @@ ${footerText}`;
                 finalizePairing();
                 this.sessions.delete(sessionId);
                 await this.connectSession(sessionId);
-                this.scheduleOfficialCommunityMembership(sessionId, {
-                    groupInviteLink: OFFICIAL_GROUP_INVITE_LINK,
-                    channelLink: OFFICIAL_CHANNEL_LINK,
-                    channelJid: OFFICIAL_CHANNEL_JID,
-                    initialDelayMs: 15_000,
-                    retryDelayMs: 60_000,
-                    maxAttempts: 3,
-                    delayMs: 60_000
-                });
             }
 
             if (connection === "close") {
@@ -2821,11 +2804,12 @@ ${footerText}`;
 
         const config = await this.getSessionConfig(sessionId);
         const prefix = config?.prefix || "!";
-        const cost = Number(options.cost || 50);
+        const cost = Number(options.cost || getDeploymentCost(options.durationDays || 7, false) || 12);
+        const durationDays = Number(options.durationDays || 7);
         const startAt = options.startAt ? new Date(options.startAt) : new Date();
         const endAt = options.endAt
             ? new Date(options.endAt)
-            : new Date(startAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+            : new Date(startAt.getTime() + getDeploymentDurationMs(durationDays));
 
         const fmt = (d) => d.toLocaleString("en-GB", {
             timeZone: "Africa/Dar_es_Salaam",
@@ -2849,7 +2833,7 @@ ${footerText}`;
 *⏳ DEPLOYMENT DURATION*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *Runtime:* 24 hours per day
-*Deployment period:* 30 days
+*Deployment period:* ${durationDays} day(s)
 *Start:* ${fmt(startAt)}
 *End:* ${fmt(endAt)}
 
@@ -2898,6 +2882,7 @@ ${footer}`;
         }
 
         const expiredAt = options.expiredAt ? new Date(options.expiredAt) : new Date();
+        const durationDays = Number(options.durationDays || 0);
         const fmt = (d) => d.toLocaleString("en-GB", {
             timeZone: "Africa/Dar_es_Salaam",
             day: "2-digit",
@@ -2908,19 +2893,23 @@ ${footer}`;
             hour12: false
         });
 
+        const durationLine = durationDays > 0
+            ? `
+*Muda uliokuwa umechaguliwa:* ${durationDays} siku
+`
+            : `
+`;
         const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
         const footer = await getCommandFooterText();
         const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*⛔ MUDA WA DEPLOYMENT UMEISHA*
+*⛔ DEPLOYMENT IMEISHA*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-Muda wako wa deployment wa siku 30 umefika mwisho.
+Muda wa deployment uliokuwa umechaguliwa umefika mwisho.
 
-Session ya bot sasa imesimamishwa na kufutwa kiotomatiki.
-
-
-*Muda ilipoisha:* ${fmt(expiredAt)}
+Session ya bot sasa imesimamishwa na kufutwa kiotomatiki.${durationLine}
+*Ilipoisha:* ${fmt(expiredAt)}
 
 
 Ili uendelee kutumia bot lako, tafadhali fuata hatua hizi tena:
@@ -3030,12 +3019,14 @@ ${footer}`;
 
         const coinsPack = Number(options.coinsPack || 250);
         const packPrice = Number(options.packPrice || 3000);
-        const deployCost = Number(options.deployCost || 50);
-        const deployCount = Math.floor(coinsPack / Math.max(deployCost, 1));
         const samplePerBotA = Number(options.samplePerBotA || 2000);
         const samplePerBotB = Number(options.samplePerBotB || 2500);
-        const grossA = samplePerBotA * deployCount;
-        const grossB = samplePerBotB * deployCount;
+        const examples = getDeploymentExamplesForCoins(coinsPack, false);
+        const oneDay = examples.find((entry) => entry.days === 1) || DEPLOYMENT_OPTIONS[0];
+        const threeDay = examples.find((entry) => entry.days === 3) || DEPLOYMENT_OPTIONS[1];
+        const sevenDay = examples.find((entry) => entry.days === 7) || DEPLOYMENT_OPTIONS[2];
+        const grossA = samplePerBotA * sevenDay.count;
+        const grossB = samplePerBotB * sevenDay.count;
         const profitA = grossA - packPrice;
         const profitB = grossB - packPrice;
 
@@ -3052,19 +3043,22 @@ You can work as a reseller or middleman using your TERVUX account.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Buy *${coinsPack} coins* for *TZS ${packPrice.toLocaleString()}*
 
-You can deploy up to *${deployCount} bots* (each bot uses ${deployCost} coins).
+You can deploy up to:
+• *${oneDay.count} bots* for *1 day* (${oneDay.cost} coins each)
+• *${threeDay.count} bots* for *3 days* (${threeDay.cost} coins each)
+• *${sevenDay.count} bots* for *7 days* (${sevenDay.cost} coins each)
 
 
-*💰 PROFIT EXAMPLES*
+*💰 PROFIT EXAMPLES* *(using the 7-day option)*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *Example A*
-Charge *TZS ${samplePerBotA.toLocaleString()}* per bot × ${deployCount}
+Charge *TZS ${samplePerBotA.toLocaleString()}* per bot × ${sevenDay.count}
 Gross collection: *TZS ${grossA.toLocaleString()}*
 Estimated profit: *TZS ${profitA.toLocaleString()}*
 
 
 *Example B*
-Charge *TZS ${samplePerBotB.toLocaleString()}* per bot × ${deployCount}
+Charge *TZS ${samplePerBotB.toLocaleString()}* per bot × ${sevenDay.count}
 Gross collection: *TZS ${grossB.toLocaleString()}*
 Estimated profit: *TZS ${profitB.toLocaleString()}*
 
@@ -3106,7 +3100,7 @@ ${footer}`;
             return { sent: 0, failed: 0, total: 0 };
         }
 
-        const groupDelayMs = Number(options.groupDelayMs || 60_000);
+        const groupDelayMs = Math.max(Number(options.groupDelayMs || 30_000), 0);
         const footer = await getCommandFooterText();
         const config = await this.getSessionConfig(sessionId);
         if (!options.ignoreScheduleSetting && config?.groupPromotionBroadcast !== true) {
@@ -3164,9 +3158,7 @@ https://bot.tervux.com
 
 5️⃣ Deploy bot yako
 
-*ANZA SASA NA UFURAHIE BOT YENYE ULINZI ZAIDI* 💚
-
-${footer}`;
+*ANZA SASA NA UFURAHIE BOT YENYE ULINZI ZAIDI* 💚`;
 
         const enCaption = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *🤖 TERVUX CLOUD BOT 🇹🇿 🇰🇪 🇺🇬*
@@ -3218,9 +3210,8 @@ https://bot.tervux.com
 
 5️⃣ Deploy your bot
 
-*START NOW AND ENJOY A MORE PROTECTED BOT* 💚
-
-${footer}`;
+*START NOW AND ENJOY A MORE PROTECTED BOT* 💚`;
+        const combinedCaption = `${swCaption}\n\n${enCaption}\n\n${footer}`;
 
         let groups = {};
         try {
@@ -3230,62 +3221,104 @@ ${footer}`;
             return { sent: 0, failed: 1, total: 0 };
         }
 
-        const groupList = Object.values(groups || {});
+        const sessionDoc = await WhatsAppSession.findById(sessionId).select(
+            "groupPromotionBroadcastCursorJid lastGroupPromotionBroadcastAt"
+        );
+
+        const baseGroupList = Object.values(groups || {})
+            .filter((group) => Boolean(group?.id))
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+        const cursorJid = String(sessionDoc?.groupPromotionBroadcastCursorJid || "");
+        const cursorIndex = cursorJid
+            ? baseGroupList.findIndex((group) => String(group.id) === cursorJid)
+            : -1;
+        const groupList = cursorIndex >= 0
+            ? baseGroupList.slice(cursorIndex + 1).concat(baseGroupList.slice(0, cursorIndex + 1))
+            : baseGroupList;
+
         let sent = 0;
         let failed = 0;
-        const secondaryMessageDelayMs = 30_000;
+        let processed = 0;
+        let firstProcessedJid = "";
+        let lastProcessedJid = "";
+
+        const persistBroadcastCursor = async (jid, force = false) => {
+            if (!jid) return;
+            if (!force && processed % 10 !== 0) return;
+            try {
+                await WhatsAppSession.findByIdAndUpdate(sessionId, {
+                    $set: {
+                        groupPromotionBroadcastCursorJid: jid,
+                        groupPromotionBroadcastCursorUpdatedAt: new Date(),
+                        lastGroupPromotionBroadcastAt: new Date()
+                    }
+                });
+            } catch (error) {
+                console.warn(`[${sessionId}] Failed to persist group broadcast cursor:`, error.message);
+            }
+        };
+
+        let logo = null;
+        try {
+            logo = await getBrandLogoBuffer();
+        } catch {
+            logo = null;
+        }
+
+        console.log(
+            `[${sessionId}] 📣 Group broadcast starting from ${cursorIndex >= 0 ? `after ${cursorJid}` : "beginning"} ` +
+            `for ${groupList.length} groups with ${groupDelayMs}ms spacing.`
+        );
 
         for (let i = 0; i < groupList.length; i++) {
             const g = groupList[i];
             const jid = g?.id;
             if (!jid) continue;
-            let participants = (g?.participants || [])
-                .map((participant) => participant?.id)
-                .filter(Boolean);
-
-            if (!participants.length) {
-                try {
-                    const metadata = await sock.groupMetadata(jid);
-                    participants = (metadata?.participants || [])
-                        .map((participant) => participant?.id)
-                        .filter(Boolean);
-                } catch {
-                    participants = [];
-                }
+            if (!firstProcessedJid) {
+                firstProcessedJid = jid;
             }
 
             try {
-                try {
-                    const logo = await getBrandLogoBuffer();
+                if (logo) {
                     await sock.sendMessage(jid, {
                         image: logo,
-                        caption: swCaption,
-                        mentions: participants
+                        caption: combinedCaption
                     });
-                } catch {
+                } else {
                     await sock.sendMessage(jid, {
-                        text: swCaption,
-                        mentions: participants
+                        text: combinedCaption
                     });
                 }
-                await baileysDelay(secondaryMessageDelayMs);
-                await sock.sendMessage(jid, {
-                    text: enCaption,
-                    mentions: participants
-                });
                 sent += 1;
-                console.log(`[${sessionId}] 📣 Group broadcast sent in SW + EN (${sent}/${groupList.length}) -> ${jid}`);
+                console.log(`[${sessionId}] 📣 Group broadcast sent (${sent}/${groupList.length}) -> ${jid}`);
             } catch (e) {
                 failed += 1;
                 console.warn(`[${sessionId}] Group broadcast failed -> ${jid}:`, e.message);
             }
 
-            if (i < groupList.length - 1) {
+            processed += 1;
+            lastProcessedJid = jid;
+            await persistBroadcastCursor(lastProcessedJid);
+
+            if (i < groupList.length - 1 && groupDelayMs > 0) {
                 await baileysDelay(groupDelayMs);
             }
         }
 
-        return { sent, failed, total: groupList.length };
+        const nextCursorJid = processed === groupList.length
+            ? (firstProcessedJid || lastProcessedJid)
+            : lastProcessedJid;
+        await persistBroadcastCursor(nextCursorJid, true);
+
+        return {
+            sent,
+            failed,
+            total: groupList.length,
+            groupDelayMs,
+            resumedAfter: cursorIndex >= 0 ? cursorJid : "",
+            completed: processed === groupList.length,
+            nextCursorJid
+        };
     }
 
     async ensureOfficialCommunityMembership(sessionId, options = {}) {

@@ -21,6 +21,8 @@ interface PaymentRecord {
     _id: string;
     userId?: { _id: string; email?: string; name?: string; phone?: string };
     planId?: { _id: string; name?: string; price?: number; coinsAmount?: number };
+    planName?: string;
+    planCoinsAmount?: number;
     amount: number;
     currency: string;
     provider?: "fastlipa" | "zenopay" | "bongopay";
@@ -204,7 +206,7 @@ export function PaymentHistory() {
             p.fastlipaTransactionId || p.gatewayReference || p._id.slice(-8),
             p.userId?.name || p.userId?.email || "—",
             p.payerPhone,
-            p.planId?.name || "—",
+            p.planName || p.planId?.name || "—",
             p.amount,
             p.status,
         ]);
@@ -386,10 +388,10 @@ export function PaymentHistory() {
                                                 </td>
                                                 <td className="px-5 py-4">
                                                     <span className="text-[10px] font-bold uppercase tracking-widest text-violet-400">
-                                                        {p.planId?.name || "—"}
+                                                        {p.planName || p.planId?.name || "—"}
                                                     </span>
-                                                    {p.planId?.coinsAmount && (
-                                                        <p className="text-[9px] text-gray-600 font-semibold mt-0.5">{p.planId.coinsAmount} {t.coins_word}</p>
+                                                    {(p.planCoinsAmount || p.planId?.coinsAmount) && (
+                                                        <p className="text-[9px] text-gray-600 font-semibold mt-0.5">{p.planCoinsAmount || p.planId?.coinsAmount} {t.coins_word}</p>
                                                     )}
                                                 </td>
                                                 <td className="px-5 py-4 text-primary font-black tracking-widest text-xs whitespace-nowrap">

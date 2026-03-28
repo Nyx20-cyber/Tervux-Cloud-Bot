@@ -61,9 +61,12 @@ export async function settleCompletedPayment(paymentId, gatewayResponse, source 
     }
 
     const plan = completedPayment.planId;
-    if (!plan) {
+    if (!plan && !completedPayment.planCoinsAmount) {
         return { ok: false, state: "missing_plan" };
     }
+
+    const purchasedCoins = completedPayment.planCoinsAmount || plan?.coinsAmount || 0;
+    const purchasedPlanName = completedPayment.planName || plan?.name || "selected plan";
 
     const User = (await import("../models/User.js")).default;
     const user = await User.findById(completedPayment.userId);
@@ -71,7 +74,7 @@ export async function settleCompletedPayment(paymentId, gatewayResponse, source 
         return { ok: false, state: "missing_user" };
     }
 
-    user.coins = (user.coins || 0) + (plan.coinsAmount || 0);
+    user.coins = (user.coins || 0) + purchasedCoins;
     await user.save();
     emitToUser(user._id, "balance_update", { coins: user.coins });
 
@@ -140,7 +143,7 @@ export async function settleCompletedPayment(paymentId, gatewayResponse, source 
     const paymentNotify = await Notification.create({
         userId: user._id,
         title: "Coins Added 🪙",
-        message: `Successfully received ${plan.coinsAmount} coins from your payment for "${plan.name}" via ${source}.`,
+        message: `Successfully received ${purchasedCoins} coins from your payment for "${purchasedPlanName}" via ${source}.`,
         type: "success"
     });
 
@@ -148,7 +151,7 @@ export async function settleCompletedPayment(paymentId, gatewayResponse, source 
     emitToUser(user._id, "payment_update", {
         paymentId: completedPayment._id,
         status: "completed",
-        message: `🪙 Payment successful! You received ${plan.coinsAmount} coins.`,
+        message: `🪙 Payment successful! You received ${purchasedCoins} coins.`,
         coins: user.coins
     });
     emitUpdate("admin_payment_updated", {

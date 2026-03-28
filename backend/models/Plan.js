@@ -14,7 +14,8 @@ const planSchema = new mongoose.Schema({
     },
     price: {
         type: Number,
-        required: true
+        required: true,
+        min: 1
     },
     currency: {
         type: String,
@@ -22,7 +23,12 @@ const planSchema = new mongoose.Schema({
     },
     coinsAmount: {
         type: Number,
-        required: true
+        required: true,
+        min: 1,
+        validate: {
+            validator: Number.isInteger,
+            message: "coinsAmount must be a whole number"
+        }
     },
     description: {
         type: String,

@@ -30,10 +30,6 @@ const systemSettingsSchema = new mongoose.Schema({
         type: Number,
         default: 10
     },
-    dailyClaimBannerEnabled: {
-        type: Boolean,
-        default: true
-    },
     tutorialBannerEnabled: {
         type: Boolean,
         default: true
@@ -67,7 +63,6 @@ const toPublicSettings = (settingsDocOrObj) => ({
     commandFooter: settingsDocOrObj.commandFooter,
     kingBonusCoins: Number(settingsDocOrObj.kingBonusCoins || 100),
     referralBonus: Number(settingsDocOrObj.referralBonus || 10),
-    dailyClaimBannerEnabled: settingsDocOrObj.dailyClaimBannerEnabled !== false,
     tutorialBannerEnabled: settingsDocOrObj.tutorialBannerEnabled !== false,
     tutorialBannerTutorialId: settingsDocOrObj.tutorialBannerTutorialId
         ? String(settingsDocOrObj.tutorialBannerTutorialId)

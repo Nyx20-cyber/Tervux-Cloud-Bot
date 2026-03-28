@@ -4,33 +4,7 @@ dotenv.config();
 import { connectDB } from "../lib/db.js";
 import Plan from "../models/Plan.js";
 import User from "../models/User.js";
-
-const plans = [
-    {
-        name: "50 Coins",
-        slug: "50-coins",
-        price: 1500,
-        currency: "TZS",
-        coinsAmount: 50,
-        description: "50 Coins — Deploy 1 Bot"
-    },
-    {
-        name: "100 Coins",
-        slug: "100-coins",
-        price: 2000,
-        currency: "TZS",
-        coinsAmount: 100,
-        description: "100 Coins — Deploy 2 Bots"
-    },
-    {
-        name: "250 Coins",
-        slug: "250-coins",
-        price: 3000,
-        currency: "TZS",
-        coinsAmount: 250,
-        description: "250 Coins — Deploy 5 Bots"
-    }
-];
+import { DEFAULT_COIN_PLANS, syncDefaultPlans } from "../utils/defaultPlans.js";
 
 async function seed() {
     try {
@@ -43,13 +17,9 @@ async function seed() {
             { $set: { isActive: false } }
         );
 
-        // Upsert new coin plans
-        for (const plan of plans) {
-            await Plan.findOneAndUpdate(
-                { slug: plan.slug },
-                plan,
-                { upsert: true, returnDocument: "after" }
-            );
+        // Upsert current default coin plans
+        await syncDefaultPlans(Plan, { overwriteExisting: true });
+        for (const plan of DEFAULT_COIN_PLANS) {
             console.log(`  ✅ Plan: ${plan.name} (${plan.price} TZS / ${plan.coinsAmount} Coins)`);
         }
 

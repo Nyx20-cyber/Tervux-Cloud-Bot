@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { ShieldCheck, Network, PauseCircle, PlayCircle, Trash2, Rocket, Coins, Loader2 } from "lucide-react";
-import { useSessionStore } from "@/store/useSessionStore";
+import { ShieldCheck, Network, PauseCircle, PlayCircle, Trash2, Rocket, Coins, Loader2, CheckCircle2 } from "lucide-react";
+import { useSessionStore, type Session } from "@/store/useSessionStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { io } from "socket.io-client";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
 import { useRouter } from "next/navigation";
+import { DEPLOYMENT_OPTIONS, getDeploymentCost, type DeploymentDurationDays } from "@/lib/deploymentPricing";
+
+function formatDurationLabel(days: number, language: "en" | "sw") {
+    if (language === "sw") return `${days} siku`;
+    return `${days} day${days === 1 ? "" : "s"}`;
+}
 
 export default function DeploymentsPage() {
     const { language } = useLocaleStore();
@@ -67,7 +73,6 @@ export default function DeploymentsPage() {
                     </div>
                 </div>
 
-                {/* Sessions List */}
                 <div className="space-y-4">
                     {isLoading && sessions.length === 0 ? (
                         <div className="p-8 text-center text-gray-500 text-xs font-bold uppercase tracking-widest border border-white/10 border-dashed rounded-xl bg-white/5 flex flex-col items-center gap-2">
@@ -83,7 +88,7 @@ export default function DeploymentsPage() {
                         </div>
                     ) : (
                         <div className="grid gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-3">
-                            {sessions.map(session => (
+                            {sessions.map((session) => (
                                 <SessionCard key={session._id} session={session} />
                             ))}
                         </div>
@@ -94,15 +99,16 @@ export default function DeploymentsPage() {
     );
 }
 
-function SessionCard({ session }: { session: any }) {
+function SessionCard({ session }: { session: Session }) {
     const { language } = useLocaleStore();
     const t = translations[language];
-    const { updateSessionLocally, fetchSessions, updateSessionStatus, deploySession } = useSessionStore();
+    const { fetchSessions, updateSessionStatus, deploySession } = useSessionStore();
     const { user, updateCoins } = useAuthStore();
     const router = useRouter();
     const [nowMs, setNowMs] = useState(Date.now());
-
     const [isDeploying, setIsDeploying] = useState(false);
+    const [selectedDuration, setSelectedDuration] = useState<DeploymentDurationDays>(3);
+
     const isPaused = session.status === "paused";
     const isActive = session.status === "active";
     const isError = ["disconnected", "expired", "failed"].includes(session.status);
@@ -116,17 +122,30 @@ function SessionCard({ session }: { session: any }) {
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [isActioning, setIsActioning] = useState(false);
 
+    const deploymentOptions = useMemo(() => DEPLOYMENT_OPTIONS.map((option) => ({
+        ...option,
+        cost: getDeploymentCost(option.days, !!user?.isVIP) ?? option.baseCost,
+    })), [user?.isVIP]);
+
+    const selectedOption = deploymentOptions.find((option) => option.days === selectedDuration) ?? deploymentOptions[1];
+    const deployDescription = language === "sw"
+        ? "Chagua muda unaotaka bot lako liwe active baada ya deploy."
+        : "Choose how long you want this deployment to stay active.";
+    const optionHint = language === "sw"
+        ? "VIP hupunguziwa sarafu 2 kwenye option yoyote."
+        : "VIP saves 2 coins on any option.";
+
     const handleDeploy = async () => {
         setIsDeploying(true);
         try {
-            const result = await deploySession(session._id);
+            const result = await deploySession(session._id, selectedDuration);
             if (typeof result?.coins === "number") {
                 updateCoins(result.coins);
             }
             toast.success(t.bot_deployed_success);
-            // Refresh sessions to get new status
             fetchSessions();
             setIsDeployDialogOpen(false);
+            setSelectedDuration(3);
         } catch (error: any) {
             const rawMsg = String(error?.response?.data?.error || error?.message || "");
             const isInsufficient = error?.response?.status === 402 || /insufficient coins/i.test(rawMsg);
@@ -177,32 +196,41 @@ function SessionCard({ session }: { session: any }) {
         return () => clearInterval(timer);
     }, []);
 
+    useEffect(() => {
+        if (!isDeployDialogOpen) {
+            setSelectedDuration(3);
+        }
+    }, [isDeployDialogOpen]);
+
     return (
-        <div className={`p-4 sm:p-5 rounded-xl sm:rounded-2xl border ${isActive ? 'border-primary/30 bg-primary/5' : isError ? 'border-destructive/30 bg-destructive/5' : isPaused ? 'border-amber-500/30 bg-amber-500/5' : 'border-white/10 bg-white/5'} flex flex-col gap-3 sm:gap-4 backdrop-blur-md transition-all`}>
-            {/* Header */}
+        <div className={`p-4 sm:p-5 rounded-xl sm:rounded-2xl border ${isActive ? "border-primary/30 bg-primary/5" : isError ? "border-destructive/30 bg-destructive/5" : isPaused ? "border-amber-500/30 bg-amber-500/5" : "border-white/10 bg-white/5"} flex flex-col gap-3 sm:gap-4 backdrop-blur-md transition-all`}>
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isActive ? 'bg-primary/20 text-primary' : isError ? 'bg-destructive/20 text-destructive' : isPaused ? 'bg-amber-500/20 text-amber-500' : 'bg-gray-500/20 text-gray-500'}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isActive ? "bg-primary/20 text-primary" : isError ? "bg-destructive/20 text-destructive" : isPaused ? "bg-amber-500/20 text-amber-500" : "bg-gray-500/20 text-gray-500"}`}>
                         <Network className="w-4 h-4" />
                     </div>
                     <div>
                         <p className="text-xs sm:text-sm font-bold text-white tracking-widest">{session.phone || t.unknown_phone}</p>
-                        <p className={`text-[9px] font-bold uppercase tracking-widest ${isActive ? 'text-primary' : isError ? 'text-destructive' : isPaused ? 'text-amber-500' : 'text-gray-500'}`}>
+                        <p className={`text-[9px] font-bold uppercase tracking-widest ${isActive ? "text-primary" : isError ? "text-destructive" : isPaused ? "text-amber-500" : "text-gray-500"}`}>
                             {session.status}
                         </p>
                     </div>
                 </div>
             </div>
 
-            {/* Sub Info */}
             {isDeployed ? (
                 <div className="p-3 rounded-xl bg-black/40 border border-white/5 flex flex-col items-center justify-center gap-1">
                     <p className="text-[10px] text-primary font-bold uppercase tracking-widest">{t.deployed_to_node}</p>
                     {remainingDays !== null && (
-                        <p className={`text-[9px] font-bold uppercase tracking-widest ${remainingDays > 5 ? 'text-gray-400' : 'text-amber-500'}`}>
+                        <p className={`text-[9px] font-bold uppercase tracking-widest ${remainingDays > 5 ? "text-gray-400" : "text-amber-500"}`}>
                             {remainingDays > 0 ? `${remainingDays} ${t.days_remaining}` : t.expiring_today}
                         </p>
                     )}
+                    {session.deploymentDurationDays ? (
+                        <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">
+                            {formatDurationLabel(session.deploymentDurationDays, language)}
+                        </p>
+                    ) : null}
                 </div>
             ) : (
                 <div className="p-3 rounded-xl bg-black/40 border border-white/5 flex flex-col items-center justify-center gap-1">
@@ -211,7 +239,6 @@ function SessionCard({ session }: { session: any }) {
                 </div>
             )}
 
-            {/* Actions */}
             <div className="flex gap-2 mt-auto pt-1.5 sm:pt-2">
                 <Button
                     variant="outline" size="sm"
@@ -239,7 +266,6 @@ function SessionCard({ session }: { session: any }) {
                 </Button>
             )}
 
-            {/* Deploy Confirmation Dialog */}
             <Dialog open={isDeployDialogOpen} onOpenChange={setIsDeployDialogOpen}>
                 <DialogContent className="sm:max-w-md bg-card/90 border-white/10 backdrop-blur-2xl">
                     <DialogHeader>
@@ -248,25 +274,67 @@ function SessionCard({ session }: { session: any }) {
                             {t.confirm_deployment}
                         </DialogTitle>
                         <DialogDescription className="text-gray-400 mt-2">
-                            {t.confirm_deployment_desc}
+                            {deployDescription}
                         </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-4 py-4">
-                        <p className="text-sm text-gray-300">
-                            <strong className="text-primary font-bold">{t.cost}:</strong>{' '}
-                            {user?.isVIP ? (
-                                <span>
-                                    <span className="line-through opacity-50 mr-2">50 Coins</span>
-                                    <span className="text-yellow-500 font-bold tracking-widest">45 Coins 🪙 (VIP)</span>
-                                </span>
-                            ) : (
-                                "50 Coins 🪙"
-                            )}
-                        </p>
-                        <p className="text-sm text-gray-300">
-                            <strong className="text-primary font-bold">{t.duration}:</strong> 30 {t.days}
-                        </p>
+                        <div className="space-y-2">
+                            {deploymentOptions.map((option) => {
+                                const isSelected = option.days === selectedDuration;
+                                return (
+                                    <button
+                                        key={option.days}
+                                        type="button"
+                                        onClick={() => setSelectedDuration(option.days)}
+                                        className={`w-full rounded-2xl border p-4 text-left transition-all ${isSelected ? "border-primary bg-primary/10 shadow-lg shadow-primary/10" : "border-white/10 bg-white/[0.04] hover:border-primary/50 hover:bg-white/[0.06]"}`}
+                                    >
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <p className="text-sm font-black uppercase tracking-widest text-white">
+                                                    {formatDurationLabel(option.days, language)}
+                                                </p>
+                                                <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                                                    {language === "sw" ? "Bot litakuwa active kila siku" : "Bot stays active daily"}
+                                                </p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                {isSelected ? <CheckCircle2 className="w-4 h-4 text-primary" /> : null}
+                                                <div className="text-right">
+                                                    {user?.isVIP ? (
+                                                        <>
+                                                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-500 line-through">{option.baseCost} Coins</p>
+                                                            <p className="text-sm font-black uppercase tracking-widest text-yellow-400">{option.cost} Coins 🪙</p>
+                                                        </>
+                                                    ) : (
+                                                        <p className="text-sm font-black uppercase tracking-widest text-primary">{option.cost} Coins 🪙</p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 space-y-2">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">{language === "sw" ? "Muhtasari wa deploy" : "Deployment summary"}</p>
+                            <p className="text-sm text-gray-300">
+                                <strong className="text-primary font-bold">{t.duration}:</strong> {formatDurationLabel(selectedOption.days, language)}
+                            </p>
+                            <p className="text-sm text-gray-300">
+                                <strong className="text-primary font-bold">{t.cost}:</strong>{" "}
+                                {user?.isVIP ? (
+                                    <span>
+                                        <span className="line-through opacity-50 mr-2">{selectedOption.baseCost} Coins</span>
+                                        <span className="text-yellow-500 font-bold tracking-widest">{selectedOption.cost} Coins 🪙 (VIP)</span>
+                                    </span>
+                                ) : (
+                                    `${selectedOption.cost} Coins 🪙`
+                                )}
+                            </p>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">{optionHint}</p>
+                        </div>
                     </div>
 
                     <DialogFooter className="flex justify-end gap-3 sm:justify-end">
@@ -280,7 +348,6 @@ function SessionCard({ session }: { session: any }) {
                 </DialogContent>
             </Dialog>
 
-            {/* Pause Confirmation Dialog */}
             <Dialog open={isPauseDialogOpen} onOpenChange={setIsPauseDialogOpen}>
                 <DialogContent className="sm:max-w-md bg-card/90 border-white/10 backdrop-blur-2xl">
                     <DialogHeader>
@@ -297,14 +364,13 @@ function SessionCard({ session }: { session: any }) {
                         <Button variant="ghost" onClick={() => !isActioning && setIsPauseDialogOpen(false)} disabled={isActioning} className="text-gray-400 hover:text-white border-white/10 hover:bg-white/5">
                             {t.cancel}
                         </Button>
-                        <Button onClick={handlePauseResume} disabled={isActioning} className={`${isPaused ? 'bg-primary text-black hover:bg-primary/90 shadow-primary/20' : 'bg-amber-500 text-black hover:bg-amber-500/90 shadow-amber-500/20'} font-bold uppercase tracking-widest px-6 shadow-lg`}>
+                        <Button onClick={handlePauseResume} disabled={isActioning} className={`${isPaused ? "bg-primary text-black hover:bg-primary/90 shadow-primary/20" : "bg-amber-500 text-black hover:bg-amber-500/90 shadow-amber-500/20"} font-bold uppercase tracking-widest px-6 shadow-lg`}>
                             {isActioning ? (isPaused ? t.resuming : t.pausing) : (isPaused ? t.resume : t.pause)}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
 
-            {/* Delete Confirmation Dialog */}
             <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                 <DialogContent className="sm:max-w-md bg-card/90 border-white/10 backdrop-blur-2xl">
                     <DialogHeader>
@@ -336,5 +402,5 @@ function SessionCard({ session }: { session: any }) {
                 </DialogContent>
             </Dialog>
         </div>
-    )
+    );
 }

@@ -122,6 +122,191 @@ function isMassMention(msgText = "", mentionedJids = []) {
     );
 }
 
+function extractMentionSignals(content = {}, contextInfo = {}, message = {}) {
+    const mentionedJids = Array.isArray(contextInfo?.mentionedJid) ? contextInfo.mentionedJid : [];
+    const groupMentions = Array.isArray(contextInfo?.groupMentions) ? contextInfo.groupMentions : [];
+    const statusMentions = Array.isArray(message?.statusMentions) ? message.statusMentions : [];
+
+    return {
+        mentionedJids,
+        groupMentions,
+        statusMentions,
+        hasNativeGroupMention: groupMentions.length > 0 || Boolean(content?.groupMentionedMessage),
+        hasNativeStatusMention: (
+            statusMentions.length > 0 ||
+            Boolean(content?.statusMentionMessage) ||
+            Boolean(message?.statusMentionMessageInfo)
+        )
+    };
+}
+
+const COMMON_LINK_TLDS = [
+    "com", "net", "org", "io", "co", "me", "app", "dev", "xyz", "ly", "gg", "tv",
+    "info", "biz", "edu", "gov", "us", "uk", "ke", "tz", "ug", "rw", "bi", "ae",
+    "in", "za", "de", "fr", "es", "it", "nl", "ca", "au"
+];
+const LINK_CANDIDATE_REGEX = new RegExp(
+    String.raw`\b(?:https?:\/\/[^\s<>()\[\]{}"']+|www\.[^\s<>()\[\]{}"']+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:${COMMON_LINK_TLDS.join("|")})(?:[/?#][^\s<>()\[\]{}"']*)?)`,
+    "ig"
+);
+
+function sanitizeLinkCandidate(candidate = "") {
+    return String(candidate || "")
+        .trim()
+        .replace(/^[("'[\]{}<]+/, "")
+        .replace(/[),.!?;:'"\]}>\u2026]+$/, "");
+}
+
+function normalizeLinkCandidate(candidate = "") {
+    const cleaned = sanitizeLinkCandidate(candidate).toLowerCase();
+    if (!cleaned) return "";
+    if (cleaned.startsWith("http://") || cleaned.startsWith("https://")) {
+        return cleaned;
+    }
+    return `https://${cleaned}`;
+}
+
+function isValidLinkCandidate(candidate = "") {
+    const normalized = normalizeLinkCandidate(candidate);
+    if (!normalized) return false;
+
+    try {
+        const parsed = new URL(normalized);
+        const hostname = String(parsed.hostname || "").toLowerCase();
+        if (!hostname || !hostname.includes(".")) return false;
+        if (hostname.includes("..")) return false;
+
+        const labels = hostname.split(".");
+        if (labels.some((label) => !/^[a-z0-9-]+$/.test(label) || label.startsWith("-") || label.endsWith("-"))) {
+            return false;
+        }
+
+        const topLevel = labels[labels.length - 1];
+        if (!/^[a-z]{2,24}$/.test(topLevel)) return false;
+        if (labels.every((label) => /^\d+$/.test(label))) return false;
+
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function extractDetectedLinks(text = "") {
+    const source = String(text || "");
+    const matches = Array.from(source.matchAll(LINK_CANDIDATE_REGEX));
+    const candidates = matches
+        .map((match) => {
+            const candidate = sanitizeLinkCandidate(match[0]);
+            const startIndex = Number(match.index || 0);
+            const precedingChar = startIndex > 0 ? source[startIndex - 1] : "";
+            return { candidate, precedingChar };
+        })
+        .filter(({ candidate, precedingChar }) => candidate && precedingChar !== "@")
+        .map(({ candidate }) => candidate);
+
+    return candidates
+        .filter((candidate, index, arr) => arr.indexOf(candidate) === index)
+        .filter((candidate) => isValidLinkCandidate(candidate));
+}
+
+const ANTILINK_ALLOWED_HOSTS = new Set([
+    "tervux.com",
+    "www.tervux.com",
+    "bot.tervux.com",
+    "nyaganya.tervux.com",
+    "tervux.portfolio"
+]);
+
+const ANTILINK_ALLOWED_EXACT_MATCHES = new Set([
+    "tervux.com",
+    "www.tervux.com",
+    "github.com/jonnitech",
+    "github.com/tervux",
+    "instagram.com/tervux",
+    "wa.me/message/tervux",
+    "wa.me/255785046741",
+    "tervux.portfolio",
+    "bot.tervux.com",
+    "nyaganya.tervux.com",
+    "github.com/jonnitech/tervux-whatsapp-bot",
+    "nyaganyamalima47@gmail.com"
+]);
+
+const ANTILINK_ALLOWED_PATH_PREFIXES = {
+    "github.com": [
+        "/jonnitech",
+        "/tervux",
+        "/jonnitech/tervux-whatsapp-bot"
+    ],
+    "instagram.com": [
+        "/tervux"
+    ],
+    "wa.me": [
+        "/message/tervux",
+        "/255785046741"
+    ],
+    "whatsapp.com": [
+        "/channel/"
+    ],
+    "chat.whatsapp.com": [
+        "/camxn3oovxwgmyoyo0nfqv"
+    ]
+};
+
+for (const rawUrl of [
+    process.env.FRONTEND_URL || "https://bot.tervux.com",
+    process.env.OFFICIAL_GROUP_INVITE_LINK || "https://chat.whatsapp.com/CAmxN3oOVxwGmoyYO0NfQv",
+    process.env.OFFICIAL_CHANNEL_LINK || "https://whatsapp.com/channel/0029Vb6z2Hp7YSczTRHtmr0N"
+]) {
+    try {
+        const parsed = new URL(rawUrl);
+        const host = String(parsed.hostname || "").toLowerCase();
+        const path = String(parsed.pathname || "").toLowerCase();
+        if (host) {
+            ANTILINK_ALLOWED_HOSTS.add(host);
+            if (path && path !== "/") {
+                ANTILINK_ALLOWED_PATH_PREFIXES[host] = [
+                    ...(ANTILINK_ALLOWED_PATH_PREFIXES[host] || []),
+                    path
+                ];
+            }
+        }
+    } catch {
+        // Ignore invalid optional env values; static allowlist still applies.
+    }
+}
+
+function isAllowedHost(hostname = "") {
+    const host = String(hostname || "").toLowerCase();
+    if (!host) return false;
+    return ANTILINK_ALLOWED_HOSTS.has(host) || host.endsWith(".tervux.com");
+}
+
+function isAllowedHostPath(hostname = "", pathname = "") {
+    const host = String(hostname || "").toLowerCase();
+    const path = String(pathname || "").toLowerCase();
+    const prefixes = ANTILINK_ALLOWED_PATH_PREFIXES[host] || [];
+    return prefixes.some((prefix) => path.startsWith(prefix));
+}
+
+function isWhitelistedAntilink(candidate = "") {
+    const sanitizedCandidate = sanitizeLinkCandidate(candidate).toLowerCase();
+    if (!sanitizedCandidate) return false;
+    if (ANTILINK_ALLOWED_EXACT_MATCHES.has(sanitizedCandidate)) {
+        return true;
+    }
+
+    const normalized = normalizeLinkCandidate(sanitizedCandidate);
+    if (!normalized) return false;
+
+    try {
+        const parsed = new URL(normalized);
+        return isAllowedHost(parsed.hostname) || isAllowedHostPath(parsed.hostname, parsed.pathname);
+    } catch {
+        return false;
+    }
+}
+
 function getSessionLaneDepths(sock) {
     const manager = sock?.__sessionManager;
     const sid = String(sock?.sessionId || "");
@@ -381,7 +566,8 @@ export async function handleGroupMessage(sock, m) {
     const msgTextRaw = extractGroupMessageText(content);
     const msgText = String(msgTextRaw || "").toLowerCase();
     const contextInfo = extractContextInfo(content);
-    const mentionedJids = contextInfo?.mentionedJid || [];
+    const mentionSignals = extractMentionSignals(content, contextInfo, m);
+    const mentionedJids = mentionSignals.mentionedJids;
 
     const settingsResult = await loadGroupSettings(sock.sessionId, remoteJid, TRACE_GROUP_PATH ? { returnMeta: true } : {});
     const settings = TRACE_GROUP_PATH ? settingsResult.settings : settingsResult;
@@ -440,15 +626,21 @@ export async function handleGroupMessage(sock, m) {
     const hasPoll = isPollMessage(content);
     const hasForward = isForwardedMessage(content);
     const hasMassMention = isMassMention(msgText, mentionedJids);
-    const hasMentionTrigger = hasMassMention || msgText.includes("@status") || mentionedJids.length > 0;
+    const hasMentionTrigger = (
+        hasMassMention ||
+        mentionSignals.hasNativeGroupMention ||
+        mentionSignals.hasNativeStatusMention ||
+        msgText.includes("@status") ||
+        mentionedJids.length > 0
+    );
     const maxLongTextLength = Math.max(Number(settings.antilongtext?.maxLength || 600), 150);
     const hasLongText = msgTextRaw.trim().length > maxLongTextLength;
     const hasBadWord = fastPathProfile.hasBadwords === true
         ? settings.badwords.some((word) => msgText.includes(String(word).toLowerCase()))
         : false;
     const hasGrouplock = fastPathProfile.hasGrouplock === true;
-    const urlRegex = /(https?:\/\/)?(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)/i;
-    const hasUrl = settings.antilink?.enabled ? urlRegex.test(msgText) : false;
+    const detectedLinks = settings.antilink?.enabled ? extractDetectedLinks(msgTextRaw) : [];
+    const hasUrl = detectedLinks.length > 0;
     const shouldTrackSpam = settings.antispam?.enabled === true;
     const spamTriggered = shouldTrackSpam ? isSpamTriggered(sock.sessionId, remoteJid, sender, settings.antispam) : false;
 
@@ -608,22 +800,8 @@ export async function handleGroupMessage(sock, m) {
 
     if (settings.antilink?.enabled && hasUrl) {
         triggerLabel = "antilink";
-        const whitelist = [
-            "tervux.com",
-            "www.tervux.com",
-            "github.com/JonniTech",
-            "github.com/tervux",
-            "instagram.com/tervux",
-            "wa.me/message/tervux",
-            "wa.me/255785046741",
-            "tervux.portfolio",
-            "bot.tervux.com",
-            "nyaganya.tervux.com",
-            "github.com/JonniTech/Tervux-WhatsApp-Bot",
-            "nyaganyamalima47@gmail.com"
-        ];
-        const isWhitelisted = whitelist.some(domain => msgText.includes(domain));
-        if (isWhitelisted) {
+        const blockedLinks = detectedLinks.filter((candidate) => !isWhitelistedAntilink(candidate));
+        if (blockedLinks.length === 0) {
             console.log(`🛡️ [Antilink] Skipping whitelisted link in ${remoteJid}`);
             return false;
         }
@@ -943,7 +1121,7 @@ export async function handleGroupMessage(sock, m) {
             if (groupContext.botIsAdmin) {
                 await sock.sendMessage(remoteJid, { delete: m.key });
                 await sock.sendMessage(remoteJid, {
-                    text: `⚠️ @${sender.split("@")[0]}, *mentions are disabled* in this group! Only admins can tag members or use @everyone.`,
+                    text: `⚠️ @${sender.split("@")[0]}, *mentions are disabled* in this group! Only admins can tag members, groups, statuses, or use @everyone.`,
                     mentions: [sender]
                 });
                 logGroupPathTrace(sock, remoteJid, {

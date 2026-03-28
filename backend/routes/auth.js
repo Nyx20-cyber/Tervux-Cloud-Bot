@@ -20,7 +20,6 @@ import sanitizeHtml from "sanitize-html";
 import { syncVipFlagOnUser } from "../services/gamificationService.js";
 
 const sanitize = (str) => sanitizeHtml(str, { allowedTags: [], allowedAttributes: {} }).trim();
-const EAT_OFFSET_MS = 3 * 60 * 60 * 1000; // Africa/Dar_es_Salaam (UTC+3)
 const MAX_REFRESH_TOKENS_PER_USER = 5;
 const AUTH_TRACE = process.env.AUTH_TRACE === "true" || process.env.NODE_ENV !== "production";
 
@@ -58,20 +57,6 @@ const attachRefreshSession = async (user, req, res) => {
         expiresAt: tokenRecord.expiresAt
     });
     return tokenRecord.expiresAt;
-};
-
-const getCurrentDailyClaimWindowStart = (now = new Date()) => {
-    const eatNow = new Date(now.getTime() + EAT_OFFSET_MS);
-    const y = eatNow.getUTCFullYear();
-    const m = eatNow.getUTCMonth();
-    const d = eatNow.getUTCDate();
-    const h = eatNow.getUTCHours();
-
-    let startAtEatMs = Date.UTC(y, m, d, 6, 0, 0, 0); // 12 asubuhi (06:00 EAT)
-    if (h < 6) {
-        startAtEatMs -= 24 * 60 * 60 * 1000;
-    }
-    return new Date(startAtEatMs - EAT_OFFSET_MS);
 };
 
 const router = Router();
@@ -418,81 +403,6 @@ router.post("/tutorial-onboarding/seen", authenticate, async (req, res) => {
     } catch (error) {
         console.error("Tutorial onboarding seen error:", error);
         res.status(500).json({ error: "Failed to update tutorial onboarding state" });
-    }
-});
-
-/**
- * POST /api/auth/daily-claim
- * Claim daily reward (Punch Card)
- */
-router.post("/daily-claim", authenticate, async (req, res) => {
-    try {
-        // Daily reset window is 12:00 asubuhi (06:00 EAT) every day.
-        const now = new Date();
-        const currentWindowStart = getCurrentDailyClaimWindowStart(now);
-        const nextResetAt = new Date(currentWindowStart.getTime() + 24 * 60 * 60 * 1000);
-
-        // Random 1-3 coins
-        const rewardCoins = Math.floor(Math.random() * 3) + 1;
-
-        const user = await User.findOneAndUpdate(
-            {
-                _id: req.user._id,
-                $or: [
-                    { lastDailyClaim: null },
-                    { lastDailyClaim: { $lt: currentWindowStart } }
-                ]
-            },
-            {
-                $inc: {
-                    dailyClaimCount: 1,
-                    coins: rewardCoins
-                },
-                $set: {
-                    lastDailyClaim: now
-                }
-            },
-            {
-                returnDocument: "after"
-            }
-        );
-
-        if (!user) {
-            return res.status(400).json({
-                error: "Already claimed for this cycle. Come back after 12:00 asubuhi (06:00 EAT).",
-                nextClaimAt: nextResetAt.toISOString()
-            });
-        }
-
-        emitToUser(user._id, "balance_update", {
-            coins: user.coins,
-            delta: rewardCoins,
-            reason: "daily_claim"
-        });
-
-        let title = "Daily Reward Claimed! 🎁";
-        let message = `You received your daily reward of ${rewardCoins} coins 🪙! Come back tomorrow!`;
-
-        try {
-            const notification = await Notification.create({
-                userId: user._id,
-                title,
-                message,
-                type: "success"
-            });
-            emitToUser(user._id, "new_notification", notification);
-        } catch (err) {
-            console.error("Failed to create daily claim notification:", err);
-        }
-
-        res.json({
-            success: true,
-            rewardCoins,
-            user: user.toJSON()
-        });
-    } catch (error) {
-        console.error("Daily claim error:", error);
-        res.status(500).json({ error: "Failed to claim daily reward" });
     }
 });
 

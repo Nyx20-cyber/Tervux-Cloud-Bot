@@ -51,7 +51,8 @@ export async function runResellerNudge() {
                 const ok = await sessionManager.sendResellerOpportunityMessage(sessionId, {
                     coinsPack: 250,
                     packPrice: 3000,
-                    deployCost: 50,
+                    deployCost: 12,
+                    deployDurationDays: 7,
                     samplePerBotA: 2000,
                     samplePerBotB: 2500
                 });

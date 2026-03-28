@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "./useAuthStore";
+import type { DeploymentDurationDays } from "@/lib/deploymentPricing";
 
 export interface SessionSettings {
   [key: string]: string | boolean | undefined;
@@ -22,11 +23,23 @@ export interface Session {
   status: string;
   isLive?: boolean;
   expiresAt?: string;
+  deployedAt?: string;
+  deploymentDurationDays?: number | null;
+  deploymentCostCoins?: number | null;
   settings: SessionSettings;
   updatedAt?: string;
-  phoneNumber?: string; // Add if used in UI
+  phoneNumber?: string;
   nodeId?: string;
   createdAt: string;
+}
+
+export interface DeploySessionResult {
+  success: boolean;
+  message: string;
+  coins?: number;
+  expiresAt?: string;
+  deploymentDurationDays?: number;
+  deploymentCostCoins?: number;
 }
 
 interface SessionState {
@@ -37,7 +50,7 @@ interface SessionState {
   updateSessionLocally: (sessionId: string, updates: Partial<Session>) => void;
   updateSessionSettings: (sessionId: string, settings: SessionSettings) => Promise<void>;
   updateSessionStatus: (sessionId: string, status: string) => Promise<void>;
-  deploySession: (sessionId: string) => Promise<{ success: boolean; message: string; coins?: number }>;
+  deploySession: (sessionId: string, durationDays: DeploymentDurationDays) => Promise<DeploySessionResult>;
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
@@ -101,17 +114,25 @@ export const useSessionStore = create<SessionState>((set) => ({
     }
   },
 
-  deploySession: async (sessionId: string) => {
+  deploySession: async (sessionId: string, durationDays: DeploymentDurationDays) => {
     try {
-      const res = await api.post(`/sessions/${sessionId}/deploy`);
+      const res = await api.post(`/sessions/${sessionId}/deploy`, { durationDays });
+      const payload = res.data as DeploySessionResult;
       set((state) => ({
         sessions: state.sessions.map((s) =>
           s._id === sessionId
-            ? { ...s, status: "active", expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() }
+            ? {
+                ...s,
+                status: "active",
+                expiresAt: payload.expiresAt ?? s.expiresAt,
+                deploymentDurationDays: payload.deploymentDurationDays ?? durationDays,
+                deploymentCostCoins: payload.deploymentCostCoins ?? s.deploymentCostCoins,
+                deployedAt: new Date().toISOString(),
+              }
             : s
         ),
       }));
-      return res.data;
+      return payload;
     } catch (error: any) {
       throw new Error(error.response?.data?.error || "Deployment failed");
     }

@@ -14,6 +14,8 @@ interface PaymentRecord {
     _id: string;
     amount: number;
     currency: string;
+    planName?: string;
+    planCoinsAmount?: number;
     provider?: "fastlipa" | "zenopay" | "bongopay";
     paymentMethod?: "mobile_money_tz" | "card";
     status: "pending" | "completed" | "failed" | "cancelled";
@@ -113,7 +115,7 @@ export default function TransactionsPage() {
         return payments.filter((payment) => {
             const query = searchTerm.trim().toLowerCase();
             const matchesSearch = !query || [
-                payment.planId?.name || "",
+                payment.planName || payment.planId?.name || "",
                 payment.payerPhone || "",
                 payment.fastlipaTransactionId || "",
                 payment.gatewayReference || "",
@@ -267,7 +269,7 @@ export default function TransactionsPage() {
                                                             <div className="grid grid-cols-[1.1fr_0.9fr_1fr_1.2fr_auto] items-center gap-4 px-5 py-3">
                                                                 <div className="min-w-0">
                                                                     <p className="truncate text-sm font-semibold text-white">
-                                                                        {payment.planId?.name || "-"}
+                                                                        {payment.planName || payment.planId?.name || "-"}
                                                                     </p>
                                                                     <p className="mt-1 truncate text-[11px] text-gray-500">
                                                                         {payment.fastlipaTransactionId || payment.gatewayReference || `${t.transactions_reference}: ${payment._id.slice(-8)}`}

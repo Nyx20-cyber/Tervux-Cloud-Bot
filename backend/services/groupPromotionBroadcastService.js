@@ -16,8 +16,8 @@ const getEatDateKey = () => {
 };
 
 /**
- * Daily midnight promotion broadcast to all groups of each deployed session.
- * Includes a 1-minute delay per group to reduce spam risk on client numbers.
+ * Daily promotion broadcast to all groups of each deployed session.
+ * Uses a fixed delay between groups and continues until all groups are finished.
  */
 export async function runGroupPromotionBroadcast() {
     if (isRunning) {
@@ -52,24 +52,14 @@ export async function runGroupPromotionBroadcast() {
             await Promise.allSettled(chunk.map(async (s) => {
                 const sid = s._id.toString();
                 try {
-                    const claimed = await WhatsAppSession.findOneAndUpdate(
+                    const alreadySentToday = await WhatsAppSession.exists(
                         {
                             _id: s._id,
-                            $or: [
-                                { lastGroupPromotionBroadcastDateKey: { $exists: false } },
-                                { lastGroupPromotionBroadcastDateKey: { $ne: dateKey } }
-                            ]
-                        },
-                        {
-                            $set: {
-                                lastGroupPromotionBroadcastDateKey: dateKey,
-                                lastGroupPromotionBroadcastAt: new Date()
-                            }
-                        },
-                        { returnDocument: "after" }
-                    ).select("_id");
+                            lastGroupPromotionBroadcastDateKey: dateKey
+                        }
+                    );
 
-                    if (!claimed) {
+                    if (alreadySentToday) {
                         console.log(`📣 [GroupBroadcast] Skipping ${sid}; already sent for ${dateKey}.`);
                         return;
                     }
@@ -79,9 +69,17 @@ export async function runGroupPromotionBroadcast() {
                     }
 
                     const result = await sessionManager.sendGroupPromotionBroadcast(sid, {
-                        groupDelayMs: 60_000,
+                        groupDelayMs: 30_000,
                         ignoreScheduleSetting: true
                     });
+                    if (result?.completed) {
+                        await WhatsAppSession.findByIdAndUpdate(s._id, {
+                            $set: {
+                                lastGroupPromotionBroadcastDateKey: dateKey,
+                                lastGroupPromotionBroadcastAt: new Date()
+                            }
+                        });
+                    }
                     totalSent += Number(result?.sent || 0);
                     totalFailed += Number(result?.failed || 0);
                     totalGroups += Number(result?.total || 0);

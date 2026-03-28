@@ -13,7 +13,8 @@ import { runDeployReminderPush } from "./services/deployReminderService.js";
 import { runReengagementPush } from "./services/reengagementPushService.js";
 import { runReferralReminderPush } from "./services/referralReminderService.js";
 import WhatsAppAuth from "./models/WhatsAppAuth.js";
-import { closeRedis, initRedis } from "./lib/redis.js";
+import { closeRedis, delKey, initRedis } from "./lib/redis.js";
+import { syncDefaultPlans } from "./utils/defaultPlans.js";
 import cron from "node-cron";
 
 const httpServer = createServer(app);
@@ -207,17 +208,20 @@ async function start() {
         await connectDB();
         await initRedis();
 
-        // 2. Seed plans if needed
+        // 2. Ensure default coin plans exist
         const Plan = (await import("./models/Plan.js")).default;
-        const planCount = await Plan.countDocuments();
-        if (planCount === 0) {
-            console.log("🌱 No plans found. Seeding...");
-            await Plan.insertMany([
-                { name: "50 Coins", slug: "50-coins", price: 1500, currency: "TZS", coinsAmount: 50, description: "50 Coins — Deploy 1 Bot" },
-                { name: "100 Coins", slug: "100-coins", price: 2000, currency: "TZS", coinsAmount: 100, description: "100 Coins — Deploy 2 Bots" },
-                { name: "250 Coins", slug: "250-coins", price: 3000, currency: "TZS", coinsAmount: 250, description: "250 Coins — Deploy 5 Bots" }
-            ]);
-            console.log("✅ Plans seeded successfully.");
+        const { created, updated, retired } = await syncDefaultPlans(Plan);
+        if (created.length > 0 || updated.length > 0 || retired.length > 0) {
+            await delKey("public:plans:v1");
+            if (created.length > 0) {
+                console.log(`✅ Added ${created.length} missing coin plan(s): ${created.join(", ")}`);
+            }
+            if (updated.length > 0) {
+                console.log(`✅ Refreshed ${updated.length} default coin plan name/description entries: ${updated.join(", ")}`);
+            }
+            if (retired.length > 0) {
+                console.log(`✅ Retired ${retired.length} old default coin plan(s): ${retired.join(", ")}`);
+            }
         }
 
         // 4. Start HTTP server

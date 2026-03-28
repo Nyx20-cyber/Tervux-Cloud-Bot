@@ -33,12 +33,30 @@ const whatsAppSessionSchema = new mongoose.Schema({
     },
     expiresAt: {
         type: Date,
+        default: null,
+        set: (value) => {
+            if (value === "" || value === null || value === undefined) {
+                return null;
+            }
+            return value;
+        }
+    },
+    deployedAt: {
+        type: Date,
+        default: null
+    },
+    deploymentDurationDays: {
+        type: Number,
+        default: null
+    },
+    deploymentCostCoins: {
+        type: Number,
         default: null
     },
     settings: {
         prefix: { type: String, default: "!" },
         alwaysOnline: { type: Boolean, default: false },
-        autoLikeStatus: { type: Boolean, default: false },
+        autoLikeStatus: { type: Boolean, default: true },
         autoViewStatus: { type: Boolean, default: false },
         antiDelete: { type: Boolean, default: false },
         antiCall: { type: Boolean, default: false },
@@ -66,6 +84,14 @@ const whatsAppSessionSchema = new mongoose.Schema({
     lastGroupPromotionBroadcastDateKey: {
         type: String,
         default: ""
+    },
+    groupPromotionBroadcastCursorJid: {
+        type: String,
+        default: ""
+    },
+    groupPromotionBroadcastCursorUpdatedAt: {
+        type: Date,
+        default: null
     },
     pairingStartedAt: {
         type: Date,

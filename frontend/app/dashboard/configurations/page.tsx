@@ -51,7 +51,9 @@ function ConfigurationsContent() {
     const t = translations[language];
     const isAdmin = user?.role === "admin";
     const restrictedSettingKeys = new Set([
-        "groupPromotionBroadcast",
+        "groupPromotionBroadcast"
+    ]);
+    const hiddenSettingKeys = new Set([
         "officialGroupJoined",
         "officialChannelFollowed",
         "officialChannelFollowBlocked",
@@ -221,7 +223,9 @@ function ConfigurationsContent() {
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                                    {Object.entries(config).map(([key, value]) => (
+                                    {Object.entries(config)
+                                        .filter(([key]) => !hiddenSettingKeys.has(key))
+                                        .map(([key, value]) => (
                                         <div key={key} className="space-y-3">
                                             <label className="text-[9px] font-bold text-gray-500 uppercase tracking-widest ml-1">
                                                 {key.replace(/([A-Z])/g, ' $1').toUpperCase()}

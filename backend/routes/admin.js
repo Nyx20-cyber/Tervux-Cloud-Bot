@@ -35,7 +35,6 @@ const buildPlatformSettingsPayload = (settingsDocOrObj) => ({
     commandFooter: settingsDocOrObj.commandFooter,
     kingBonusCoins: Number(settingsDocOrObj.kingBonusCoins || 100),
     referralBonus: Number(settingsDocOrObj.referralBonus || 10),
-    dailyClaimBannerEnabled: settingsDocOrObj.dailyClaimBannerEnabled !== false,
     tutorialBannerEnabled: settingsDocOrObj.tutorialBannerEnabled !== false,
     tutorialBannerTutorialId: settingsDocOrObj.tutorialBannerTutorialId
         ? String(settingsDocOrObj.tutorialBannerTutorialId)
@@ -416,7 +415,8 @@ router.get("/payments", authenticate, requireAdmin, async (req, res) => {
                 { fastlipaTransactionId: { $regex: search, $options: "i" } },
                 { gatewayReference: { $regex: search, $options: "i" } },
                 { provider: { $regex: search, $options: "i" } },
-                { paymentMethod: { $regex: search, $options: "i" } }
+                { paymentMethod: { $regex: search, $options: "i" } },
+                { planName: { $regex: search, $options: "i" } }
             ];
 
             if (matchingUserIds.length > 0) {
@@ -718,9 +718,15 @@ router.get("/plans", authenticate, requireAdmin, async (req, res) => {
 router.post("/plans", authenticate, requireAdmin, async (req, res) => {
     try {
         const { name, slug, price, currency, coinsAmount, description, isActive } = req.body;
+        const normalizedPrice = Number(price);
+        const normalizedCoinsAmount = Number(coinsAmount);
 
         if (!name || !slug || price === undefined || coinsAmount === undefined) {
             return res.status(400).json({ error: "name, slug, price, and coinsAmount are required" });
+        }
+
+        if (!Number.isFinite(normalizedPrice) || normalizedPrice <= 0 || !Number.isFinite(normalizedCoinsAmount) || normalizedCoinsAmount <= 0 || !Number.isInteger(normalizedCoinsAmount)) {
+            return res.status(400).json({ error: "price must be greater than 0 and coinsAmount must be a whole number greater than 0" });
         }
 
         const existing = await Plan.findOne({ $or: [{ slug }, { name }] });
@@ -730,8 +736,8 @@ router.post("/plans", authenticate, requireAdmin, async (req, res) => {
 
         const plan = await Plan.create({
             name, slug: slug.toLowerCase(),
-            price, currency: currency || "TZS",
-            coinsAmount, description: description || "",
+            price: normalizedPrice, currency: currency || "TZS",
+            coinsAmount: normalizedCoinsAmount, description: description || "",
             isActive: isActive !== undefined ? isActive : true
         });
 
@@ -757,12 +763,21 @@ router.put("/plans/:id", authenticate, requireAdmin, async (req, res) => {
         if (!plan) return res.status(404).json({ error: "Plan not found" });
 
         const { name, slug, price, currency, coinsAmount, description, isActive } = req.body;
+        const normalizedPrice = price !== undefined ? Number(price) : undefined;
+        const normalizedCoinsAmount = coinsAmount !== undefined ? Number(coinsAmount) : undefined;
+
+        if (normalizedPrice !== undefined && (!Number.isFinite(normalizedPrice) || normalizedPrice <= 0)) {
+            return res.status(400).json({ error: "price must be greater than 0" });
+        }
+        if (normalizedCoinsAmount !== undefined && (!Number.isFinite(normalizedCoinsAmount) || normalizedCoinsAmount <= 0 || !Number.isInteger(normalizedCoinsAmount))) {
+            return res.status(400).json({ error: "coinsAmount must be a whole number greater than 0" });
+        }
 
         if (name !== undefined) plan.name = name;
         if (slug !== undefined) plan.slug = slug.toLowerCase();
-        if (price !== undefined) plan.price = price;
+        if (normalizedPrice !== undefined) plan.price = normalizedPrice;
         if (currency !== undefined) plan.currency = currency;
-        if (coinsAmount !== undefined) plan.coinsAmount = coinsAmount;
+        if (normalizedCoinsAmount !== undefined) plan.coinsAmount = normalizedCoinsAmount;
         if (description !== undefined) plan.description = description;
         if (isActive !== undefined) plan.isActive = isActive;
 
@@ -1078,7 +1093,7 @@ router.post("/group-broadcast/manual", authenticate, requireAdmin, async (req, r
         };
 
         const sessions = await WhatsAppSession.find(filter).select("_id status phone expiresAt settings");
-        const groupDelayMs = Number(req.body.groupDelayMs || 60_000);
+        const groupDelayMs = Number(req.body.groupDelayMs || 30_000);
 
         let triggered = 0;
         let totalSkipped = 0;
@@ -1565,7 +1580,6 @@ router.put("/settings", authenticate, requireAdmin, async (req, res) => {
             commandFooter,
             kingBonusCoins,
             referralBonus,
-            dailyClaimBannerEnabled,
             tutorialBannerEnabled,
             tutorialBannerTutorialId
         } = req.body;
@@ -1581,7 +1595,6 @@ router.put("/settings", authenticate, requireAdmin, async (req, res) => {
         if (commandFooter !== undefined && String(commandFooter).trim()) settings.commandFooter = String(commandFooter);
         if (kingBonusCoins !== undefined && Number(kingBonusCoins) > 0) settings.kingBonusCoins = Number(kingBonusCoins);
         if (referralBonus !== undefined && Number(referralBonus) > 0) settings.referralBonus = Number(referralBonus);
-        if (dailyClaimBannerEnabled !== undefined) settings.dailyClaimBannerEnabled = !!dailyClaimBannerEnabled;
         if (tutorialBannerEnabled !== undefined) settings.tutorialBannerEnabled = !!tutorialBannerEnabled;
         if (tutorialBannerTutorialId !== undefined) {
             if (!tutorialBannerTutorialId) {

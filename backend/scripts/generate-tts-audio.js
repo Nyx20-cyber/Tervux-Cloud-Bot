@@ -16,7 +16,7 @@ const jobs = [
   },
   {
     name: "deploy-success.mp3",
-    text: "Congratulations. Your bot has been deployed successfully using fifty coins. It is now active twenty four hours a day for thirty days. Open your dashboard to configure features and run help commands."
+    text: "Congratulations. Your bot has been deployed successfully. Your selected deployment time is now active twenty four hours a day. Open your dashboard to configure features and run help commands."
   }
 ];
 

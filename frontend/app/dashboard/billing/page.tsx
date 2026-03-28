@@ -73,6 +73,25 @@ function BillingContent() {
             usd: (amount / EXCHANGE_RATES.USD_TO_TZS).toFixed(2)
         };
     };
+    const getPlanDeploymentDays = (slug?: string) => {
+        const daysBySlug: Record<string, number> = {
+            "3-coins": 1,
+            "6-coins": 3,
+            "12-coins": 7
+        };
+
+        return slug ? daysBySlug[slug] || null : null;
+    };
+    const getLocalizedPlanDescription = (plan: { slug?: string; description?: string }) => {
+        const days = getPlanDeploymentDays(plan?.slug);
+        if (!days) return plan?.description || "";
+
+        if (language === "sw") {
+            return `Inatosha ku-deploy bot 1 kwa siku ${days}`;
+        }
+
+        return `Enough to deploy 1 bot for ${days} day${days === 1 ? "" : "s"}`;
+    };
 
     useEffect(() => {
         api.get("/plans").then(res => {
@@ -275,6 +294,7 @@ function BillingContent() {
                     </div>
                 ) : plans.map((plan: any) => {
                     const approx = getApproxPlanCurrencies(plan.price);
+                    const deploymentDays = getPlanDeploymentDays(plan.slug);
                     return (
                     <div key={plan._id} className="relative group">
                         {plan._id === bestValuePlanId && (
@@ -293,6 +313,11 @@ function BillingContent() {
                                     {plan.coinsAmount} {t.coins_included_short}
                                 </div>
                             </div>
+                            {getLocalizedPlanDescription(plan) && (
+                                <p className="mt-2 text-[11px] font-semibold text-gray-400 leading-relaxed line-clamp-1">
+                                    {getLocalizedPlanDescription(plan)}
+                                </p>
+                            )}
 
                             <div className="mt-5 flex items-end gap-2">
                                 <div className="text-3xl sm:text-4xl font-black text-white tabular-nums leading-none">
@@ -312,14 +337,19 @@ function BillingContent() {
                                 </span>
                             </div>
 
-                            <div className="mt-4 p-3 rounded-2xl border border-white/10 bg-white/[0.03]">
-                                <p className="text-[9px] font-black uppercase tracking-widest text-gray-500">{t.billing_plan_summary}</p>
-                                <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-gray-300">
-                                    {tr("deploy_up_to_bots", { count: Math.floor(plan.coinsAmount / 50) })}
-                                </p>
-                            </div>
-
                             <ul className="mt-4 sm:mt-5 space-y-3 flex-1">
+                                {deploymentDays && (
+                                    <li className="flex items-center gap-3 group/item">
+                                        <div className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 group-hover/item:scale-110 transition-transform">
+                                            <CheckCircle2 className="w-3.5 h-3.5 stroke-[2.5]" />
+                                        </div>
+                                        <span className="text-[10px] sm:text-[11px] font-bold text-gray-300 uppercase tracking-wider">
+                                            {language === "sw"
+                                                ? `BOT ACTIVE KWA SIKU ${deploymentDays}`
+                                                : `BOT ACTIVE FOR ${deploymentDays} DAY${deploymentDays === 1 ? "" : "S"}`}
+                                        </span>
+                                    </li>
+                                )}
                                 <li className="flex items-center gap-3 group/item">
                                     <div className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 group-hover/item:scale-110 transition-transform">
                                         <CheckCircle2 className="w-3.5 h-3.5 stroke-[2.5]" />

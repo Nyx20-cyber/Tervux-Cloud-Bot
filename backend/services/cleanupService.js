@@ -164,7 +164,7 @@ async function healUnresponsiveLiveSessions() {
 }
 
 /**
- * Expired bots: Deletes sessions that have passed their 30-day deployment timestamp.
+ * Expired bots: Deletes sessions that have passed their deployment expiry timestamp.
  */
 async function cleanExpiredBots() {
     const now = new Date();
@@ -175,7 +175,7 @@ async function cleanExpiredBots() {
     });
 
     for (const session of expiredSessions) {
-        console.log(`   ⏳ [Expired] Auto-deleting expired 30-day session ${session._id} (${session.phone || "unknown"})`);
+        console.log(`   ⏳ [Expired] Auto-deleting expired deployment session ${session._id} (${session.phone || "unknown"})`);
         const sessionId = session._id.toString();
         const userId = session.userId?.toString?.() || String(session.userId);
         const hasAuth = await WhatsAppAuth.exists({ sessionId, type: "creds" });
@@ -183,7 +183,10 @@ async function cleanExpiredBots() {
         // Best effort: send final expiry message only if session is ALREADY connected.
         try {
             if (sessionManager.isConnected(sessionId)) {
-                await sessionManager.sendDeploymentExpiredMessage(sessionId, { expiredAt: session.expiresAt });
+                await sessionManager.sendDeploymentExpiredMessage(sessionId, {
+                    expiredAt: session.expiresAt,
+                    durationDays: session.deploymentDurationDays || undefined
+                });
                 await new Promise((r) => setTimeout(r, 1200));
             }
         } catch (e) {
@@ -214,7 +217,7 @@ async function cleanExpiredBots() {
     }
 
     if (expiredSessions.length > 0) {
-        console.log(`   🧹 Cleaned ${expiredSessions.length} expired 30-day session(s).`);
+        console.log(`   🧹 Cleaned ${expiredSessions.length} expired deployment session(s).`);
     }
 }
 

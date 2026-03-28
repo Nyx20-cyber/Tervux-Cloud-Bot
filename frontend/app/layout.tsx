@@ -12,6 +12,7 @@ const outfit = Outfit({
 });
 
 import { TooltipProvider } from "@/components/ui/tooltip";
+import LocaleBootstrap from "@/components/LocaleBootstrap";
 
 export const metadata: Metadata = {
   title: translations.en.site_title,
@@ -41,6 +42,7 @@ export default function RootLayout({
       <body className={`${outfit.variable} antialiased min-h-screen relative overflow-x-hidden selection:bg-primary/30`}>
         <AuthProvider>
           <TooltipProvider>
+            <LocaleBootstrap />
             <ParticlesBackground />
             <div className="relative z-10 w-full">
               <PWARegistration />
