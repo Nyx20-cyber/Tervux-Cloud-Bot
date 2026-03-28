@@ -233,6 +233,32 @@ function identitySetsOverlap(left, right) {
     return false;
 }
 
+function collectStatusParticipantCandidates(message) {
+    const candidates = [];
+    const values = [
+        message?.key?.participant,
+        message?.participant,
+        message?.key?.participantPn,
+        message?.participantPn
+    ];
+
+    for (const value of values) {
+        const raw = String(value || "").trim();
+        if (raw && !candidates.includes(raw)) {
+            candidates.push(raw);
+        }
+
+        if (raw) {
+            const normalized = jidNormalizedUser(raw);
+            if (normalized && !candidates.includes(normalized)) {
+                candidates.push(normalized);
+            }
+        }
+    }
+
+    return candidates.filter(Boolean);
+}
+
 function isOwnerCommandMessage(sock, message, config) {
     const senderRaw = message?.key?.participant || message?.participant || message?.key?.remoteJid || "";
     const senderJid = senderRaw ? jidNormalizedUser(senderRaw) : "";
@@ -278,6 +304,10 @@ class SessionManager {
         this.CONFIG_CACHE_TTL = Number.parseInt(process.env.WA_CONFIG_CACHE_TTL_MS || "30000", 10);
         this.RUNTIME_META_CACHE_TTL = Number.parseInt(process.env.WA_RUNTIME_META_CACHE_TTL_MS || "30000", 10);
         this.STATUS_AUTOMATION_MIN_INTERVAL_MS = Number.parseInt(process.env.WA_STATUS_AUTOMATION_MIN_INTERVAL_MS || "15000", 10);
+        this.STATUS_VIEW_DELAY_MIN_MS = Number.parseInt(process.env.WA_STATUS_VIEW_DELAY_MIN_MS || "9000", 10);
+        this.STATUS_VIEW_DELAY_MAX_MS = Number.parseInt(process.env.WA_STATUS_VIEW_DELAY_MAX_MS || "22000", 10);
+        this.STATUS_LIKE_DELAY_MIN_MS = Number.parseInt(process.env.WA_STATUS_LIKE_DELAY_MIN_MS || "4000", 10);
+        this.STATUS_LIKE_DELAY_MAX_MS = Number.parseInt(process.env.WA_STATUS_LIKE_DELAY_MAX_MS || "12000", 10);
         this.DELAYED_COMMAND_HEAL_THRESHOLD_MS = Number.parseInt(process.env.WA_DELAYED_COMMAND_HEAL_THRESHOLD_MS || "20000", 10);
         this.DELAYED_COMMAND_HEAL_COOLDOWN_MS = Number.parseInt(process.env.WA_DELAYED_COMMAND_HEAL_COOLDOWN_MS || "180000", 10);
         this.RUNTIME_HEALTH_INTERVAL_MS = Number.parseInt(process.env.WA_RUNTIME_HEALTH_INTERVAL_MS || "60000", 10);
@@ -1073,6 +1103,39 @@ class SessionManager {
         return true;
     }
 
+    async markStatusAsViewed(sock, message) {
+        if (!message?.key?.id || message.key.fromMe || message.key.remoteJid !== "status@broadcast") {
+            return false;
+        }
+
+        const participants = collectStatusParticipantCandidates(message);
+        if (participants.length === 0) {
+            return false;
+        }
+
+        let lastError = null;
+
+        for (const participant of participants) {
+            try {
+                await sock.readMessages([{
+                    remoteJid: "status@broadcast",
+                    id: message.key.id,
+                    fromMe: false,
+                    participant
+                }]);
+                return true;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        if (lastError) {
+            throw lastError;
+        }
+
+        return false;
+    }
+
     shouldRunAmbientTask(sessionId, taskKey, cooldownMs) {
         const key = `${String(sessionId)}:${taskKey}`;
         const now = Date.now();
@@ -1415,11 +1478,14 @@ class SessionManager {
                 configCache: null,
                 configCacheTime: 0,
                 messageCache: new Map(),
+                viewedStatusIds: new Map(),
+                queuedStatusIds: new Set(),
                 processedMessageIds: new Map(),
                 lastActivityAt: Date.now(),
                 connectStartedAt: Date.now(),
                 connectionState: "connecting",
                 lastStatusAutomationAt: 0,
+                statusAutomationInFlight: false,
                 lastCommandSuccessAt: 0,
                 heartbeatFailures: 0,
                 staleProbeFailures: 0,
@@ -1786,6 +1852,9 @@ ${footer}`
 
                         const entry = this.sessions.get(sessionId);
                         if (!entry || entry.connectionState !== "open") continue;
+                        if (entry.viewedStatusIds?.has(m.key.id)) continue;
+                        if (entry.queuedStatusIds?.has(m.key.id)) continue;
+                        if (entry.statusAutomationInFlight && (entry.queuedStatusIds?.size || 0) >= 1) continue;
                         if (Date.now() - (entry.lastStatusAutomationAt || 0) < this.STATUS_AUTOMATION_MIN_INTERVAL_MS) {
                             continue;
                         }
@@ -1799,53 +1868,94 @@ ${footer}`
                         if ((this.commandLaneDepths.get(String(sessionId)) || 0) > 0) continue;
                         if (this.isSystemUnderPressure()) continue;
 
-                        const participantRaw = m.key.participant || m.participant;
-                        const participant = participantRaw ? jidNormalizedUser(participantRaw) : "";
+                        entry.queuedStatusIds?.add(m.key.id);
+                        setTimeout(() => {
+                            const latestEntry = this.sessions.get(sessionId);
+                            if (!latestEntry) return;
+                            if (latestEntry.statusAutomationInFlight) return;
+                            latestEntry.queuedStatusIds?.delete(m.key.id);
+                        }, Math.max(this.STATUS_VIEW_DELAY_MAX_MS + this.STATUS_LIKE_DELAY_MAX_MS + 15000, 45000));
                         this.enqueueLowPriorityTask(sessionId, "status-automation", async () => {
                             const latestEntry = this.sessions.get(sessionId);
                             if (!latestEntry || latestEntry.connectionState !== "open") return null;
+                            if (latestEntry.viewedStatusIds?.has(m.key.id)) return null;
                             if (Date.now() - (latestEntry.lastStatusAutomationAt || 0) < this.STATUS_AUTOMATION_MIN_INTERVAL_MS) {
                                 return null;
                             }
 
-                            latestEntry.lastStatusAutomationAt = Date.now();
-                            if (config?.autoViewStatus) {
-                                try {
-                                    if (!participant || !m.key?.id) {
-                                        console.warn(`[${sessionId}] Auto-view skipped: missing participant or status message ID.`);
-                                    } else {
-                                        await sock.sendPresenceUpdate("available", participant);
-                                        await sock.readMessages([{
-                                            remoteJid: "status@broadcast",
-                                            id: m.key.id,
-                                            fromMe: false,
-                                            participant
-                                        }]);
-                                        console.log(`[${sessionId}] ✅ Auto-viewed status from ${participant} (${m.key.id})`);
-                                    }
-                                } catch (err) {
-                                    console.error(`[${sessionId}] Auto View Status failed:`, err.message);
-                                }
-                            }
+                            latestEntry.queuedStatusIds?.delete(m.key.id);
+                            latestEntry.statusAutomationInFlight = true;
 
-                            if (config?.autoLikeStatus) {
-                                try {
-                                    if (!participant) {
-                                        console.warn(`[${sessionId}] Auto-like skipped: missing participant for status message ${m.key?.id || "unknown"}.`);
-                                    } else {
+                            try {
+                                const participants = collectStatusParticipantCandidates(m);
+                                const primaryParticipant = participants[0] || "";
+                                const minDelay = Math.max(1000, this.STATUS_VIEW_DELAY_MIN_MS);
+                                const maxDelay = Math.max(minDelay, this.STATUS_VIEW_DELAY_MAX_MS);
+                                const humanDelayMs = minDelay + Math.floor(Math.random() * (maxDelay - minDelay + 1));
+
+                                await baileysDelay(humanDelayMs);
+
+                                if (!isCurrentSocket()) return null;
+                                if (!latestEntry || latestEntry.connectionState !== "open") return null;
+                                if (latestEntry.viewedStatusIds?.has(m.key.id)) return null;
+                                latestEntry.lastStatusAutomationAt = Date.now();
+
+                                let viewed = false;
+
+                                if (config?.autoViewStatus) {
+                                    try {
+                                        if (!primaryParticipant || !m.key?.id) {
+                                            console.warn(`[${sessionId}] Auto-view skipped: missing participant or status message ID.`);
+                                        } else {
+                                            await sock.sendPresenceUpdate("available", primaryParticipant).catch(() => {});
+                                            viewed = await this.markStatusAsViewed(sock, m);
+                                            if (viewed) {
+                                                latestEntry.viewedStatusIds.set(m.key.id, Date.now());
+                                                while (latestEntry.viewedStatusIds.size > 300) {
+                                                    const oldestKey = latestEntry.viewedStatusIds.keys().next().value;
+                                                    latestEntry.viewedStatusIds.delete(oldestKey);
+                                                }
+                                                console.log(`[${sessionId}] ✅ Auto-viewed status from ${primaryParticipant} (${m.key.id}) after ${humanDelayMs}ms`);
+                                            }
+                                        }
+                                    } catch (err) {
+                                        console.error(`[${sessionId}] Auto View Status failed:`, err.message);
+                                    }
+                                }
+
+                                const shouldLikeStatus = Boolean(
+                                    config?.autoLikeStatus &&
+                                    primaryParticipant &&
+                                    (!config?.autoViewStatus || viewed)
+                                );
+
+                                if (shouldLikeStatus) {
+                                    try {
+                                        const likeMinDelay = Math.max(1000, this.STATUS_LIKE_DELAY_MIN_MS);
+                                        const likeMaxDelay = Math.max(likeMinDelay, this.STATUS_LIKE_DELAY_MAX_MS);
+                                        const likeDelayMs = likeMinDelay + Math.floor(Math.random() * (likeMaxDelay - likeMinDelay + 1));
+                                        await baileysDelay(likeDelayMs);
+                                        if (!isCurrentSocket()) return null;
+                                        if (!latestEntry || latestEntry.connectionState !== "open") return null;
                                         const emoji = getRandomEmoji();
                                         await sock.sendMessage(m.key.remoteJid, {
                                             react: { text: emoji, key: m.key }
-                                        }, { statusJidList: [participant] });
-                                        console.log(`[${sessionId}] ❤️ Auto-reacted to status from ${participant} with ${emoji}`);
+                                        }, { statusJidList: [primaryParticipant] });
+                                        console.log(`[${sessionId}] ❤️ Auto-reacted to status from ${primaryParticipant} with ${emoji}`);
+                                    } catch (err) {
+                                        console.error(`[${sessionId}] Auto Like Status failed:`, err.message);
                                     }
-                                } catch (err) {
-                                    console.error(`[${sessionId}] Auto Like Status failed:`, err.message);
+                                }
+
+                                return null;
+                            } finally {
+                                const currentEntry = this.sessions.get(sessionId);
+                                if (currentEntry) {
+                                    currentEntry.statusAutomationInFlight = false;
+                                    currentEntry.queuedStatusIds?.delete(m.key.id);
                                 }
                             }
-
-                            return null;
-                        }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+                        }, { backlogLimit: 1, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
                     }
                 }
             });
@@ -2482,6 +2592,8 @@ ${text}
             sock, reconnectAttempts: 0,
             configCache: null, configCacheTime: 0,
             messageCache: new Map(),
+            viewedStatusIds: new Map(),
+            queuedStatusIds: new Set(),
             processedMessageIds: new Map()
         });
 
