@@ -1,5 +1,4 @@
 import { Router } from "express";
-import mongoose from "../lib/db.js";
 import { authenticate } from "../middleware/auth.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import WhatsAppAuth from "../models/WhatsAppAuth.js";
@@ -285,7 +284,6 @@ router.get("/pair/latest-qr", authenticate, async (req, res) => {
  * Deploy a bot using one of the supported duration options
  */
 router.post("/:id/deploy", authenticate, async (req, res) => {
-    const dbSession = await mongoose.startSession();
     try {
         const durationDays = Number(req.body?.durationDays);
         if (!isValidDeploymentDuration(durationDays)) {
@@ -299,78 +297,130 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         };
 
         let deploymentResult = null;
+        const existingSession = await WhatsAppSession.findOne({
+            _id: req.params.id,
+            userId: req.user._id
+        });
 
-        await dbSession.withTransaction(async () => {
-            const waSession = await WhatsAppSession.findOne({
+        if (!existingSession) {
+            fail(404, "Session not found");
+        }
+
+        if (
+            existingSession.expiresAt &&
+            existingSession.status === "active" &&
+            new Date(existingSession.expiresAt) > new Date()
+        ) {
+            fail(400, "Session is already deployed and active");
+        }
+
+        const existingUser = await User.findById(req.user._id);
+        if (!existingUser) {
+            fail(404, "User not found");
+        }
+
+        syncVipFlagOnUser(existingUser);
+
+        const cost = getDeploymentCost(durationDays, existingUser.isVIP);
+        if (!Number.isFinite(cost)) {
+            fail(400, `Invalid deployment duration: ${durationDays} days. Valid options: 1, 3, or 7 days.`);
+        }
+
+        if (cost < 0) {
+            fail(400, "Invalid deployment pricing configuration. Please contact support.");
+        }
+
+        const refundedOps = {
+            $inc: {
+                coins: cost,
+                totalDeployments: -1,
+                totalCoinsSpent: -cost
+            }
+        };
+
+        const refundUserCharge = async () => {
+            try {
+                await User.findByIdAndUpdate(req.user._id, refundedOps);
+            } catch (refundError) {
+                console.error("Failed to refund user after deploy error:", refundError);
+            }
+        };
+
+        let user = await User.findOneAndUpdate(
+            {
+                _id: req.user._id,
+                coins: { $gte: cost }
+            },
+            {
+                $inc: {
+                    coins: -cost,
+                    totalDeployments: 1,
+                    totalCoinsSpent: cost
+                }
+            },
+            { new: true }
+        );
+
+        if (!user) {
+            fail(402, `Insufficient coins. You need ${cost} coins to deploy.`);
+        }
+
+        const deployedAt = new Date();
+        const expiresAt = new Date(deployedAt.getTime() + getDeploymentDurationMs(durationDays));
+
+        const waSession = await WhatsAppSession.findOneAndUpdate(
+            {
+                _id: req.params.id,
+                userId: req.user._id,
+                $or: [
+                    { status: { $ne: "active" } },
+                    { expiresAt: null },
+                    { expiresAt: { $lte: deployedAt } }
+                ]
+            },
+            {
+                $set: {
+                    status: "active",
+                    autoReconnectDisabled: false,
+                    disconnectIntent: "none",
+                    lastDisconnectedAt: null,
+                    deployedAt,
+                    deploymentDurationDays: durationDays,
+                    deploymentCostCoins: cost,
+                    expiresAt
+                }
+            },
+            { new: true }
+        );
+
+        if (!waSession) {
+            await refundUserCharge();
+
+            const latestSession = await WhatsAppSession.findOne({
                 _id: req.params.id,
                 userId: req.user._id
-            }).session(dbSession);
+            }).select("_id status expiresAt");
 
-            if (!waSession) {
+            if (!latestSession) {
                 fail(404, "Session not found");
-                return;
             }
 
-            if (waSession.expiresAt && 
-                waSession.status === "active" && 
-                new Date(waSession.expiresAt) > new Date()) {
+            if (
+                latestSession.expiresAt &&
+                latestSession.status === "active" &&
+                new Date(latestSession.expiresAt) > deployedAt
+            ) {
                 fail(400, "Session is already deployed and active");
-                return;
             }
 
-            let user = await User.findById(req.user._id).session(dbSession);
-            if (!user) {
-                fail(404, "User not found");
-                return;
-            }
+            fail(500, "Failed to update deployment session");
+        }
 
+        let earnedBotMaster = false;
+        let earnedVIP = false;
+
+        try {
             syncVipFlagOnUser(user);
-
-            const cost = getDeploymentCost(durationDays, user.isVIP);
-            if (!Number.isFinite(cost)) {
-                fail(400, `Invalid deployment duration: ${durationDays} days. Valid options: 1, 3, or 7 days.`);
-                return;
-            }
-
-            if (cost < 0) {
-                fail(400, "Invalid deployment pricing configuration. Please contact support.");
-                return;
-            }
-
-            if (user.coins < cost) {
-                fail(402, `Insufficient coins. You need ${cost} coins to deploy.`);
-                return;
-            }
-
-            // Use atomic findByIdAndUpdate to prevent race conditions with concurrent deployments
-            user = await User.findByIdAndUpdate(
-                req.user._id,
-                {
-                    $inc: { 
-                        coins: -cost,
-                        totalDeployments: 1,
-                        totalCoinsSpent: cost
-                    }
-                },
-                { new: true, session: dbSession }
-            );
-
-            if (!user) {
-                fail(500, "Failed to update user balance");
-                return;
-            }
-
-            // Verify the balance didn't go negative (should not happen given the check above, but defensive)
-            if (user.coins < 0) {
-                fail(402, `Insufficient coins. You need ${cost} coins to deploy.`);
-                return;
-            }
-
-            // Re-sync VIP flag based on updated totals
-            syncVipFlagOnUser(user);
-
-            let earnedBotMaster = false;
-            let earnedVIP = false;
 
             if (user.totalDeployments >= BOT_MASTER_DEPLOYMENT_THRESHOLD && !user.badges.includes("bot_master")) {
                 user.badges.push("bot_master");
@@ -387,35 +437,25 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
                 earnedVIP = true;
             }
 
-            const deployedAt = new Date();
-            const expiresAt = new Date(deployedAt.getTime() + getDeploymentDurationMs(durationDays));
+            await user.save();
+        } catch (userSaveError) {
+            console.error("Failed to persist deployment rewards:", userSaveError);
+            user = await User.findById(req.user._id).select("coins");
+        }
 
-            waSession.status = "active";
-            waSession.autoReconnectDisabled = false;
-            waSession.disconnectIntent = "none";
-            waSession.lastDisconnectedAt = null;
-            waSession.deployedAt = deployedAt;
-            waSession.deploymentDurationDays = durationDays;
-            waSession.deploymentCostCoins = cost;
-            waSession.expiresAt = expiresAt;
-
-            await user.save({ session: dbSession });
-            await waSession.save({ session: dbSession });
-
-            deploymentResult = {
-                sessionId: waSession._id.toString(),
-                sessionPhone: waSession.phone || "your device",
-                sessionStatus: waSession.status,
-                userId: user._id.toString(),
-                coins: user.coins,
-                cost,
-                durationDays,
-                deployedAt,
-                expiresAt,
-                earnedBotMaster,
-                earnedVIP
-            };
-        });
+        deploymentResult = {
+            sessionId: waSession._id.toString(),
+            sessionPhone: waSession.phone || "your device",
+            sessionStatus: waSession.status,
+            userId: req.user._id.toString(),
+            coins: user?.coins ?? Math.max((existingUser.coins || 0) - cost, 0),
+            cost,
+            durationDays,
+            deployedAt,
+            expiresAt,
+            earnedBotMaster,
+            earnedVIP
+        };
 
         if (!deploymentResult) {
             throw new Error("Deployment transaction did not complete.");
@@ -490,8 +530,6 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         console.error("Deploy bot error:", error);
         const statusCode = Number(error?.statusCode || 500);
         res.status(statusCode).json({ error: statusCode === 500 ? "Failed to deploy bot" : error.message });
-    } finally {
-        await dbSession.endSession();
     }
 });
 
