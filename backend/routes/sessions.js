@@ -328,7 +328,12 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
 
             const cost = getDeploymentCost(durationDays, user.isVIP);
             if (!Number.isFinite(cost)) {
-                fail(400, "Invalid deployment pricing option.");
+                fail(400, `Invalid deployment duration: ${durationDays} days. Valid options: 1, 3, or 7 days.`);
+                return;
+            }
+
+            if (cost < 0) {
+                fail(400, "Invalid deployment pricing configuration. Please contact support.");
                 return;
             }
 

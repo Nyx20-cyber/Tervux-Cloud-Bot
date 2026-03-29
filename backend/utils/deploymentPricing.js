@@ -17,8 +17,9 @@ export function getDeploymentBaseCost(days) {
 
 export function getDeploymentCost(days, isVIP = false) {
     const baseCost = getDeploymentBaseCost(days);
-    if (!Number.isFinite(baseCost)) return null;
-    return isVIP ? Math.max(1, baseCost - 2) : baseCost;
+    if (!Number.isFinite(baseCost)) return baseCost; // Return null for invalid options to be handled by caller
+    const cost = isVIP ? Math.max(1, baseCost - 2) : baseCost;
+    return Number.isFinite(cost) ? cost : baseCost;
 }
 
 export function getDeploymentDurationMs(days) {
@@ -26,11 +27,15 @@ export function getDeploymentDurationMs(days) {
 }
 
 export function getDeploymentExamplesForCoins(coins, isVIP = false) {
-    return DEPLOYMENT_OPTIONS.map((option) => ({
-        ...option,
-        cost: getDeploymentCost(option.days, isVIP),
-        count: Math.floor(Number(coins || 0) / Math.max(getDeploymentCost(option.days, isVIP) || 1, 1))
-    }));
+    return DEPLOYMENT_OPTIONS.map((option) => {
+        const cost = getDeploymentCost(option.days, isVIP);
+        const finalCost = Number.isFinite(cost) ? cost : option.baseCost;
+        return {
+            ...option,
+            cost: finalCost,
+            count: Math.floor(Number(coins || 0) / Math.max(finalCost || 1, 1))
+        };
+    });
 }
 
 export function getDeploymentReminderThresholdsMs(days) {
