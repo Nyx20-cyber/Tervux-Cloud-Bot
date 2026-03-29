@@ -308,15 +308,20 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
 
             if (!waSession) {
                 fail(404, "Session not found");
+                return;
             }
 
-            if (waSession.expiresAt && new Date(waSession.expiresAt) > new Date()) {
+            if (waSession.expiresAt && 
+                waSession.status === "active" && 
+                new Date(waSession.expiresAt) > new Date()) {
                 fail(400, "Session is already deployed and active");
+                return;
             }
 
-            const user = await User.findById(req.user._id).session(dbSession);
+            let user = await User.findById(req.user._id).session(dbSession);
             if (!user) {
                 fail(404, "User not found");
+                return;
             }
 
             syncVipFlagOnUser(user);
@@ -324,15 +329,40 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
             const cost = getDeploymentCost(durationDays, user.isVIP);
             if (!Number.isFinite(cost)) {
                 fail(400, "Invalid deployment pricing option.");
+                return;
             }
 
             if (user.coins < cost) {
                 fail(402, `Insufficient coins. You need ${cost} coins to deploy.`);
+                return;
             }
 
-            user.coins -= cost;
-            user.totalDeployments = (user.totalDeployments || 0) + 1;
-            user.totalCoinsSpent = (user.totalCoinsSpent || 0) + cost;
+            // Use atomic findByIdAndUpdate to prevent race conditions with concurrent deployments
+            user = await User.findByIdAndUpdate(
+                req.user._id,
+                {
+                    $inc: { 
+                        coins: -cost,
+                        totalDeployments: 1,
+                        totalCoinsSpent: cost
+                    }
+                },
+                { new: true, session: dbSession }
+            );
+
+            if (!user) {
+                fail(500, "Failed to update user balance");
+                return;
+            }
+
+            // Verify the balance didn't go negative (should not happen given the check above, but defensive)
+            if (user.coins < 0) {
+                fail(402, `Insufficient coins. You need ${cost} coins to deploy.`);
+                return;
+            }
+
+            // Re-sync VIP flag based on updated totals
+            syncVipFlagOnUser(user);
 
             let earnedBotMaster = false;
             let earnedVIP = false;
@@ -419,7 +449,11 @@ router.post("/:id/deploy", authenticate, async (req, res) => {
         });
 
         if (!sessionManager.isConnected(deploymentResult.sessionId)) {
-            sessionManager.connectSession(deploymentResult.sessionId, { useReconnectPermit: true, reconnectReason: "deploy" });
+            try {
+                await sessionManager.connectSession(deploymentResult.sessionId, { useReconnectPermit: true, reconnectReason: "deploy" });
+            } catch (connErr) {
+                console.warn(`[${deploymentResult.sessionId}] Connection attempt after deploy failed:`, connErr.message);
+            }
         }
 
         const deployedSessionId = deploymentResult.sessionId;
