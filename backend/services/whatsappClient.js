@@ -587,6 +587,32 @@ class SessionManager {
         entry.commandPriorityUntil = Date.now() + Math.max(0, Number(durationMs) || 0);
     }
 
+    async _waitForCommandPriorityClear(sessionId, options = {}) {
+        const sid = String(sessionId);
+        const pollMs = Math.max(250, Number(options.pollMs || 1500));
+        const maxWaitMs = Math.max(0, Number(options.maxWaitMs || 0));
+        const startedAt = Date.now();
+        let wasBlocked = false;
+
+        while (this._hasCommandPriority(sid)) {
+            wasBlocked = true;
+            if (maxWaitMs > 0 && (Date.now() - startedAt) >= maxWaitMs) {
+                return {
+                    cleared: false,
+                    waitedMs: Date.now() - startedAt,
+                    wasBlocked
+                };
+            }
+            await baileysDelay(pollMs);
+        }
+
+        return {
+            cleared: true,
+            waitedMs: Date.now() - startedAt,
+            wasBlocked
+        };
+    }
+
     async _enqueueLaneTask(sessionId, laneName, fn, options = {}) {
         const sid = String(sessionId);
         const isLowPriority = laneName === "low";
@@ -3466,6 +3492,13 @@ https://bot.tervux.com
                 firstProcessedJid = jid;
             }
 
+            const priorityWait = await this._waitForCommandPriorityClear(sessionId);
+            if (priorityWait.wasBlocked && priorityWait.cleared) {
+                console.log(
+                    `[${sessionId}] 📣 Resuming group broadcast after waiting ${Math.round(priorityWait.waitedMs / 1000)}s for command priority.`
+                );
+            }
+
             try {
                 if (logo) {
                     await sock.sendMessage(jid, {
@@ -3489,7 +3522,19 @@ https://bot.tervux.com
             await persistBroadcastCursor(lastProcessedJid);
 
             if (i < groupList.length - 1 && groupDelayMs > 0) {
-                await baileysDelay(groupDelayMs);
+                const delayStartedAt = Date.now();
+                while ((Date.now() - delayStartedAt) < groupDelayMs) {
+                    const priorityGap = await this._waitForCommandPriorityClear(sessionId);
+                    if (priorityGap.wasBlocked && priorityGap.cleared) {
+                        console.log(
+                            `[${sessionId}] 📣 Holding inter-group delay for command priority (${Math.round(priorityGap.waitedMs / 1000)}s).`
+                        );
+                    }
+
+                    const remainingMs = groupDelayMs - (Date.now() - delayStartedAt);
+                    if (remainingMs <= 0) break;
+                    await baileysDelay(Math.min(remainingMs, 1500));
+                }
             }
         }
 
