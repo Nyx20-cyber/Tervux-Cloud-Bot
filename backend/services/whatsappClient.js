@@ -613,6 +613,43 @@ class SessionManager {
         };
     }
 
+    async _sendMessageWithTimeout(sessionId, sock, remoteJid, content, sendOptions = {}, options = {}) {
+        const sid = String(sessionId);
+        const timeoutMs = Math.max(1000, Number(options.timeoutMs || 20_000));
+        const label = String(options.label || "send-message");
+        let timeoutHandle = null;
+
+        try {
+            const result = await Promise.race([
+                sock.sendMessage(remoteJid, content, sendOptions),
+                new Promise((_, reject) => {
+                    timeoutHandle = setTimeout(() => {
+                        reject(new Error(`${label}_timeout_${timeoutMs}`));
+                    }, timeoutMs);
+                })
+            ]);
+            this._touchSession(sid);
+            return result;
+        } catch (error) {
+            const message = String(error?.message || "");
+            if (message === `${label}_timeout_${timeoutMs}`) {
+                console.warn(`⚠️ [${sid}] ${label} timed out after ${timeoutMs}ms -> ${remoteJid}`);
+                const entry = this.sessions.get(sid);
+                if (entry) {
+                    entry.degradedUntil = Math.max(entry.degradedUntil || 0, Date.now() + (2 * 60 * 1000));
+                }
+                if (label.startsWith("command")) {
+                    this.scheduleDelayedCommandHeal(sid, timeoutMs).catch(() => {});
+                }
+            }
+            throw error;
+        } finally {
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+            }
+        }
+    }
+
     async _enqueueLaneTask(sessionId, laneName, fn, options = {}) {
         const sid = String(sessionId);
         const isLowPriority = laneName === "low";
@@ -1319,11 +1356,25 @@ class SessionManager {
             if (result) {
                 const footer = `\n\n${await getCommandFooterText()}`;
                 if (typeof result === "string") {
-                    await sock.sendMessage(message.key.remoteJid, { text: result + footer });
+                    await this._sendMessageWithTimeout(
+                        sessionId,
+                        sock,
+                        message.key.remoteJid,
+                        { text: result + footer },
+                        {},
+                        { timeoutMs: 45_000, label: "command-reply" }
+                    );
                 } else if (typeof result === "object") {
                     if (result.caption) result.caption += footer;
                     else if (result.text) result.text += footer;
-                    await sock.sendMessage(message.key.remoteJid, result);
+                    await this._sendMessageWithTimeout(
+                        sessionId,
+                        sock,
+                        message.key.remoteJid,
+                        result,
+                        {},
+                        { timeoutMs: 45_000, label: "command-reply" }
+                    );
                 }
             }
             ctx.commandTiming.replyMs = Date.now() - replyStartedAt;
@@ -2144,7 +2195,7 @@ ${footer}`
                     }
 
                     if (!isOwner) {
-                        await sock.sendMessage(m.key.remoteJid, {
+                        await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                             text: `╔══════════════════════════════════╗
 ║  🚫 *𝔸ℂℂ𝔼𝕊𝕊 𝔻𝔼ℕ𝕀𝔼𝔻* 🚫  ║
 ╚══════════════════════════════════╝
@@ -2157,7 +2208,7 @@ Only the owner can execute commands here.
 ╔══════════════════════════════════╗
 ║    💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏* 💠    ║
 ╚══════════════════════════════════╝`
-                        }, { quoted: m });
+                        }, { quoted: m }, { timeoutMs: 30_000, label: "access-denied-reply" });
                         continue;
                     }
 
@@ -2183,26 +2234,26 @@ Only the owner can execute commands here.
                         } else {
                             this.invalidateConfigCache(sessionId);
                         }
-                        await sock.sendMessage(m.key.remoteJid, {
+                        await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                             text: enabled
                                 ? `✅ Group promotion broadcast has been ENABLED for this session.\n\nUse *${prefix}bcoff* to disable it again.`
                                 : `🛑 Group promotion broadcast has been DISABLED for this session.\n\nUse *${prefix}bcon* to re-enable it.`
-                        }, { quoted: m });
+                        }, { quoted: m }, { timeoutMs: 30_000, label: "broadcast-toggle-reply" });
                         continue;
                     }
 
                     if (commands[commandName]) {
                         const runtimeMeta = await this.getSessionRuntimeMeta(sessionId);
                         if (!runtimeMeta) {
-                            await sock.sendMessage(m.key.remoteJid, {
+                            await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                                 text: `⚠️ Bot is temporarily loading. Please try *${prefix}${commandName}* again in a few seconds.`
-                            }, { quoted: m });
+                            }, { quoted: m }, { timeoutMs: 30_000, label: "loading-reply" });
                             continue;
                         }
 
                         // Pause Check
                         if (runtimeMeta.isPaused) {
-                            await sock.sendMessage(m.key.remoteJid, {
+                            await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                                 text: `╔══════════════════════════════════╗
 ║     ⏸️ *𝔹𝕆𝕋 𝕀𝕊 ℙ𝔸𝕌𝕊𝔼𝔻* ⏸️      ║
 ╚══════════════════════════════════╝
@@ -2216,7 +2267,7 @@ Hello! This Tervux Bot instance has been temporarily paused by its owner.
 ╔══════════════════════════════════╗
 ║    💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏* 💠    ║
 ╚══════════════════════════════════╝`
-                            }, { quoted: m });
+                            }, { quoted: m }, { timeoutMs: 30_000, label: "paused-reply" });
                             continue;
                         }
 
@@ -2224,7 +2275,7 @@ Hello! This Tervux Bot instance has been temporarily paused by its owner.
                         const isDeployed = runtimeMeta.isDeployed;
 
                         if (!isDeployed) {
-                            await sock.sendMessage(m.key.remoteJid, {
+                            await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                                 text: `╔══════════════════════════════════╗
 ║  ⚠️ *𝔻𝔼ℙ𝕃𝕆𝕐𝕄𝔼ℕ𝕋 ℝ𝔼ℚ𝕌𝕀ℝ𝔼𝔻* ⚠️  ║
 ╚══════════════════════════════════╝
@@ -2239,7 +2290,7 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
 ╔══════════════════════════════════╗
 ║    💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏* 💠    ║
 ╚══════════════════════════════════╝`
-                            }, { quoted: m });
+                            }, { quoted: m }, { timeoutMs: 30_000, label: "deploy-required-reply" });
                             continue;
                         }
 
@@ -2257,16 +2308,16 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
                             });
                         } catch (err) {
                             console.error(`❌ [${sessionId}] Command error (${commandName}):`, err.message);
-                            await sock.sendMessage(m.key.remoteJid, {
+                            await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                                 text: `❌ Error executing command: ${err.message}`
-                            });
+                            }, {}, { timeoutMs: 30_000, label: "command-error-reply" });
                         }
                     } else {
                         // Unknown command — let user know
                         const footer = await getCommandFooterText();
-                        await sock.sendMessage(m.key.remoteJid, {
+                        await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                             text: `❌ Command *${prefix}${commandName}* haipo.\n\n💡 Tumia *${prefix}help* kuona commands zote zinazopatikana.\n\n${footer}`
-                        }, { quoted: m });
+                        }, { quoted: m }, { timeoutMs: 30_000, label: "unknown-command-reply" });
                     }
 
                     this.queueAmbientMessageTasks(sessionId, sock, m, config);
@@ -3501,14 +3552,28 @@ https://bot.tervux.com
 
             try {
                 if (logo) {
-                    await sock.sendMessage(jid, {
-                        image: logo,
-                        caption: combinedCaption
-                    });
+                    await this._sendMessageWithTimeout(
+                        sessionId,
+                        sock,
+                        jid,
+                        {
+                            image: logo,
+                            caption: combinedCaption
+                        },
+                        {},
+                        { timeoutMs: 20_000, label: "group-broadcast" }
+                    );
                 } else {
-                    await sock.sendMessage(jid, {
-                        text: combinedCaption
-                    });
+                    await this._sendMessageWithTimeout(
+                        sessionId,
+                        sock,
+                        jid,
+                        {
+                            text: combinedCaption
+                        },
+                        {},
+                        { timeoutMs: 20_000, label: "group-broadcast" }
+                    );
                 }
                 sent += 1;
                 console.log(`[${sessionId}] 📣 Group broadcast sent (${sent}/${groupList.length}) -> ${jid}`);
