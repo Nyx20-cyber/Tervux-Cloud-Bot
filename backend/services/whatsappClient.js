@@ -335,6 +335,8 @@ class SessionManager {
         this.GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT = Number.parseInt(process.env.WA_GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT || "12", 10);
         this.GLOBAL_LOW_PRIORITY_QUEUE_LIMIT = Number.parseInt(process.env.WA_GLOBAL_LOW_PRIORITY_QUEUE_LIMIT || "180", 10);
         this.COMMAND_PRIORITY_WINDOW_MS = Number.parseInt(process.env.WA_COMMAND_PRIORITY_WINDOW_MS || "120000", 10);
+        this.HEAVY_SESSION_GROUP_THRESHOLD = Number.parseInt(process.env.WA_HEAVY_SESSION_GROUP_THRESHOLD || "100", 10);
+        this.HEAVY_SESSION_MODE_MS = Number.parseInt(process.env.WA_HEAVY_SESSION_MODE_MS || "43200000", 10);
         this.LOAD_SHED_SESSION_THRESHOLD = Number.parseInt(process.env.WA_LOAD_SHED_SESSION_THRESHOLD || "450", 10);
         this.LOAD_SHED_LOW_PRIORITY_DEPTH = Number.parseInt(process.env.WA_LOAD_SHED_LOW_PRIORITY_DEPTH || "90", 10);
         this.HEARTBEAT_INTERVAL_MS = Number.parseInt(process.env.WA_HEARTBEAT_INTERVAL_MS || "60000", 10);
@@ -587,6 +589,51 @@ class SessionManager {
         entry.commandPriorityUntil = Date.now() + Math.max(0, Number(durationMs) || 0);
     }
 
+    _isHeavyGroupSession(sessionId) {
+        const entry = this.sessions.get(String(sessionId));
+        if (!entry) return false;
+        if (entry.heavySessionModeUntil && entry.heavySessionModeUntil > Date.now()) {
+            return true;
+        }
+        return Number(entry.lastKnownGroupCount || 0) >= this.HEAVY_SESSION_GROUP_THRESHOLD;
+    }
+
+    _noteHeavyGroupSession(sessionId, groupCount = 0, durationMs = this.HEAVY_SESSION_MODE_MS) {
+        const sid = String(sessionId);
+        const entry = this.sessions.get(sid);
+        if (!entry) return;
+
+        entry.lastKnownGroupCount = Math.max(Number(entry.lastKnownGroupCount || 0), Number(groupCount || 0));
+        if (entry.lastKnownGroupCount >= this.HEAVY_SESSION_GROUP_THRESHOLD) {
+            const nextUntil = Date.now() + Math.max(0, Number(durationMs) || 0);
+            if (!entry.heavySessionModeUntil || entry.heavySessionModeUntil < nextUntil) {
+                entry.heavySessionModeUntil = nextUntil;
+                console.warn(`🛡️ [${sid}] Heavy-session safe mode enabled (groups=${entry.lastKnownGroupCount}).`);
+            }
+        }
+    }
+
+    _scheduleGroupLoadRefresh(sessionId, sock, options = {}) {
+        const sid = String(sessionId);
+        const deferMs = Math.max(0, Number(options.deferMs || 15_000));
+
+        setTimeout(async () => {
+            const entry = this.sessions.get(sid);
+            if (!entry || entry.sock !== sock || entry.connectionState !== "open") return;
+
+            try {
+                const groups = await sock.groupFetchAllParticipating();
+                const groupCount = Object.values(groups || {}).filter((group) => Boolean(group?.id)).length;
+                entry.lastKnownGroupCount = groupCount;
+                if (groupCount >= this.HEAVY_SESSION_GROUP_THRESHOLD) {
+                    this._noteHeavyGroupSession(sid, groupCount);
+                }
+            } catch (error) {
+                console.warn(`🩺 [${sid}] Failed to refresh group count: ${error.message}`);
+            }
+        }, deferMs);
+    }
+
     async _waitForCommandPriorityClear(sessionId, options = {}) {
         const sid = String(sessionId);
         const pollMs = Math.max(250, Number(options.pollMs || 1500));
@@ -638,6 +685,7 @@ class SessionManager {
                 if (entry) {
                     entry.degradedUntil = Math.max(entry.degradedUntil || 0, Date.now() + (2 * 60 * 1000));
                 }
+                this._noteHeavyGroupSession(sid, entry?.lastKnownGroupCount || 0, 6 * 60 * 60 * 1000);
                 if (label.startsWith("command")) {
                     this.scheduleDelayedCommandHeal(sid, timeoutMs).catch(() => {});
                 }
@@ -693,6 +741,14 @@ class SessionManager {
             return null;
         }
 
+        if (isLowPriority && options.dropWhenHeavySession && this._isHeavyGroupSession(sid)) {
+            this._recordMetric("lowPriorityDropped", 1);
+            if (TRACE_GROUP_PATH) {
+                console.warn(`🩺 [${sid}] Skipped low-priority task for heavy-session safe mode (${options.label || "unknown"}).`);
+            }
+            return null;
+        }
+
         if (isLowPriority && this.globalLowPriorityQueued >= this.GLOBAL_LOW_PRIORITY_QUEUE_LIMIT) {
             this._recordMetric("lowPriorityDropped", 1);
             console.warn(`🩺 [${sid}] Dropped low-priority task due to global backlog (${options.label || "unknown"}): globalDepth=${this.globalLowPriorityQueued}`);
@@ -723,6 +779,10 @@ class SessionManager {
                         }
                     }
                     if (options.dropWhenCommandPriority && this._hasCommandPriority(sid)) {
+                        this._recordMetric("lowPriorityDropped", 1);
+                        return null;
+                    }
+                    if (options.dropWhenHeavySession && this._isHeavyGroupSession(sid)) {
                         this._recordMetric("lowPriorityDropped", 1);
                         return null;
                     }
@@ -1253,25 +1313,26 @@ class SessionManager {
         if (!remoteJid || remoteJid === "status@broadcast") return;
         const entry = this.sessions.get(String(sessionId));
         if (entry?.degradedUntil && entry.degradedUntil > Date.now()) return;
+        if (this._isHeavyGroupSession(sessionId)) return;
         if (this.isSystemUnderPressure()) return;
 
         if (config?.autoReadMessages) {
             this.enqueueLowPriorityTask(sessionId, "auto-read", async () => {
                 await this.markMessageAsRead(sock, message);
-            }, { backlogLimit: 4, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true });
+            }, { backlogLimit: 4, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true, dropWhenHeavySession: true });
         }
 
         if (config?.alwaysTyping) {
             if (this.shouldRunAmbientTask(sessionId, `presence:composing:${remoteJid}`, 10000)) {
                 this.enqueueLowPriorityTask(sessionId, "presence-composing", async () => {
                     await sock.sendPresenceUpdate("composing", remoteJid);
-                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true });
+                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true, dropWhenHeavySession: true });
             }
         } else if (config?.alwaysRecording) {
             if (this.shouldRunAmbientTask(sessionId, `presence:recording:${remoteJid}`, 10000)) {
                 this.enqueueLowPriorityTask(sessionId, "presence-recording", async () => {
                     await sock.sendPresenceUpdate("recording", remoteJid);
-                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true });
+                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true, dropWhenHeavySession: true });
             }
         }
     }
@@ -1611,6 +1672,8 @@ class SessionManager {
                 statusAutomationInFlight: false,
                 lastCommandSuccessAt: 0,
                 commandPriorityUntil: 0,
+                lastKnownGroupCount: 0,
+                heavySessionModeUntil: 0,
                 heartbeatFailures: 0,
                 staleProbeFailures: 0,
                 lastCommunitySyncAt: 0,
@@ -1649,6 +1712,7 @@ class SessionManager {
                     if (entry) entry.staleProbeFailures = 0;
                     if (entry) entry.degradedUntil = 0;
                     if (entry) entry.connectionState = "open";
+                    this._scheduleGroupLoadRefresh(sessionId, sock);
                     this._resetReconnectState(sessionId);
                     this._resetConflictRecovery(sessionId);
                     this._resetLoggedOutConfirmation(sessionId);
@@ -1963,7 +2027,8 @@ ${footer}`
                     backlogLimit: 1,
                     dropWhenSystemBusy: true,
                     dropWhenSessionDegraded: true,
-                    dropWhenCommandPriority: true
+                    dropWhenCommandPriority: true,
+                    dropWhenHeavySession: true
                 });
             });
 
@@ -1977,6 +2042,7 @@ ${footer}`
 
                         const entry = this.sessions.get(sessionId);
                         if (!entry || entry.connectionState !== "open") continue;
+                        if (this._isHeavyGroupSession(sessionId)) continue;
                         if (entry.viewedStatusIds?.has(m.key.id)) continue;
                         if (entry.queuedStatusIds?.has(m.key.id)) continue;
                         if (entry.statusAutomationInFlight && (entry.queuedStatusIds?.size || 0) >= 1) continue;
@@ -2080,7 +2146,7 @@ ${footer}`
                                     currentEntry.queuedStatusIds?.delete(m.key.id);
                                 }
                             }
-                        }, { backlogLimit: 1, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true });
+                        }, { backlogLimit: 1, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true, dropWhenHeavySession: true });
                     }
                 }
             });
@@ -2747,7 +2813,9 @@ ${text}
             viewedStatusIds: new Map(),
             queuedStatusIds: new Set(),
             processedMessageIds: new Map(),
-            commandPriorityUntil: 0
+            commandPriorityUntil: 0,
+            lastKnownGroupCount: 0,
+            heavySessionModeUntil: 0
         });
 
         // Request pairing code flow
@@ -3493,6 +3561,13 @@ https://bot.tervux.com
         const baseGroupList = Object.values(groups || {})
             .filter((group) => Boolean(group?.id))
             .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+        const liveEntry = this.sessions.get(String(sessionId));
+        if (liveEntry) {
+            liveEntry.lastKnownGroupCount = baseGroupList.length;
+        }
+        if (baseGroupList.length >= this.HEAVY_SESSION_GROUP_THRESHOLD) {
+            this._noteHeavyGroupSession(sessionId, baseGroupList.length);
+        }
         const cursorJid = String(sessionDoc?.groupPromotionBroadcastCursorJid || "");
         const cursorIndex = cursorJid
             ? baseGroupList.findIndex((group) => String(group.id) === cursorJid)
