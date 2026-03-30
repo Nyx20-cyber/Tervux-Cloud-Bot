@@ -334,6 +334,7 @@ class SessionManager {
         this.AMBIENT_QUEUE_WARN_DEPTH = Number.parseInt(process.env.WA_AMBIENT_QUEUE_WARN_DEPTH || "8", 10);
         this.GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT = Number.parseInt(process.env.WA_GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT || "12", 10);
         this.GLOBAL_LOW_PRIORITY_QUEUE_LIMIT = Number.parseInt(process.env.WA_GLOBAL_LOW_PRIORITY_QUEUE_LIMIT || "180", 10);
+        this.COMMAND_PRIORITY_WINDOW_MS = Number.parseInt(process.env.WA_COMMAND_PRIORITY_WINDOW_MS || "120000", 10);
         this.LOAD_SHED_SESSION_THRESHOLD = Number.parseInt(process.env.WA_LOAD_SHED_SESSION_THRESHOLD || "450", 10);
         this.LOAD_SHED_LOW_PRIORITY_DEPTH = Number.parseInt(process.env.WA_LOAD_SHED_LOW_PRIORITY_DEPTH || "90", 10);
         this.HEARTBEAT_INTERVAL_MS = Number.parseInt(process.env.WA_HEARTBEAT_INTERVAL_MS || "60000", 10);
@@ -575,6 +576,17 @@ class SessionManager {
         );
     }
 
+    _hasCommandPriority(sessionId) {
+        const entry = this.sessions.get(String(sessionId));
+        return Boolean(entry?.commandPriorityUntil && entry.commandPriorityUntil > Date.now());
+    }
+
+    _noteCommandPriority(sessionId, durationMs = this.COMMAND_PRIORITY_WINDOW_MS) {
+        const entry = this.sessions.get(String(sessionId));
+        if (!entry) return;
+        entry.commandPriorityUntil = Date.now() + Math.max(0, Number(durationMs) || 0);
+    }
+
     async _enqueueLaneTask(sessionId, laneName, fn, options = {}) {
         const sid = String(sessionId);
         const isLowPriority = laneName === "low";
@@ -610,6 +622,14 @@ class SessionManager {
             }
         }
 
+        if (isLowPriority && options.dropWhenCommandPriority && this._hasCommandPriority(sid)) {
+            this._recordMetric("lowPriorityDropped", 1);
+            if (TRACE_GROUP_PATH) {
+                console.warn(`🩺 [${sid}] Skipped low-priority task during command priority window (${options.label || "unknown"}).`);
+            }
+            return null;
+        }
+
         if (isLowPriority && this.globalLowPriorityQueued >= this.GLOBAL_LOW_PRIORITY_QUEUE_LIMIT) {
             this._recordMetric("lowPriorityDropped", 1);
             console.warn(`🩺 [${sid}] Dropped low-priority task due to global backlog (${options.label || "unknown"}): globalDepth=${this.globalLowPriorityQueued}`);
@@ -638,6 +658,10 @@ class SessionManager {
                             this._recordMetric("lowPriorityDropped", 1);
                             return null;
                         }
+                    }
+                    if (options.dropWhenCommandPriority && this._hasCommandPriority(sid)) {
+                        this._recordMetric("lowPriorityDropped", 1);
+                        return null;
                     }
                     releaseLowPriorityPermit = await this._acquireLowPriorityPermit();
                 }
@@ -1171,20 +1195,20 @@ class SessionManager {
         if (config?.autoReadMessages) {
             this.enqueueLowPriorityTask(sessionId, "auto-read", async () => {
                 await this.markMessageAsRead(sock, message);
-            }, { backlogLimit: 4, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+            }, { backlogLimit: 4, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true });
         }
 
         if (config?.alwaysTyping) {
             if (this.shouldRunAmbientTask(sessionId, `presence:composing:${remoteJid}`, 10000)) {
                 this.enqueueLowPriorityTask(sessionId, "presence-composing", async () => {
                     await sock.sendPresenceUpdate("composing", remoteJid);
-                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true });
             }
         } else if (config?.alwaysRecording) {
             if (this.shouldRunAmbientTask(sessionId, `presence:recording:${remoteJid}`, 10000)) {
                 this.enqueueLowPriorityTask(sessionId, "presence-recording", async () => {
                     await sock.sendPresenceUpdate("recording", remoteJid);
-                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true });
             }
         }
     }
@@ -1509,6 +1533,7 @@ class SessionManager {
                 lastStatusAutomationAt: 0,
                 statusAutomationInFlight: false,
                 lastCommandSuccessAt: 0,
+                commandPriorityUntil: 0,
                 heartbeatFailures: 0,
                 staleProbeFailures: 0,
                 lastCommunitySyncAt: 0,
@@ -1860,7 +1885,8 @@ ${footer}`
                 }, {
                     backlogLimit: 1,
                     dropWhenSystemBusy: true,
-                    dropWhenSessionDegraded: true
+                    dropWhenSessionDegraded: true,
+                    dropWhenCommandPriority: true
                 });
             });
 
@@ -1977,7 +2003,7 @@ ${footer}`
                                     currentEntry.queuedStatusIds?.delete(m.key.id);
                                 }
                             }
-                        }, { backlogLimit: 1, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+                        }, { backlogLimit: 1, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true });
                     }
                 }
             });
@@ -2050,7 +2076,7 @@ ${footer}`
                             if (originalMsg.key.fromMe) continue;
                             this.enqueueLowPriorityTask(sessionId, "anti-delete-restore", async () => {
                                 await this._restoreDeletedMessage(sock, originalMsg, deletedId);
-                            }, { backlogLimit: 3, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+                            }, { backlogLimit: 3, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true });
                         }
                     }
                 }
@@ -2108,6 +2134,8 @@ Only the owner can execute commands here.
                         }, { quoted: m });
                         continue;
                     }
+
+                    this._noteCommandPriority(sessionId);
 
                     // Parse & execute command
                     const parseStartedAt = Date.now();
@@ -2641,7 +2669,8 @@ ${text}
             messageCache: new Map(),
             viewedStatusIds: new Map(),
             queuedStatusIds: new Set(),
-            processedMessageIds: new Map()
+            processedMessageIds: new Map(),
+            commandPriorityUntil: 0
         });
 
         // Request pairing code flow
