@@ -1430,7 +1430,16 @@ class SessionManager {
                 return null;
             }
 
-            if (dbSession.autoReconnectDisabled === true) {
+            const allowStartupReconnectOverride = (
+                options.ignoreReconnectBlock === true &&
+                options.reconnectReason === "startup_reconnect" &&
+                dbSession.status !== "pairing" &&
+                dbSession.disconnectIntent !== "manual" &&
+                dbSession.disconnectIntent !== "banned" &&
+                dbSession.disconnectIntent !== "expired"
+            );
+
+            if (dbSession.autoReconnectDisabled === true && !allowStartupReconnectOverride) {
                 console.log(`⏭️ [${sessionId}] Skipping connect (${options.reconnectReason || "runtime"}) — auto reconnect disabled (${dbSession.disconnectIntent || "manual"}).`);
                 return null;
             }
@@ -2446,8 +2455,7 @@ ${text}
             const now = new Date();
             const activeSessions = await WhatsAppSession.find({
                 status: { $in: ["active", "paused", "disconnected"] },
-                expiresAt: { $gt: now },
-                autoReconnectDisabled: { $ne: true }
+                expiresAt: { $gt: now }
             });
             console.log(`🔄 [Reconnect] Current Time: ${now.toISOString()}`);
             console.log(`🔄 Found ${activeSessions.length} eligible session(s) to reconnect.`);
@@ -2506,10 +2514,36 @@ ${text}
                     continue;
                 }
 
+                if (session.autoReconnectDisabled === true && session.disconnectIntent === "manual") {
+                    console.log(`⏭️ [${sid}] Skipping — manually disconnected by user.`);
+                    await this.primeSessionRuntimeFromDocument(session);
+                    continue;
+                }
+
+                if (session.autoReconnectDisabled === true && session.disconnectIntent === "banned") {
+                    console.log(`⏭️ [${sid}] Skipping — user/session banned.`);
+                    await this.primeSessionRuntimeFromDocument(session);
+                    continue;
+                }
+
+                if (session.autoReconnectDisabled === true && session.disconnectIntent === "expired") {
+                    console.log(`⏭️ [${sid}] Skipping — deployment expired.`);
+                    await this.primeSessionRuntimeFromDocument(session);
+                    continue;
+                }
+
+                if (session.autoReconnectDisabled === true) {
+                    console.warn(`🩺 [${sid}] Startup reconnect overriding stale reconnect block (${session.disconnectIntent || "none"}).`);
+                }
+
                 console.log(`🔌 [${sid}] Reconnecting session for ${session.phone}...`);
                 try {
                     await this.primeSessionRuntimeFromDocument(session);
-                    await this.connectSession(sid, { useReconnectPermit: true, reconnectReason: "startup_reconnect" });
+                    await this.connectSession(sid, {
+                        useReconnectPermit: true,
+                        reconnectReason: "startup_reconnect",
+                        ignoreReconnectBlock: true
+                    });
                 } catch (err) {
                     console.error(`❌ [${sid}] Reconnect failed:`, err.message);
                 }

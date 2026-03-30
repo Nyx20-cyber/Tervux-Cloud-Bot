@@ -11,7 +11,7 @@ export const define = async (sock, m, args) => {
 ║   📖 *𝔻𝕀ℂ𝕋𝕀𝕆ℕ𝔸ℝ𝕐* 📖              ║
 ╚══════════════════════════════════╝
 
-This command looks up the meaning of an English words.
+This command looks up the meaning of an English word.
 
 *Usage:* ${p}define <word>
 *Example:* ${p}define serendipity`;
