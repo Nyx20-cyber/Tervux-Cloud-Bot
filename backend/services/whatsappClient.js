@@ -3176,10 +3176,10 @@ ${footer}`;
         const footer = await getCommandFooterText();
         const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
 
-        const coinsPack = Number(options.coinsPack || 250);
-        const packPrice = Number(options.packPrice || 3000);
-        const samplePerBotA = Number(options.samplePerBotA || 2000);
-        const samplePerBotB = Number(options.samplePerBotB || 2500);
+        const coinsPack = Number(options.coinsPack || 30);
+        const packPrice = Number(options.packPrice || 1500);
+        const samplePerBotA = Number(options.samplePerBotA || 1000);
+        const samplePerBotB = Number(options.samplePerBotB || 1500);
         const examples = getDeploymentExamplesForCoins(coinsPack, false);
         const oneDay = examples.find((entry) => entry.days === 1) || DEPLOYMENT_OPTIONS[0];
         const threeDay = examples.find((entry) => entry.days === 3) || DEPLOYMENT_OPTIONS[1];

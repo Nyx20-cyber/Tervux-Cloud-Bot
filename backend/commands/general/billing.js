@@ -30,9 +30,9 @@ export const billing = async (sock, m, args) => {
 💰 *ℂ𝕆𝕀ℕ ℙ𝕃𝔸ℕ𝕊*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🪙 *50 Coins*  — 1,500 TZS _(1 Bot)_
-🪙 *100 Coins* — 2,000 TZS _(2 Bots)_
-🪙 *250 Coins* — 3,000 TZS _(5 Bots)_
+🪙 *10 Coins* — 500 TZS _(Up to 3 one-day deploys)_
+🪙 *20 Coins* — 1,000 TZS _(Up to 1 week + 3 days)_
+🪙 *30 Coins* — 1,500 TZS _(Best for multiple deploys)_
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📞 *Need help?* Contact +255 629 360 383

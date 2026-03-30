@@ -217,7 +217,7 @@ async function start() {
                 console.log(`✅ Added ${created.length} missing coin plan(s): ${created.join(", ")}`);
             }
             if (updated.length > 0) {
-                console.log(`✅ Refreshed ${updated.length} default coin plan name/description entries: ${updated.join(", ")}`);
+                console.log(`✅ Refreshed ${updated.length} default coin plan entries: ${updated.join(", ")}`);
             }
             if (retired.length > 0) {
                 console.log(`✅ Retired ${retired.length} old default coin plan(s): ${retired.join(", ")}`);

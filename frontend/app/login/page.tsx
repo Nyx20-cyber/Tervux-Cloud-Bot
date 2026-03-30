@@ -64,7 +64,10 @@ export default function LoginPage() {
         e.preventDefault();
         setIsLoading(true);
         try {
-            const res = await api.post("/auth/login", { email, password });
+            const res = await api.post("/auth/login", {
+                email: email.trim().toLowerCase(),
+                password
+            });
             login(res.data.token, res.data.user, res.data.refreshTokenExpiresAt ?? null);
             toast.success(t.successful_login);
             router.push("/dashboard");
