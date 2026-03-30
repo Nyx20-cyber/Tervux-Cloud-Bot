@@ -260,17 +260,30 @@ function collectStatusParticipantCandidates(message) {
 }
 
 function isOwnerCommandMessage(sock, message, config) {
-    const senderRaw = message?.key?.participant || message?.participant || message?.key?.remoteJid || "";
+    const senderRaw = (
+        message?.key?.participantAlt ||
+        message?.participantAlt ||
+        message?.key?.participant ||
+        message?.participant ||
+        message?.key?.remoteJidAlt ||
+        message?.remoteJidAlt ||
+        message?.key?.remoteJid ||
+        ""
+    );
     const senderJid = senderRaw ? jidNormalizedUser(senderRaw) : "";
     const botRaw = sock?.user?.id || "";
     const botJid = botRaw ? jidNormalizedUser(botRaw) : "";
     const botLid = sock?.user?.lid || "";
     const ownerJid = config?.ownerJid ? jidNormalizedUser(config.ownerJid) : "";
     const senderCandidates = collectIdentityCandidates(
+        message?.key?.participantAlt,
+        message?.participantAlt,
         message?.key?.participant,
         message?.participant,
         message?.key?.participantPn,
         message?.participantPn,
+        message?.key?.remoteJidAlt,
+        message?.remoteJidAlt,
         message?.key?.remoteJid
     );
     const ownerCandidates = collectIdentityCandidates(
