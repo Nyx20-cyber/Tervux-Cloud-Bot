@@ -72,47 +72,72 @@ function unwrapGroupMessageContent(message = {}) {
 }
 
 function extractGroupMessageText(content = {}) {
-    return (
-        content?.conversation ||
-        content?.extendedTextMessage?.text ||
-        content?.imageMessage?.caption ||
-        content?.videoMessage?.caption ||
-        content?.documentMessage?.caption ||
-        ""
-    );
+    return collectTextFragments(content)[0] || "";
+}
+
+function collectTextFragments(node, depth = 0, bucket = []) {
+    if (!node || depth > 6) return bucket;
+
+    if (typeof node === "string") {
+        const value = node.trim();
+        if (value) bucket.push(value);
+        return bucket;
+    }
+
+    if (Array.isArray(node)) {
+        for (const item of node) {
+            collectTextFragments(item, depth + 1, bucket);
+        }
+        return bucket;
+    }
+
+    if (typeof node !== "object") {
+        return bucket;
+    }
+
+    for (const [key, value] of Object.entries(node)) {
+        if (typeof value === "string") {
+            if (
+                key === "conversation" ||
+                key === "text" ||
+                key === "caption" ||
+                key === "contentText" ||
+                key === "selectedDisplayText" ||
+                key === "title" ||
+                key === "description" ||
+                key === "matchedText" ||
+                key === "canonicalUrl" ||
+                key === "inviteLink" ||
+                key === "groupName"
+            ) {
+                const next = value.trim();
+                if (next) bucket.push(next);
+            }
+            continue;
+        }
+
+        collectTextFragments(value, depth + 1, bucket);
+    }
+
+    return bucket;
 }
 
 function collectMessageLinkSources(content = {}) {
-    const sources = [
-        extractGroupMessageText(content),
-        content?.extendedTextMessage?.canonicalUrl,
-        content?.extendedTextMessage?.matchedText,
-        content?.imageMessage?.canonicalUrl,
-        content?.imageMessage?.matchedText,
-        content?.videoMessage?.canonicalUrl,
-        content?.videoMessage?.matchedText,
-        content?.documentMessage?.canonicalUrl,
-        content?.documentMessage?.matchedText
-    ];
+    const sources = collectTextFragments(content);
 
     for (const invitePayload of [content?.groupInviteMessage, content?.groupInviteMessageV2]) {
         if (!invitePayload) continue;
-
         const inviteCode = String(invitePayload.inviteCode || "").trim();
         if (inviteCode) {
             sources.push(`https://chat.whatsapp.com/${inviteCode}`);
         }
-
-        sources.push(
-            invitePayload.inviteLink,
-            invitePayload.caption,
-            invitePayload.groupName
-        );
     }
 
-    return sources
-        .map((value) => String(value || "").trim())
-        .filter(Boolean);
+    return Array.from(new Set(
+        sources
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+    ));
 }
 
 function extractDetectedLinksFromContent(content = {}) {
@@ -132,18 +157,33 @@ function extractDetectedLinksFromContent(content = {}) {
 }
 
 function extractContextInfo(content = {}) {
-    return (
-        content?.extendedTextMessage?.contextInfo ||
-        content?.imageMessage?.contextInfo ||
-        content?.videoMessage?.contextInfo ||
-        content?.audioMessage?.contextInfo ||
-        content?.documentMessage?.contextInfo ||
-        content?.stickerMessage?.contextInfo ||
-        content?.pollCreationMessage?.contextInfo ||
-        content?.pollCreationMessageV2?.contextInfo ||
-        content?.pollCreationMessageV3?.contextInfo ||
-        {}
-    );
+    const contexts = collectContextInfos(content);
+    return contexts[0] || {};
+}
+
+function collectContextInfos(node, depth = 0, bucket = []) {
+    if (!node || depth > 6) return bucket;
+
+    if (Array.isArray(node)) {
+        for (const item of node) {
+            collectContextInfos(item, depth + 1, bucket);
+        }
+        return bucket;
+    }
+
+    if (typeof node !== "object") {
+        return bucket;
+    }
+
+    if (node.contextInfo && typeof node.contextInfo === "object") {
+        bucket.push(node.contextInfo);
+    }
+
+    for (const value of Object.values(node)) {
+        collectContextInfos(value, depth + 1, bucket);
+    }
+
+    return bucket;
 }
 
 function isVoiceNote(content = {}) {
@@ -172,20 +212,88 @@ function isMassMention(msgText = "", mentionedJids = []) {
 }
 
 function extractMentionSignals(content = {}, contextInfo = {}, message = {}) {
-    const mentionedJids = Array.isArray(contextInfo?.mentionedJid) ? contextInfo.mentionedJid : [];
-    const groupMentions = Array.isArray(contextInfo?.groupMentions) ? contextInfo.groupMentions : [];
-    const statusMentions = Array.isArray(message?.statusMentions) ? message.statusMentions : [];
+    const mentionMeta = collectMentionSignals(content, message);
+    const mentionedJids = mentionMeta.mentionedJids.length > 0
+        ? mentionMeta.mentionedJids
+        : (Array.isArray(contextInfo?.mentionedJid) ? contextInfo.mentionedJid : []);
+    const groupMentions = mentionMeta.groupMentions.length > 0
+        ? mentionMeta.groupMentions
+        : (Array.isArray(contextInfo?.groupMentions) ? contextInfo.groupMentions : []);
+    const statusMentions = mentionMeta.statusMentions.length > 0
+        ? mentionMeta.statusMentions
+        : (Array.isArray(message?.statusMentions) ? message.statusMentions : []);
 
     return {
         mentionedJids,
         groupMentions,
         statusMentions,
-        hasNativeGroupMention: groupMentions.length > 0 || Boolean(content?.groupMentionedMessage),
+        hasNativeGroupMention: groupMentions.length > 0 || mentionMeta.hasNativeGroupMention || Boolean(content?.groupMentionedMessage),
         hasNativeStatusMention: (
             statusMentions.length > 0 ||
+            mentionMeta.hasNativeStatusMention ||
             Boolean(content?.statusMentionMessage) ||
             Boolean(message?.statusMentionMessageInfo)
         )
+    };
+}
+
+function collectMentionSignals(content = {}, message = {}) {
+    const mentionedJids = new Set();
+    const groupMentions = [];
+    const statusMentions = [];
+    let hasNativeGroupMention = false;
+    let hasNativeStatusMention = false;
+
+    const visit = (node, depth = 0) => {
+        if (!node || depth > 6) return;
+
+        if (Array.isArray(node)) {
+            for (const item of node) visit(item, depth + 1);
+            return;
+        }
+
+        if (typeof node !== "object") {
+            return;
+        }
+
+        if (Array.isArray(node.mentionedJid)) {
+            for (const jid of node.mentionedJid) {
+                if (jid) mentionedJids.add(jid);
+            }
+        }
+
+        if (Array.isArray(node.groupMentions) && node.groupMentions.length > 0) {
+            groupMentions.push(...node.groupMentions);
+            hasNativeGroupMention = true;
+        }
+
+        if (Array.isArray(node.statusMentions) && node.statusMentions.length > 0) {
+            statusMentions.push(...node.statusMentions);
+            hasNativeStatusMention = true;
+        }
+
+        if (node.groupMentionedMessage) {
+            hasNativeGroupMention = true;
+        }
+
+        if (node.statusMentionMessage || node.statusMentionMessageInfo) {
+            hasNativeStatusMention = true;
+        }
+
+        for (const value of Object.values(node)) {
+            visit(value, depth + 1);
+        }
+    };
+
+    visit(content);
+    visit(message);
+
+    return {
+        mentionedJids: Array.from(mentionedJids),
+        groupMentions,
+        statusMentions,
+        hasNativeGroupMention,
+        hasNativeStatusMention
     };
 }
 
@@ -1165,26 +1273,30 @@ export async function handleGroupMessage(sock, m) {
     if (settings.antimention?.enabled && hasMentionTrigger) {
         triggerLabel = "antimention";
         const groupContext = await getGroupContextLazy();
-        if (!groupContext.senderIsAdmin) {
-            console.log(`🛡️ Antimention triggered for ${sender} in ${remoteJid}`);
-            if (groupContext.botIsAdmin) {
-                await sock.sendMessage(remoteJid, { delete: m.key });
-                await sock.sendMessage(remoteJid, {
-                    text: `⚠️ @${sender.split("@")[0]}, *mentions are disabled* in this group! Only admins can tag members, groups, statuses, or use @everyone.`,
-                    mentions: [sender]
-                });
-                logGroupPathTrace(sock, remoteJid, {
-                    totalMs: Date.now() - startedAt,
-                    consumed: true,
-                    settingsSource: settingsMeta?.source,
-                    metadataSource: contextMeta?.metadataSource,
-                    contextMs: contextMeta?.totalMs,
-                    commandLaneDepth: laneDepths.command,
-                    lowLaneDepth: laneDepths.low,
-                    trigger: triggerLabel
-                });
-                return true;
-            }
+        const consumed = await enforceGroupRestriction({
+            sock,
+            m,
+            remoteJid,
+            sender,
+            senderIsAdmin: groupContext.senderIsAdmin,
+            botIsAdmin: groupContext.botIsAdmin,
+            triggered: true,
+            featureKey: "antimention",
+            adminRequiredText: `🚫 *Mention Detected!* I need admin privileges to manage antimention.`,
+            warnText: `⚠️ @${sender.split("@")[0]}, *mentions are disabled* in this group! Only admins can tag members, groups, statuses, or use @everyone.`
+        });
+        if (consumed) {
+            logGroupPathTrace(sock, remoteJid, {
+                totalMs: Date.now() - startedAt,
+                consumed: true,
+                settingsSource: settingsMeta?.source,
+                metadataSource: contextMeta?.metadataSource,
+                contextMs: contextMeta?.totalMs,
+                commandLaneDepth: laneDepths.command,
+                lowLaneDepth: laneDepths.low,
+                trigger: triggerLabel
+            });
+            return true;
         }
     }
 

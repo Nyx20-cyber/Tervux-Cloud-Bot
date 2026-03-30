@@ -1,9 +1,47 @@
+import { timingSafeEqual } from "crypto";
 import { Router } from "express";
 import Payment from "../models/Payment.js";
 import FastLipaWebhookLog from "../models/FastLipaWebhookLog.js";
 import { extractFastLipaFields, settleCompletedPayment, settleFailedPayment } from "../services/paymentSettlement.js";
 
 const router = Router();
+const FASTLIPA_WEBHOOK_SECRET = String(process.env.FASTLIPA_WEBHOOK_SECRET || "").trim();
+
+const safeEqual = (left, right) => {
+    const leftBuffer = Buffer.from(String(left));
+    const rightBuffer = Buffer.from(String(right));
+    return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+};
+
+const resolvePresentedSecret = (req, payload) => {
+    const authorization = String(req.headers.authorization || "").trim();
+    if (authorization.toLowerCase().startsWith("bearer ")) {
+        return authorization.slice(7).trim();
+    }
+
+    return String(
+        req.headers["x-fastlipa-secret"] ||
+        req.headers["x-webhook-secret"] ||
+        req.headers["x-api-key"] ||
+        req.query.secret ||
+        payload?.secret ||
+        payload?.webhookSecret ||
+        ""
+    ).trim();
+};
+
+const isWebhookAuthorized = (req, payload) => {
+    if (!FASTLIPA_WEBHOOK_SECRET) {
+        if (process.env.NODE_ENV === "production") {
+            console.error("[WEBHOOK] FASTLIPA_WEBHOOK_SECRET is missing in production.");
+            return false;
+        }
+        return true;
+    }
+
+    const presentedSecret = resolvePresentedSecret(req, payload);
+    return presentedSecret ? safeEqual(presentedSecret, FASTLIPA_WEBHOOK_SECRET) : false;
+};
 
 async function handleFastLipaWebhook(req, res) {
     const headers = req.headers || {};
@@ -25,6 +63,19 @@ async function handleFastLipaWebhook(req, res) {
             transactionId: transactionId || null,
             paymentStatus: paymentStatus || null
         });
+
+        if (!isWebhookAuthorized(req, payload)) {
+            await FastLipaWebhookLog.create({
+                transactionId,
+                paymentStatus,
+                headers,
+                payload,
+                processingResult: "ignored",
+                notes: "Webhook secret validation failed"
+            });
+            console.warn("[WEBHOOK] Ignored: invalid or missing webhook secret");
+            return res.status(401).json({ received: false, error: "Unauthorized webhook" });
+        }
 
         const payment = transactionId
             ? await Payment.findOne({ fastlipaTransactionId: transactionId }).select("_id status userId fastlipaTransactionId")

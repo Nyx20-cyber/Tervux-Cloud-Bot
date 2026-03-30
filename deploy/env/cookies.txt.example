@@ -1,0 +1,3 @@
+# Netscape HTTP Cookie File
+# Place real exported cookies in deploy/env/cookies.txt on the deployment host.
+# Keep that file untracked.

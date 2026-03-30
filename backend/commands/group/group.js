@@ -684,10 +684,10 @@ export async function setdesc(sock, m, args) {
  */
 export async function welcome(sock, m, args) {
     const remoteJid = m.key.remoteJid;
+    const sender = m.key.participant || m.key.remoteJid;
 
-    if (!remoteJid.endsWith("@g.us")) {
-        return `⚠️ This command only works in groups.`;
-    }
+    const accessError = await ensureGroupProtectionAccess(sock, remoteJid, sender, "welcome messages", { requireBotAdmin: false });
+    if (accessError) return accessError;
 
     const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const action = args[0]?.toLowerCase();
@@ -723,6 +723,9 @@ Welcome messages have been turned off.`;
 ${settings.welcome.message}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+*Default:* Welcome stays OFF until an admin enables it manually.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *Commands:*
 • ${p}welcome on - Enable
 • ${p}welcome off - Disable
@@ -736,10 +739,10 @@ ${settings.welcome.message}
  */
 export async function setwelcome(sock, m, args) {
     const remoteJid = m.key.remoteJid;
+    const sender = m.key.participant || m.key.remoteJid;
 
-    if (!remoteJid.endsWith("@g.us")) {
-        return `⚠️ This command only works in groups.`;
-    }
+    const accessError = await ensureGroupProtectionAccess(sock, remoteJid, sender, "welcome messages", { requireBotAdmin: false });
+    if (accessError) return accessError;
 
     const message = args.join(" ");
     if (!message) {
@@ -1288,10 +1291,9 @@ export async function antimention(sock, m, args) {
         featureName: "antimention",
         title: "ANTIMENTION",
         icon: "📣",
-        enableText: "Non-admin members can no longer use @all, @everyone, or mass mentions.",
+        enableText: "Non-admin members can no longer tag members, groups, statuses, or use @all / @everyone.",
         disableText: "Members can now mention freely again.",
-        footer: "🛡️ Stops mention spam from non-admin members.\n⚠️ Bot needs admin privileges for delete actions.",
-        requireBotAdmin: false
+        footer: "🛡️ Stops member mentions, native group/status mentions, and mention spam from non-admin members.\n⚠️ Bot needs admin privileges for delete actions."
     });
 }
 

@@ -1,0 +1,3 @@
+# Netscape HTTP Cookie File
+# Copy this to backend/cookies.txt only on your local machine when yt-dlp needs authenticated cookies.
+# Keep backend/cookies.txt untracked.

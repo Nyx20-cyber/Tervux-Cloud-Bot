@@ -71,11 +71,16 @@ dist-ssr
 # Environment
 .env
 .env.*
+!.env.example
+!**/.env.example
 
 # WhatsApp Auth Session (contains your credentials!)
 auth_info/
 auth_sessions/
 sessions/
+cookies.txt
+backend/cookies.txt
+deploy/env/cookies.txt
 
 # Runtime config (user settings)
 config.json
