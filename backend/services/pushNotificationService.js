@@ -7,10 +7,15 @@ const VAPID_PRIVATE_KEY = process.env.WEB_PUSH_VAPID_PRIVATE_KEY || "";
 const VAPID_SUBJECT = process.env.WEB_PUSH_VAPID_SUBJECT || "mailto:support@tervux.com";
 const FRONTEND_URL = process.env.FRONTEND_URL || "https://bot.tervux.com";
 
-const isConfigured = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY && VAPID_SUBJECT);
+let isConfigured = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY && VAPID_SUBJECT);
 
 if (isConfigured) {
-    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+    try {
+        webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+    } catch (error) {
+        isConfigured = false;
+        console.error("Web push disabled: invalid VAPID configuration.", error.message);
+    }
 }
 
 export function isWebPushConfigured() {
