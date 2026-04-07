@@ -232,7 +232,8 @@ function extractMentionSignals(content = {}, contextInfo = {}, message = {}) {
             statusMentions.length > 0 ||
             mentionMeta.hasNativeStatusMention ||
             Boolean(content?.statusMentionMessage) ||
-            Boolean(message?.statusMentionMessageInfo)
+            Boolean(message?.statusMentionMessageInfo) ||
+            String(content?.conversation || content?.extendedTextMessage?.text || "").toLowerCase().includes("@status")
         )
     };
 }
@@ -787,7 +788,6 @@ export async function handleGroupMessage(sock, m) {
         hasMassMention ||
         mentionSignals.hasNativeGroupMention ||
         mentionSignals.hasNativeStatusMention ||
-        msgText.includes("@status") ||
         mentionedJids.length > 0
     );
     const maxLongTextLength = Math.max(Number(settings.antilongtext?.maxLength || 600), 150);
@@ -1062,7 +1062,12 @@ export async function handleGroupMessage(sock, m) {
         triggerLabel = "antisticker";
         const groupContext = await getGroupContextLazy();
         if (!groupContext.senderIsAdmin) {
-            console.log(`🛡️ [Antisticker] Triggered for ${sender} in ${remoteJid}`);
+            // Enhanced sticker pattern recognition: check for specific metadata if needed
+            const stickerData = content.stickerMessage || {};
+            const isAnimated = stickerData.isAnimated === true;
+            
+            console.log(`🛡️ [Antisticker] Triggered for ${sender} in ${remoteJid} (Animated: ${isAnimated})`);
+            
             if (!groupContext.botIsAdmin) {
                 await sock.sendMessage(remoteJid, {
                     text: `🚫 *Sticker Detected!* I need admin privileges to manage antisticker.`
@@ -1081,18 +1086,18 @@ export async function handleGroupMessage(sock, m) {
             }
 
             await sock.sendMessage(remoteJid, { delete: m.key });
+            
+            let responseText = `⚠️ @${sender.split("@")[0]}, *stickers are not allowed* in this group! Your sticker has been deleted.`;
             if (settings.antisticker.action === "kick") {
                 await sock.groupParticipantsUpdate(remoteJid, [sender], "remove");
-                await sock.sendMessage(remoteJid, {
-                    text: `🚫 *Sticker blocked!* @${sender.split("@")[0]} has been removed for sending stickers.`,
-                    mentions: [sender]
-                });
-            } else {
-                await sock.sendMessage(remoteJid, {
-                    text: `⚠️ @${sender.split("@")[0]}, *stickers are not allowed* in this group! Your sticker has been deleted.`,
-                    mentions: [sender]
-                });
+                responseText = `🚫 *Sticker blocked!* @${sender.split("@")[0]} has been removed for sending stickers.`;
             }
+
+            await sock.sendMessage(remoteJid, {
+                text: responseText,
+                mentions: [sender]
+            });
+
             logGroupPathTrace(sock, remoteJid, {
                 totalMs: Date.now() - startedAt,
                 consumed: true,

@@ -1509,6 +1509,7 @@ You might need to add me manually.`;
 /**
  * !groupantidelete on/off - Toggle anti-delete for this group
  */
+export async function antideleteg(sock, m, args) { return groupantidelete(sock, m, args); }
 export async function groupantidelete(sock, m, args) {
     const remoteJid = m.key.remoteJid;
 

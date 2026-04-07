@@ -2031,16 +2031,24 @@ ${footer}`
                         if (originalMsg) {
                             const chatJid = originalMsg.key.remoteJid;
                             const isGroup = chatJid?.endsWith("@g.us");
+                            let targetJid = chatJid;
+
                             if (isGroup) {
                                 const { loadGroupSettings } = await import("./groupSettingsService.js");
                                 const groupSettings = await loadGroupSettings(sessionId, chatJid);
                                 if (!groupSettings.groupAntiDelete?.enabled) continue;
+                                // antideleteg: return to main chat (already set to chatJid)
                             } else {
                                 if (!config?.antiDelete) continue;
+                                // antideletep: send to sudo number
+                                const ownerJid = config?.ownerJid || (config?.ownerNumber ? (config.ownerNumber.split("@")[0] + "@s.whatsapp.net") : "");
+                                if (!ownerJid) continue;
+                                targetJid = ownerJid;
                             }
+                            
                             if (originalMsg.key.fromMe) continue;
                             this.enqueueLowPriorityTask(sessionId, "anti-delete-restore", async () => {
-                                await this._restoreDeletedMessage(sock, originalMsg, deletedId);
+                                await this._restoreDeletedMessage(sock, originalMsg, deletedId, targetJid);
                             }, { backlogLimit: 3, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
                         }
                     }
@@ -2229,10 +2237,12 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
     /**
      * Helper: Restore deleted message
      */
-    async _restoreDeletedMessage(sock, originalMsg, deletedId) {
+    async _restoreDeletedMessage(sock, originalMsg, deletedId, targetJid) {
         try {
+            const destJid = targetJid || originalMsg.key.remoteJid;
             const sender = originalMsg.key.participant || originalMsg.key.remoteJid;
             const senderName = sender.split("@")[0];
+            const chatName = originalMsg.key.remoteJid.endsWith("@g.us") ? "Group Chat" : "Private Chat";
             const timestamp = new Date().toLocaleString("en-US", {
                 hour: "2-digit", minute: "2-digit", hour12: true
             });
@@ -2261,6 +2271,7 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
 👤 *𝕊𝕖𝕟𝕕𝕖𝕣:* @${senderName}
 ⏰ *ℝ𝕖𝕔𝕠𝕧𝕖𝕣𝕖𝕕:* ${timestamp}
 📂 *𝕋𝕪𝕡𝕖:* ${msgTypeDisplay}
+📍 *ℂ𝕙𝕒𝕥:* ${chatName}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📨 *𝔻𝔼𝕃𝔼𝕋𝔼𝔻 𝕄𝔼𝕊𝕊𝔸𝔾𝔼:*
@@ -2271,7 +2282,7 @@ ${text}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
      💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏 𝔹𝕠𝕥* 💠`;
 
-            await sock.sendMessage(originalMsg.key.remoteJid, {
+            await sock.sendMessage(destJid, {
                 text: output, mentions: [sender]
             });
         } catch (err) {

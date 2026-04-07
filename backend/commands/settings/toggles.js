@@ -37,6 +37,7 @@ export const alwaysonline = createToggle("alwaysOnline", "Always Online");
 export const autolikestatus = createToggle("autoLikeStatus", "Auto Like Status");
 export const autoviewstatus = createToggle("autoViewStatus", "Auto View Status");
 export const antidelete = createToggle("antiDelete", "Anti Delete");
+export const antideletep = createToggle("antiDelete", "Private Anti Delete");
 export const anticall = createToggle("antiCall", "Anti Call");
 export const autoread = createToggle("autoReadMessages", "Auto Read");
 export const alwaystyping = createToggle("alwaysTyping", "Always Typing");
