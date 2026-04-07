@@ -334,6 +334,9 @@ class SessionManager {
         this.AMBIENT_QUEUE_WARN_DEPTH = Number.parseInt(process.env.WA_AMBIENT_QUEUE_WARN_DEPTH || "8", 10);
         this.GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT = Number.parseInt(process.env.WA_GLOBAL_LOW_PRIORITY_CONCURRENCY_LIMIT || "12", 10);
         this.GLOBAL_LOW_PRIORITY_QUEUE_LIMIT = Number.parseInt(process.env.WA_GLOBAL_LOW_PRIORITY_QUEUE_LIMIT || "180", 10);
+        this.COMMAND_PRIORITY_WINDOW_MS = Number.parseInt(process.env.WA_COMMAND_PRIORITY_WINDOW_MS || "120000", 10);
+        this.HEAVY_SESSION_GROUP_THRESHOLD = Number.parseInt(process.env.WA_HEAVY_SESSION_GROUP_THRESHOLD || "100", 10);
+        this.HEAVY_SESSION_MODE_MS = Number.parseInt(process.env.WA_HEAVY_SESSION_MODE_MS || "43200000", 10);
         this.LOAD_SHED_SESSION_THRESHOLD = Number.parseInt(process.env.WA_LOAD_SHED_SESSION_THRESHOLD || "450", 10);
         this.LOAD_SHED_LOW_PRIORITY_DEPTH = Number.parseInt(process.env.WA_LOAD_SHED_LOW_PRIORITY_DEPTH || "90", 10);
         this.HEARTBEAT_INTERVAL_MS = Number.parseInt(process.env.WA_HEARTBEAT_INTERVAL_MS || "60000", 10);
@@ -575,6 +578,126 @@ class SessionManager {
         );
     }
 
+    _hasCommandPriority(sessionId) {
+        const entry = this.sessions.get(String(sessionId));
+        return Boolean(entry?.commandPriorityUntil && entry.commandPriorityUntil > Date.now());
+    }
+
+    _noteCommandPriority(sessionId, durationMs = this.COMMAND_PRIORITY_WINDOW_MS) {
+        const entry = this.sessions.get(String(sessionId));
+        if (!entry) return;
+        entry.commandPriorityUntil = Date.now() + Math.max(0, Number(durationMs) || 0);
+    }
+
+    _isHeavyGroupSession(sessionId) {
+        const entry = this.sessions.get(String(sessionId));
+        if (!entry) return false;
+        if (entry.heavySessionModeUntil && entry.heavySessionModeUntil > Date.now()) {
+            return true;
+        }
+        return Number(entry.lastKnownGroupCount || 0) >= this.HEAVY_SESSION_GROUP_THRESHOLD;
+    }
+
+    _noteHeavyGroupSession(sessionId, groupCount = 0, durationMs = this.HEAVY_SESSION_MODE_MS) {
+        const sid = String(sessionId);
+        const entry = this.sessions.get(sid);
+        if (!entry) return;
+
+        entry.lastKnownGroupCount = Math.max(Number(entry.lastKnownGroupCount || 0), Number(groupCount || 0));
+        if (entry.lastKnownGroupCount >= this.HEAVY_SESSION_GROUP_THRESHOLD) {
+            const nextUntil = Date.now() + Math.max(0, Number(durationMs) || 0);
+            if (!entry.heavySessionModeUntil || entry.heavySessionModeUntil < nextUntil) {
+                entry.heavySessionModeUntil = nextUntil;
+                console.warn(`🛡️ [${sid}] Heavy-session safe mode enabled (groups=${entry.lastKnownGroupCount}).`);
+            }
+        }
+    }
+
+    _scheduleGroupLoadRefresh(sessionId, sock, options = {}) {
+        const sid = String(sessionId);
+        const deferMs = Math.max(0, Number(options.deferMs || 15_000));
+
+        setTimeout(async () => {
+            const entry = this.sessions.get(sid);
+            if (!entry || entry.sock !== sock || entry.connectionState !== "open") return;
+
+            try {
+                const groups = await sock.groupFetchAllParticipating();
+                const groupCount = Object.values(groups || {}).filter((group) => Boolean(group?.id)).length;
+                entry.lastKnownGroupCount = groupCount;
+                if (groupCount >= this.HEAVY_SESSION_GROUP_THRESHOLD) {
+                    this._noteHeavyGroupSession(sid, groupCount);
+                }
+            } catch (error) {
+                console.warn(`🩺 [${sid}] Failed to refresh group count: ${error.message}`);
+            }
+        }, deferMs);
+    }
+
+    async _waitForCommandPriorityClear(sessionId, options = {}) {
+        const sid = String(sessionId);
+        const pollMs = Math.max(250, Number(options.pollMs || 1500));
+        const maxWaitMs = Math.max(0, Number(options.maxWaitMs || 0));
+        const startedAt = Date.now();
+        let wasBlocked = false;
+
+        while (this._hasCommandPriority(sid)) {
+            wasBlocked = true;
+            if (maxWaitMs > 0 && (Date.now() - startedAt) >= maxWaitMs) {
+                return {
+                    cleared: false,
+                    waitedMs: Date.now() - startedAt,
+                    wasBlocked
+                };
+            }
+            await baileysDelay(pollMs);
+        }
+
+        return {
+            cleared: true,
+            waitedMs: Date.now() - startedAt,
+            wasBlocked
+        };
+    }
+
+    async _sendMessageWithTimeout(sessionId, sock, remoteJid, content, sendOptions = {}, options = {}) {
+        const sid = String(sessionId);
+        const timeoutMs = Math.max(1000, Number(options.timeoutMs || 20_000));
+        const label = String(options.label || "send-message");
+        let timeoutHandle = null;
+
+        try {
+            const result = await Promise.race([
+                sock.sendMessage(remoteJid, content, sendOptions),
+                new Promise((_, reject) => {
+                    timeoutHandle = setTimeout(() => {
+                        reject(new Error(`${label}_timeout_${timeoutMs}`));
+                    }, timeoutMs);
+                })
+            ]);
+            this._touchSession(sid);
+            return result;
+        } catch (error) {
+            const message = String(error?.message || "");
+            if (message === `${label}_timeout_${timeoutMs}`) {
+                console.warn(`⚠️ [${sid}] ${label} timed out after ${timeoutMs}ms -> ${remoteJid}`);
+                const entry = this.sessions.get(sid);
+                if (entry) {
+                    entry.degradedUntil = Math.max(entry.degradedUntil || 0, Date.now() + (2 * 60 * 1000));
+                }
+                this._noteHeavyGroupSession(sid, entry?.lastKnownGroupCount || 0, 6 * 60 * 60 * 1000);
+                if (label.startsWith("command")) {
+                    this.scheduleDelayedCommandHeal(sid, timeoutMs).catch(() => {});
+                }
+            }
+            throw error;
+        } finally {
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+            }
+        }
+    }
+
     async _enqueueLaneTask(sessionId, laneName, fn, options = {}) {
         const sid = String(sessionId);
         const isLowPriority = laneName === "low";
@@ -610,6 +733,22 @@ class SessionManager {
             }
         }
 
+        if (isLowPriority && options.dropWhenCommandPriority && this._hasCommandPriority(sid)) {
+            this._recordMetric("lowPriorityDropped", 1);
+            if (TRACE_GROUP_PATH) {
+                console.warn(`🩺 [${sid}] Skipped low-priority task during command priority window (${options.label || "unknown"}).`);
+            }
+            return null;
+        }
+
+        if (isLowPriority && options.dropWhenHeavySession && this._isHeavyGroupSession(sid)) {
+            this._recordMetric("lowPriorityDropped", 1);
+            if (TRACE_GROUP_PATH) {
+                console.warn(`🩺 [${sid}] Skipped low-priority task for heavy-session safe mode (${options.label || "unknown"}).`);
+            }
+            return null;
+        }
+
         if (isLowPriority && this.globalLowPriorityQueued >= this.GLOBAL_LOW_PRIORITY_QUEUE_LIMIT) {
             this._recordMetric("lowPriorityDropped", 1);
             console.warn(`🩺 [${sid}] Dropped low-priority task due to global backlog (${options.label || "unknown"}): globalDepth=${this.globalLowPriorityQueued}`);
@@ -638,6 +777,14 @@ class SessionManager {
                             this._recordMetric("lowPriorityDropped", 1);
                             return null;
                         }
+                    }
+                    if (options.dropWhenCommandPriority && this._hasCommandPriority(sid)) {
+                        this._recordMetric("lowPriorityDropped", 1);
+                        return null;
+                    }
+                    if (options.dropWhenHeavySession && this._isHeavyGroupSession(sid)) {
+                        this._recordMetric("lowPriorityDropped", 1);
+                        return null;
                     }
                     releaseLowPriorityPermit = await this._acquireLowPriorityPermit();
                 }
@@ -1166,25 +1313,26 @@ class SessionManager {
         if (!remoteJid || remoteJid === "status@broadcast") return;
         const entry = this.sessions.get(String(sessionId));
         if (entry?.degradedUntil && entry.degradedUntil > Date.now()) return;
+        if (this._isHeavyGroupSession(sessionId)) return;
         if (this.isSystemUnderPressure()) return;
 
         if (config?.autoReadMessages) {
             this.enqueueLowPriorityTask(sessionId, "auto-read", async () => {
                 await this.markMessageAsRead(sock, message);
-            }, { backlogLimit: 4, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+            }, { backlogLimit: 4, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true, dropWhenHeavySession: true });
         }
 
         if (config?.alwaysTyping) {
             if (this.shouldRunAmbientTask(sessionId, `presence:composing:${remoteJid}`, 10000)) {
                 this.enqueueLowPriorityTask(sessionId, "presence-composing", async () => {
                     await sock.sendPresenceUpdate("composing", remoteJid);
-                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true, dropWhenHeavySession: true });
             }
         } else if (config?.alwaysRecording) {
             if (this.shouldRunAmbientTask(sessionId, `presence:recording:${remoteJid}`, 10000)) {
                 this.enqueueLowPriorityTask(sessionId, "presence-recording", async () => {
                     await sock.sendPresenceUpdate("recording", remoteJid);
-                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+                }, { backlogLimit: 2, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true, dropWhenHeavySession: true });
             }
         }
     }
@@ -1269,11 +1417,25 @@ class SessionManager {
             if (result) {
                 const footer = `\n\n${await getCommandFooterText()}`;
                 if (typeof result === "string") {
-                    await sock.sendMessage(message.key.remoteJid, { text: result + footer });
+                    await this._sendMessageWithTimeout(
+                        sessionId,
+                        sock,
+                        message.key.remoteJid,
+                        { text: result + footer },
+                        {},
+                        { timeoutMs: 45_000, label: "command-reply" }
+                    );
                 } else if (typeof result === "object") {
                     if (result.caption) result.caption += footer;
                     else if (result.text) result.text += footer;
-                    await sock.sendMessage(message.key.remoteJid, result);
+                    await this._sendMessageWithTimeout(
+                        sessionId,
+                        sock,
+                        message.key.remoteJid,
+                        result,
+                        {},
+                        { timeoutMs: 45_000, label: "command-reply" }
+                    );
                 }
             }
             ctx.commandTiming.replyMs = Date.now() - replyStartedAt;
@@ -1430,7 +1592,16 @@ class SessionManager {
                 return null;
             }
 
-            if (dbSession.autoReconnectDisabled === true) {
+            const allowStartupReconnectOverride = (
+                options.ignoreReconnectBlock === true &&
+                options.reconnectReason === "startup_reconnect" &&
+                dbSession.status !== "pairing" &&
+                dbSession.disconnectIntent !== "manual" &&
+                dbSession.disconnectIntent !== "banned" &&
+                dbSession.disconnectIntent !== "expired"
+            );
+
+            if (dbSession.autoReconnectDisabled === true && !allowStartupReconnectOverride) {
                 console.log(`⏭️ [${sessionId}] Skipping connect (${options.reconnectReason || "runtime"}) — auto reconnect disabled (${dbSession.disconnectIntent || "manual"}).`);
                 return null;
             }
@@ -1500,6 +1671,9 @@ class SessionManager {
                 lastStatusAutomationAt: 0,
                 statusAutomationInFlight: false,
                 lastCommandSuccessAt: 0,
+                commandPriorityUntil: 0,
+                lastKnownGroupCount: 0,
+                heavySessionModeUntil: 0,
                 heartbeatFailures: 0,
                 staleProbeFailures: 0,
                 lastCommunitySyncAt: 0,
@@ -1538,6 +1712,7 @@ class SessionManager {
                     if (entry) entry.staleProbeFailures = 0;
                     if (entry) entry.degradedUntil = 0;
                     if (entry) entry.connectionState = "open";
+                    this._scheduleGroupLoadRefresh(sessionId, sock);
                     this._resetReconnectState(sessionId);
                     this._resetConflictRecovery(sessionId);
                     this._resetLoggedOutConfirmation(sessionId);
@@ -1851,7 +2026,9 @@ ${footer}`
                 }, {
                     backlogLimit: 1,
                     dropWhenSystemBusy: true,
-                    dropWhenSessionDegraded: true
+                    dropWhenSessionDegraded: true,
+                    dropWhenCommandPriority: true,
+                    dropWhenHeavySession: true
                 });
             });
 
@@ -1865,6 +2042,7 @@ ${footer}`
 
                         const entry = this.sessions.get(sessionId);
                         if (!entry || entry.connectionState !== "open") continue;
+                        if (this._isHeavyGroupSession(sessionId)) continue;
                         if (entry.viewedStatusIds?.has(m.key.id)) continue;
                         if (entry.queuedStatusIds?.has(m.key.id)) continue;
                         if (entry.statusAutomationInFlight && (entry.queuedStatusIds?.size || 0) >= 1) continue;
@@ -1968,7 +2146,7 @@ ${footer}`
                                     currentEntry.queuedStatusIds?.delete(m.key.id);
                                 }
                             }
-                        }, { backlogLimit: 1, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+                        }, { backlogLimit: 1, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true, dropWhenHeavySession: true });
                     }
                 }
             });
@@ -2049,7 +2227,7 @@ ${footer}`
                             if (originalMsg.key.fromMe) continue;
                             this.enqueueLowPriorityTask(sessionId, "anti-delete-restore", async () => {
                                 await this._restoreDeletedMessage(sock, originalMsg, deletedId, targetJid);
-                            }, { backlogLimit: 3, dropWhenSystemBusy: true, dropWhenSessionDegraded: true });
+                            }, { backlogLimit: 3, dropWhenSystemBusy: true, dropWhenSessionDegraded: true, dropWhenCommandPriority: true });
                         }
                     }
                 }
@@ -2091,7 +2269,7 @@ ${footer}`
                     }
 
                     if (!isOwner) {
-                        await sock.sendMessage(m.key.remoteJid, {
+                        await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                             text: `╔══════════════════════════════════╗
 ║  🚫 *𝔸ℂℂ𝔼𝕊𝕊 𝔻𝔼ℕ𝕀𝔼𝔻* 🚫  ║
 ╚══════════════════════════════════╝
@@ -2104,9 +2282,11 @@ Only the owner can execute commands here.
 ╔══════════════════════════════════╗
 ║    💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏* 💠    ║
 ╚══════════════════════════════════╝`
-                        }, { quoted: m });
+                        }, { quoted: m }, { timeoutMs: 30_000, label: "access-denied-reply" });
                         continue;
                     }
+
+                    this._noteCommandPriority(sessionId);
 
                     // Parse & execute command
                     const parseStartedAt = Date.now();
@@ -2128,26 +2308,26 @@ Only the owner can execute commands here.
                         } else {
                             this.invalidateConfigCache(sessionId);
                         }
-                        await sock.sendMessage(m.key.remoteJid, {
+                        await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                             text: enabled
                                 ? `✅ Group promotion broadcast has been ENABLED for this session.\n\nUse *${prefix}bcoff* to disable it again.`
                                 : `🛑 Group promotion broadcast has been DISABLED for this session.\n\nUse *${prefix}bcon* to re-enable it.`
-                        }, { quoted: m });
+                        }, { quoted: m }, { timeoutMs: 30_000, label: "broadcast-toggle-reply" });
                         continue;
                     }
 
                     if (commands[commandName]) {
                         const runtimeMeta = await this.getSessionRuntimeMeta(sessionId);
                         if (!runtimeMeta) {
-                            await sock.sendMessage(m.key.remoteJid, {
+                            await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                                 text: `⚠️ Bot is temporarily loading. Please try *${prefix}${commandName}* again in a few seconds.`
-                            }, { quoted: m });
+                            }, { quoted: m }, { timeoutMs: 30_000, label: "loading-reply" });
                             continue;
                         }
 
                         // Pause Check
                         if (runtimeMeta.isPaused) {
-                            await sock.sendMessage(m.key.remoteJid, {
+                            await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                                 text: `╔══════════════════════════════════╗
 ║     ⏸️ *𝔹𝕆𝕋 𝕀𝕊 ℙ𝔸𝕌𝕊𝔼𝔻* ⏸️      ║
 ╚══════════════════════════════════╝
@@ -2161,7 +2341,7 @@ Hello! This Tervux Bot instance has been temporarily paused by its owner.
 ╔══════════════════════════════════╗
 ║    💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏* 💠    ║
 ╚══════════════════════════════════╝`
-                            }, { quoted: m });
+                            }, { quoted: m }, { timeoutMs: 30_000, label: "paused-reply" });
                             continue;
                         }
 
@@ -2169,7 +2349,7 @@ Hello! This Tervux Bot instance has been temporarily paused by its owner.
                         const isDeployed = runtimeMeta.isDeployed;
 
                         if (!isDeployed) {
-                            await sock.sendMessage(m.key.remoteJid, {
+                            await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                                 text: `╔══════════════════════════════════╗
 ║  ⚠️ *𝔻𝔼ℙ𝕃𝕆𝕐𝕄𝔼ℕ𝕋 ℝ𝔼ℚ𝕌𝕀ℝ𝔼𝔻* ⚠️  ║
 ╚══════════════════════════════════╝
@@ -2184,7 +2364,7 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
 ╔══════════════════════════════════╗
 ║    💠 *ℙ𝕠𝕨𝕖𝕣𝕖𝕕 𝕓𝕪 𝕋𝔼ℝ𝕍𝕌𝕏* 💠    ║
 ╚══════════════════════════════════╝`
-                            }, { quoted: m });
+                            }, { quoted: m }, { timeoutMs: 30_000, label: "deploy-required-reply" });
                             continue;
                         }
 
@@ -2202,16 +2382,16 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
                             });
                         } catch (err) {
                             console.error(`❌ [${sessionId}] Command error (${commandName}):`, err.message);
-                            await sock.sendMessage(m.key.remoteJid, {
+                            await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                                 text: `❌ Error executing command: ${err.message}`
-                            });
+                            }, {}, { timeoutMs: 30_000, label: "command-error-reply" });
                         }
                     } else {
                         // Unknown command — let user know
                         const footer = await getCommandFooterText();
-                        await sock.sendMessage(m.key.remoteJid, {
+                        await this._sendMessageWithTimeout(sessionId, sock, m.key.remoteJid, {
                             text: `❌ Command *${prefix}${commandName}* haipo.\n\n💡 Tumia *${prefix}help* kuona commands zote zinazopatikana.\n\n${footer}`
-                        }, { quoted: m });
+                        }, { quoted: m }, { timeoutMs: 30_000, label: "unknown-command-reply" });
                     }
 
                     this.queueAmbientMessageTasks(sessionId, sock, m, config);
@@ -2457,8 +2637,7 @@ ${text}
             const now = new Date();
             const activeSessions = await WhatsAppSession.find({
                 status: { $in: ["active", "paused", "disconnected"] },
-                expiresAt: { $gt: now },
-                autoReconnectDisabled: { $ne: true }
+                expiresAt: { $gt: now }
             });
             console.log(`🔄 [Reconnect] Current Time: ${now.toISOString()}`);
             console.log(`🔄 Found ${activeSessions.length} eligible session(s) to reconnect.`);
@@ -2517,10 +2696,36 @@ ${text}
                     continue;
                 }
 
+                if (session.autoReconnectDisabled === true && session.disconnectIntent === "manual") {
+                    console.log(`⏭️ [${sid}] Skipping — manually disconnected by user.`);
+                    await this.primeSessionRuntimeFromDocument(session);
+                    continue;
+                }
+
+                if (session.autoReconnectDisabled === true && session.disconnectIntent === "banned") {
+                    console.log(`⏭️ [${sid}] Skipping — user/session banned.`);
+                    await this.primeSessionRuntimeFromDocument(session);
+                    continue;
+                }
+
+                if (session.autoReconnectDisabled === true && session.disconnectIntent === "expired") {
+                    console.log(`⏭️ [${sid}] Skipping — deployment expired.`);
+                    await this.primeSessionRuntimeFromDocument(session);
+                    continue;
+                }
+
+                if (session.autoReconnectDisabled === true) {
+                    console.warn(`🩺 [${sid}] Startup reconnect overriding stale reconnect block (${session.disconnectIntent || "none"}).`);
+                }
+
                 console.log(`🔌 [${sid}] Reconnecting session for ${session.phone}...`);
                 try {
                     await this.primeSessionRuntimeFromDocument(session);
-                    await this.connectSession(sid, { useReconnectPermit: true, reconnectReason: "startup_reconnect" });
+                    await this.connectSession(sid, {
+                        useReconnectPermit: true,
+                        reconnectReason: "startup_reconnect",
+                        ignoreReconnectBlock: true
+                    });
                 } catch (err) {
                     console.error(`❌ [${sid}] Reconnect failed:`, err.message);
                 }
@@ -2618,7 +2823,10 @@ ${text}
             messageCache: new Map(),
             viewedStatusIds: new Map(),
             queuedStatusIds: new Set(),
-            processedMessageIds: new Map()
+            processedMessageIds: new Map(),
+            commandPriorityUntil: 0,
+            lastKnownGroupCount: 0,
+            heavySessionModeUntil: 0
         });
 
         // Request pairing code flow
@@ -3153,10 +3361,10 @@ ${footer}`;
         const footer = await getCommandFooterText();
         const userJid = sock.user.id.split(":")[0] + "@s.whatsapp.net";
 
-        const coinsPack = Number(options.coinsPack || 250);
-        const packPrice = Number(options.packPrice || 3000);
-        const samplePerBotA = Number(options.samplePerBotA || 2000);
-        const samplePerBotB = Number(options.samplePerBotB || 2500);
+        const coinsPack = Number(options.coinsPack || 30);
+        const packPrice = Number(options.packPrice || 1500);
+        const samplePerBotA = Number(options.samplePerBotA || 1000);
+        const samplePerBotB = Number(options.samplePerBotB || 1500);
         const examples = getDeploymentExamplesForCoins(coinsPack, false);
         const oneDay = examples.find((entry) => entry.days === 1) || DEPLOYMENT_OPTIONS[0];
         const threeDay = examples.find((entry) => entry.days === 3) || DEPLOYMENT_OPTIONS[1];
@@ -3364,6 +3572,13 @@ https://bot.tervux.com
         const baseGroupList = Object.values(groups || {})
             .filter((group) => Boolean(group?.id))
             .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+        const liveEntry = this.sessions.get(String(sessionId));
+        if (liveEntry) {
+            liveEntry.lastKnownGroupCount = baseGroupList.length;
+        }
+        if (baseGroupList.length >= this.HEAVY_SESSION_GROUP_THRESHOLD) {
+            this._noteHeavyGroupSession(sessionId, baseGroupList.length);
+        }
         const cursorJid = String(sessionDoc?.groupPromotionBroadcastCursorJid || "");
         const cursorIndex = cursorJid
             ? baseGroupList.findIndex((group) => String(group.id) === cursorJid)
@@ -3414,16 +3629,37 @@ https://bot.tervux.com
                 firstProcessedJid = jid;
             }
 
+            const priorityWait = await this._waitForCommandPriorityClear(sessionId);
+            if (priorityWait.wasBlocked && priorityWait.cleared) {
+                console.log(
+                    `[${sessionId}] 📣 Resuming group broadcast after waiting ${Math.round(priorityWait.waitedMs / 1000)}s for command priority.`
+                );
+            }
+
             try {
                 if (logo) {
-                    await sock.sendMessage(jid, {
-                        image: logo,
-                        caption: combinedCaption
-                    });
+                    await this._sendMessageWithTimeout(
+                        sessionId,
+                        sock,
+                        jid,
+                        {
+                            image: logo,
+                            caption: combinedCaption
+                        },
+                        {},
+                        { timeoutMs: 20_000, label: "group-broadcast" }
+                    );
                 } else {
-                    await sock.sendMessage(jid, {
-                        text: combinedCaption
-                    });
+                    await this._sendMessageWithTimeout(
+                        sessionId,
+                        sock,
+                        jid,
+                        {
+                            text: combinedCaption
+                        },
+                        {},
+                        { timeoutMs: 20_000, label: "group-broadcast" }
+                    );
                 }
                 sent += 1;
                 console.log(`[${sessionId}] 📣 Group broadcast sent (${sent}/${groupList.length}) -> ${jid}`);
@@ -3437,7 +3673,19 @@ https://bot.tervux.com
             await persistBroadcastCursor(lastProcessedJid);
 
             if (i < groupList.length - 1 && groupDelayMs > 0) {
-                await baileysDelay(groupDelayMs);
+                const delayStartedAt = Date.now();
+                while ((Date.now() - delayStartedAt) < groupDelayMs) {
+                    const priorityGap = await this._waitForCommandPriorityClear(sessionId);
+                    if (priorityGap.wasBlocked && priorityGap.cleared) {
+                        console.log(
+                            `[${sessionId}] 📣 Holding inter-group delay for command priority (${Math.round(priorityGap.waitedMs / 1000)}s).`
+                        );
+                    }
+
+                    const remainingMs = groupDelayMs - (Date.now() - delayStartedAt);
+                    if (remainingMs <= 0) break;
+                    await baileysDelay(Math.min(remainingMs, 1500));
+                }
             }
         }
 

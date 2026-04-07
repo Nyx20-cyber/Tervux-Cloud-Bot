@@ -44,7 +44,12 @@ function BillingContent() {
         UGX_TO_TZS: 0.7334
     } as const;
     const bestValuePlanId = plans.length
-        ? [...plans].sort((a, b) => (b.coinsAmount / Math.max(b.price, 1)) - (a.coinsAmount / Math.max(a.price, 1)))[0]?._id
+        ? [...plans].sort((a, b) => {
+            const left = b.coinsAmount / Math.max(b.price, 1);
+            const right = a.coinsAmount / Math.max(a.price, 1);
+            if (left !== right) return left - right;
+            return Number(b.coinsAmount || 0) - Number(a.coinsAmount || 0);
+        })[0]?._id
         : null;
 
     const isValidInternationalPhone = (value: string) => /^[1-9]\d{11}$/.test(value.trim());
@@ -73,24 +78,27 @@ function BillingContent() {
             usd: (amount / EXCHANGE_RATES.USD_TO_TZS).toFixed(2)
         };
     };
-    const getPlanDeploymentDays = (slug?: string) => {
-        const daysBySlug: Record<string, number> = {
-            "3-coins": 1,
-            "6-coins": 3,
-            "12-coins": 7
+    const getLocalizedPlanDescription = (plan: { slug?: string; description?: string }) => {
+        const localizedBySlug: Record<string, { en: string; sw: string }> = {
+            "3-coins": {
+                en: "Up to 3 one-day deploys or 1 three-day deploy",
+                sw: "Inafaa hadi deploy 3 za siku 1 au deploy 1 ya siku 3"
+            },
+            "6-coins": {
+                en: "Up to 1 seven-day + 1 three-day deploy",
+                sw: "Inafaa hadi deploy 1 ya siku 7 na deploy 1 ya siku 3"
+            },
+            "12-coins": {
+                en: "Up to 2 seven-day + 2 one-day deploys",
+                sw: "Inafaa hadi deploy 2 za siku 7 na deploy 2 za siku 1"
+            }
         };
 
-        return slug ? daysBySlug[slug] || null : null;
-    };
-    const getLocalizedPlanDescription = (plan: { slug?: string; description?: string }) => {
-        const days = getPlanDeploymentDays(plan?.slug);
-        if (!days) return plan?.description || "";
-
-        if (language === "sw") {
-            return `Inatosha ku-deploy bot 1 kwa siku ${days}`;
+        if (plan?.slug && localizedBySlug[plan.slug]) {
+            return localizedBySlug[plan.slug][language];
         }
 
-        return `Enough to deploy 1 bot for ${days} day${days === 1 ? "" : "s"}`;
+        return plan?.description || "";
     };
 
     useEffect(() => {
@@ -294,7 +302,6 @@ function BillingContent() {
                     </div>
                 ) : plans.map((plan: any) => {
                     const approx = getApproxPlanCurrencies(plan.price);
-                    const deploymentDays = getPlanDeploymentDays(plan.slug);
                     return (
                     <div key={plan._id} className="relative group">
                         {plan._id === bestValuePlanId && (
@@ -338,18 +345,16 @@ function BillingContent() {
                             </div>
 
                             <ul className="mt-4 sm:mt-5 space-y-3 flex-1">
-                                {deploymentDays && (
-                                    <li className="flex items-center gap-3 group/item">
-                                        <div className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 group-hover/item:scale-110 transition-transform">
-                                            <CheckCircle2 className="w-3.5 h-3.5 stroke-[2.5]" />
-                                        </div>
-                                        <span className="text-[10px] sm:text-[11px] font-bold text-gray-300 uppercase tracking-wider">
-                                            {language === "sw"
-                                                ? `BOT ACTIVE KWA SIKU ${deploymentDays}`
-                                                : `BOT ACTIVE FOR ${deploymentDays} DAY${deploymentDays === 1 ? "" : "S"}`}
-                                        </span>
-                                    </li>
-                                )}
+                                <li className="flex items-center gap-3 group/item">
+                                    <div className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 group-hover/item:scale-110 transition-transform">
+                                        <CheckCircle2 className="w-3.5 h-3.5 stroke-[2.5]" />
+                                    </div>
+                                    <span className="text-[10px] sm:text-[11px] font-bold text-gray-300 uppercase tracking-wider">
+                                        {language === "sw"
+                                            ? "DEPLOY ZA SIKU 1 / 3 / 7"
+                                            : "1 / 3 / 7 DAY DEPLOYS"}
+                                    </span>
+                                </li>
                                 <li className="flex items-center gap-3 group/item">
                                     <div className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 group-hover/item:scale-110 transition-transform">
                                         <CheckCircle2 className="w-3.5 h-3.5 stroke-[2.5]" />

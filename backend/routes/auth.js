@@ -68,6 +68,7 @@ const router = Router();
 router.post("/register", authLimiter, async (req, res) => {
     try {
         const { email, password, name, referralCode } = req.body;
+        const normalizedEmail = String(email || "").trim().toLowerCase();
 
         const settings = await getCachedPublicSettings();
         if (!settings.registrationEnabled) {
@@ -78,7 +79,7 @@ router.post("/register", authLimiter, async (req, res) => {
             return res.status(400).json({ error: "Email, password, and name are required" });
         }
 
-        if (!validator.isEmail(email)) {
+        if (!validator.isEmail(normalizedEmail)) {
             return res.status(400).json({ error: "Please provide a valid email address" });
         }
 
@@ -87,7 +88,7 @@ router.post("/register", authLimiter, async (req, res) => {
         }
 
         // Check if user exists
-        const existing = await User.findOne({ email: email.toLowerCase() });
+        const existing = await User.findOne({ email: normalizedEmail });
         if (existing) {
             return res.status(409).json({ error: "Email already registered" });
         }
@@ -103,7 +104,7 @@ router.post("/register", authLimiter, async (req, res) => {
         }
 
         const user = await User.create({
-            email: email.toLowerCase(),
+            email: normalizedEmail,
             password,
             name: sanitize(name),
             referredBy: referrer ? referrer._id : null
@@ -156,17 +157,18 @@ router.post("/register", authLimiter, async (req, res) => {
 router.post("/login", authLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
+        const normalizedEmail = String(email || "").trim().toLowerCase();
         traceAuth("Login requested.", {
-            email: String(email || "").toLowerCase(),
+            email: normalizedEmail,
             hasPassword: Boolean(password),
             cookieHeaderPresent: Boolean(req.headers.cookie)
         });
 
-        if (!email || !password) {
+        if (!normalizedEmail || !password) {
             return res.status(400).json({ error: "Email and password are required" });
         }
 
-        const user = await User.findOne({ email: email.toLowerCase() });
+        const user = await User.findOne({ email: normalizedEmail });
         if (!user) {
             return res.status(401).json({ error: "Invalid email or password" });
         }
