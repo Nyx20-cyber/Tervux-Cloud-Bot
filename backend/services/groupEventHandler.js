@@ -2,6 +2,7 @@ import { loadGroupSettings, saveGroupSettings } from "./groupSettingsService.js"
 import { getGroupMetadata, getGroupParticipantContext, invalidateGroupMetadataCache } from "../utils/groupUtils.js";
 import { getCachedConfig } from "./configService.js";
 import GroupMemberStats from "../models/GroupMemberStats.js";
+import SessionGroup from "../models/SessionGroup.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { sticker } from "../commands/tools/sticker.js";
 
@@ -26,6 +27,15 @@ const SLOW_GROUP_PATH_WARN_MS = Number(process.env.WA_SLOW_GROUP_PATH_WARN_MS ||
 const pendingGroupStats = new Map();
 const pendingGroupStatsTimers = new Map();
 const GROUP_STATS_FLUSH_DELAY_MS = Number(process.env.WA_GROUP_STATS_FLUSH_DELAY_MS || 8000);
+
+const normalizeJid = (jid) => String(jid || "").split(":")[0];
+const getSelfJid = (sock) => {
+    const raw = sock?.user?.id;
+    if (!raw) return "";
+    const bare = normalizeJid(raw);
+    if (bare.includes("@")) return bare;
+    return `${bare}@s.whatsapp.net`;
+};
 
 // Periodic eviction for module-level Maps to prevent memory leaks at scale
 setInterval(() => {
@@ -607,12 +617,39 @@ export async function handleGroupParticipantsUpdate(sock, update) {
 
     // Normalize participants (some Baileys versions send objects instead of JIDs)
     const normalizedParticipants = (update.participants || []).map(p => typeof p === "string" ? p : p.id).filter(Boolean);
+    const selfJid = getSelfJid(sock);
+    const isSelfAffected = Boolean(
+        selfJid &&
+        normalizedParticipants.some((p) => normalizeJid(p) === normalizeJid(selfJid))
+    );
 
     if (TRACE_GROUP_EVENTS) {
         console.log(`👥 [GroupEvent] Participants update: action=${action}, group=${id}, participants=${normalizedParticipants.join(", ")}`);
     }
 
     try {
+        // Track bot membership in groups so broadcasts can be ordered newest->oldest.
+        // This is intentionally independent of welcome/goodbye/antifake settings.
+        if (sock?.sessionId && id && isSelfAffected) {
+            const now = new Date();
+            if (action === "add") {
+                await SessionGroup.updateOne(
+                    { sessionId: sock.sessionId, groupJid: id },
+                    {
+                        $setOnInsert: { firstSeenAt: now },
+                        $set: { lastSeenAt: now, leftAt: null }
+                    },
+                    { upsert: true }
+                );
+            } else if (action === "remove") {
+                await SessionGroup.updateOne(
+                    { sessionId: sock.sessionId, groupJid: id },
+                    { $set: { lastSeenAt: now, leftAt: now } },
+                    { upsert: true }
+                );
+            }
+        }
+
         const settings = await loadGroupSettings(sock.sessionId, id);
         const welcomeEnabled = settings.welcome?.enabled === true;
         const goodbyeEnabled = settings.goodbye?.enabled === true;

@@ -4,12 +4,14 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { readFile } from "fs/promises";
 import { existsSync } from "fs";
+import { randomUUID } from "crypto";
 import { commands } from "../commands/index.js";
 import { handleGroupParticipantsUpdate, handleGroupMessage } from "./groupEventHandler.js";
 import { getRandomEmoji } from "../utils/reactionUtils.js";
 import WhatsAppSession from "../models/WhatsAppSession.js";
 import WhatsAppAuth from "../models/WhatsAppAuth.js";
 import Notification from "../models/Notification.js";
+import SessionGroup from "../models/SessionGroup.js";
 import { getSettings } from "../models/SystemSettings.js";
 import { useMongoDBAuthState } from "./mongoAuthState.js";
 import { queueService } from "./queueService.js";
@@ -3566,12 +3568,11 @@ https://bot.tervux.com
         }
 
         const sessionDoc = await WhatsAppSession.findById(sessionId).select(
-            "groupPromotionBroadcastCursorJid lastGroupPromotionBroadcastAt"
+            "groupPromotionBroadcastCursorJid groupPromotionBroadcastCursorUpdatedAt groupPromotionBroadcastRunKey groupPromotionBroadcastRunStartedAt deployedAt createdAt"
         );
 
         const baseGroupList = Object.values(groups || {})
-            .filter((group) => Boolean(group?.id))
-            .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+            .filter((group) => Boolean(group?.id));
         const liveEntry = this.sessions.get(String(sessionId));
         if (liveEntry) {
             liveEntry.lastKnownGroupCount = baseGroupList.length;
@@ -3579,13 +3580,89 @@ https://bot.tervux.com
         if (baseGroupList.length >= this.HEAVY_SESSION_GROUP_THRESHOLD) {
             this._noteHeavyGroupSession(sessionId, baseGroupList.length);
         }
+
+        const now = new Date();
+        const resumeMaxAgeMs = Number(options.resumeMaxAgeMs || (6 * 60 * 60 * 1000));
         const cursorJid = String(sessionDoc?.groupPromotionBroadcastCursorJid || "");
-        const cursorIndex = cursorJid
-            ? baseGroupList.findIndex((group) => String(group.id) === cursorJid)
+        const cursorUpdatedAt = sessionDoc?.groupPromotionBroadcastCursorUpdatedAt || null;
+        const existingRunKey = String(sessionDoc?.groupPromotionBroadcastRunKey || "");
+        const existingRunStartedAt = sessionDoc?.groupPromotionBroadcastRunStartedAt || null;
+        const shouldResume = Boolean(
+            existingRunKey &&
+            cursorJid &&
+            cursorUpdatedAt &&
+            (now.getTime() - new Date(cursorUpdatedAt).getTime()) <= resumeMaxAgeMs
+        );
+        const runKey = shouldResume ? existingRunKey : randomUUID();
+        const runStartedAt = shouldResume ? existingRunStartedAt : now;
+
+        if (!shouldResume) {
+            await WhatsAppSession.findByIdAndUpdate(sessionId, {
+                $set: {
+                    groupPromotionBroadcastCursorJid: "",
+                    groupPromotionBroadcastCursorUpdatedAt: now,
+                    groupPromotionBroadcastRunKey: runKey,
+                    groupPromotionBroadcastRunStartedAt: runStartedAt
+                }
+            }).catch(() => {});
+        }
+
+        const baselineFirstSeenAt = sessionDoc?.deployedAt || sessionDoc?.createdAt || now;
+        const groupJids = baseGroupList.map((g) => String(g.id));
+
+        let groupSeenDocs = [];
+        try {
+            groupSeenDocs = await SessionGroup.find({
+                sessionId,
+                groupJid: { $in: groupJids }
+            }).select("groupJid firstSeenAt");
+        } catch (error) {
+            console.warn(`[${sessionId}] Failed to load group join ordering data:`, error.message);
+            groupSeenDocs = [];
+        }
+
+        const seenByJid = new Map(
+            groupSeenDocs.map((doc) => [String(doc.groupJid), doc.firstSeenAt ? new Date(doc.firstSeenAt) : null])
+        );
+
+        // Backfill/update group membership records so future broadcasts have stable newest->oldest ordering.
+        try {
+            const ops = groupJids.map((jid) => ({
+                updateOne: {
+                    filter: { sessionId, groupJid: jid },
+                    update: {
+                        $setOnInsert: { firstSeenAt: baselineFirstSeenAt },
+                        $set: { lastSeenAt: now, leftAt: null }
+                    },
+                    upsert: true
+                }
+            }));
+            const chunkSize = 500;
+            for (let i = 0; i < ops.length; i += chunkSize) {
+                await SessionGroup.bulkWrite(ops.slice(i, i + chunkSize), { ordered: false });
+            }
+        } catch (error) {
+            console.warn(`[${sessionId}] Failed to backfill group ordering data:`, error.message);
+        }
+
+        const baseSortedByJoin = baseGroupList
+            .map((group) => {
+                const jid = String(group.id);
+                const firstSeenAt = seenByJid.get(jid) || baselineFirstSeenAt;
+                return { group, jid, firstSeenAt: firstSeenAt ? new Date(firstSeenAt) : baselineFirstSeenAt };
+            })
+            .sort((a, b) => {
+                const diff = new Date(b.firstSeenAt).getTime() - new Date(a.firstSeenAt).getTime();
+                if (diff !== 0) return diff;
+                return a.jid.localeCompare(b.jid);
+            });
+
+        const sortedGroups = baseSortedByJoin.map((x) => x.group);
+        const totalGroups = sortedGroups.length;
+        const cursorIndex = shouldResume && cursorJid
+            ? sortedGroups.findIndex((group) => String(group.id) === cursorJid)
             : -1;
-        const groupList = cursorIndex >= 0
-            ? baseGroupList.slice(cursorIndex + 1).concat(baseGroupList.slice(0, cursorIndex + 1))
-            : baseGroupList;
+        const groupList = cursorIndex >= 0 ? sortedGroups.slice(cursorIndex + 1) : sortedGroups;
 
         let sent = 0;
         let failed = 0;
@@ -3601,6 +3678,8 @@ https://bot.tervux.com
                     $set: {
                         groupPromotionBroadcastCursorJid: jid,
                         groupPromotionBroadcastCursorUpdatedAt: new Date(),
+                        groupPromotionBroadcastRunKey: runKey,
+                        groupPromotionBroadcastRunStartedAt: runStartedAt,
                         lastGroupPromotionBroadcastAt: new Date()
                     }
                 });
@@ -3617,7 +3696,7 @@ https://bot.tervux.com
         }
 
         console.log(
-            `[${sessionId}] 📣 Group broadcast starting from ${cursorIndex >= 0 ? `after ${cursorJid}` : "beginning"} ` +
+            `[${sessionId}] 📣 Group broadcast starting from ${cursorIndex >= 0 ? `after ${cursorJid}` : "newest"} ` +
             `for ${groupList.length} groups with ${groupDelayMs}ms spacing.`
         );
 
@@ -3689,18 +3768,34 @@ https://bot.tervux.com
             }
         }
 
-        const nextCursorJid = processed === groupList.length
-            ? (firstProcessedJid || lastProcessedJid)
-            : lastProcessedJid;
-        await persistBroadcastCursor(nextCursorJid, true);
+        const completed = processed === groupList.length;
+        const nextCursorJid = completed ? "" : lastProcessedJid;
+
+        if (completed) {
+            try {
+                await WhatsAppSession.findByIdAndUpdate(sessionId, {
+                    $set: {
+                        groupPromotionBroadcastCursorJid: "",
+                        groupPromotionBroadcastCursorUpdatedAt: new Date(),
+                        groupPromotionBroadcastRunKey: "",
+                        groupPromotionBroadcastRunStartedAt: null,
+                        lastGroupPromotionBroadcastAt: new Date()
+                    }
+                });
+            } catch (error) {
+                console.warn(`[${sessionId}] Failed to finalize group broadcast run:`, error.message);
+            }
+        } else {
+            await persistBroadcastCursor(nextCursorJid, true);
+        }
 
         return {
             sent,
             failed,
-            total: groupList.length,
+            total: totalGroups,
             groupDelayMs,
             resumedAfter: cursorIndex >= 0 ? cursorJid : "",
-            completed: processed === groupList.length,
+            completed,
             nextCursorJid
         };
     }
