@@ -1,4 +1,4 @@
-import { downloadMediaMessage } from "@whiskeysockets/baileys";
+import { downloadMediaMessage, normalizeMessageContent } from "@whiskeysockets/baileys";
 import { getCachedConfig } from "../../services/configService.js";
 
 export const vv = async (sock, m, args, ctx = {}) => {
@@ -20,12 +20,8 @@ export const vv = async (sock, m, args, ctx = {}) => {
 
         // Retrieve from cache if possible, because quotedMessage context often lacks indices
         const cachedEntry = session.messageCache.get(quotedMsgId);
-        let msg = cachedEntry ? cachedEntry.message : quotedMessage;
-
-        // Unwrap various message wrappers
-        if (msg.viewOnceMessage) msg = msg.viewOnceMessage.message;
-        if (msg.viewOnceMessageV2) msg = msg.viewOnceMessageV2.message;
-        if (msg.ephemeralMessage) msg = msg.ephemeralMessage.message;
+        const msg = normalizeMessageContent(cachedEntry ? cachedEntry.message : quotedMessage)
+            || (cachedEntry ? cachedEntry.message : quotedMessage);
 
         const type = Object.keys(msg)[0];
         const validTypes = ['imageMessage', 'videoMessage', 'audioMessage'];

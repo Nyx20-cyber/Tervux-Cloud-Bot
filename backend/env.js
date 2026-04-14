@@ -30,6 +30,11 @@ export const PORT = process.env.PORT || 5000;
 // AI Configuration
 export const AI_API_KEY = process.env.AI_API_KEY;
 export const AI_API_BASE_URL = process.env.AI_API_BASE_URL || "https://open.bigmodel.cn/api/paas/v4/";
+export const SERPAPI_KEY = process.env.SERPAPI_KEY;
+export const OMDB_API_KEY = process.env.OMDB_API_KEY;
+export const RAPID_API_HOST = process.env.RAPID_API_HOST || "all-media-downloader4.p.rapidapi.com";
+export const RAPID_API_KEY = process.env.RAPID_API_KEY;
+export const AUDD_API_TOKEN = process.env.AUDD_API_TOKEN;
 
 // BongoPay Configuration
 export const BONGOPAY_API_KEY = process.env.BONGOPAY_API_KEY;

@@ -1,5 +1,6 @@
 import axios from "axios";
 import { getCachedConfig } from "../../services/configService.js";
+import { OMDB_API_KEY } from "../../env.js";
 
 export const movie = async (sock, m, args) => {
     const config = await getCachedConfig(sock.sessionId);
@@ -18,9 +19,11 @@ Search any movie from IMDB! 🎥`;
     }
 
     try {
-        // Use OMDb API with a stable public key as primary source
-        const apiKey = "trilogy";
-        const response = await axios.get(`https://www.omdbapi.com/?t=${encodeURIComponent(query)}&apikey=${apiKey}`, { timeout: 15000 });
+        if (!OMDB_API_KEY) {
+            return `❌ *Movie search is unavailable.* Add *OMDB_API_KEY* to backend/.env to enable this command.`;
+        }
+
+        const response = await axios.get(`https://www.omdbapi.com/?t=${encodeURIComponent(query)}&apikey=${OMDB_API_KEY}`, { timeout: 15000 });
         const data = response.data;
 
         if (data && data.Response === "True") {

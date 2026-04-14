@@ -64,9 +64,11 @@ export const help = async (sock, m, args, ctx = {}) => {
 │ 💘 ➾ *${p}ship* @user1 @user2
 │ ✨ ➾ *${p}fancy* <text>
 │ 😂 ➾ *${p}joke*
+│ 😂 ➾ *${p}jokes*
 │ 🧠 ➾ *${p}fact*
 │ 😇 ➾ *${p}truth*
 │ 😈 ➾ *${p}dare*
+│ 🎲 ➾ *${p}truthordare*
 │ 🎱 ➾ *${p}8ball* <question>
 │ 💘 ➾ *${p}pickup*
 │ 🌟 ➾ *${p}compliment*
@@ -112,6 +114,7 @@ export const help = async (sock, m, args, ctx = {}) => {
 
 ╭───『 ⚙️ *𝔾𝔼ℕ𝔼ℝ𝔸𝕃* 』───╮
 │ 🏓 ➾ *${p}ping*
+│ 📊 ➾ *${p}botstatus*
 │ 📊 ➾ *${p}botstats*
 │ 👑 ➾ *${p}owner*
 │ 🚫 ➾ *${p}block* <@user>
@@ -119,23 +122,35 @@ export const help = async (sock, m, args, ctx = {}) => {
 │ ℹ️ ➾ *${p}help*
 │ 💎 ➾ *${p}creator*
 │ 💫 ➾ *${p}quote*
+│ 💫 ➾ *${p}quotes*
+│ 🏓 ➾ *${p}ping2*
+│ 💬 ➾ *${p}feedback* <message>
 │ 💳 ➾ *${p}billing* _(payment info)_
 ╰──────────────────────────────╯
 
 ╭───『 🎬 *𝕄𝔼𝔻𝕀𝔸* 』───╮
 │ 🎵 ➾ *${p}play* <YouTube link / ID>
+│ 🎵 ➾ *${p}song* <YouTube link / ID>
+│ 🎵 ➾ *${p}song2* <YouTube link / ID>
 │ 📹 ➾ *${p}video* <YouTube link / ID>
 │ 🎬 ➾ *${p}movie* <movie name>
+│ 🎞️ ➾ *${p}imdb* <movie name>
 │ ⚽ ➾ *${p}sport* <team name>
 │ 📰 ➾ *${p}news*
 │ 😂 ➾ *${p}meme*
+│ 😂 ➾ *${p}memes*
 │ 🎤 ➾ *${p}lyrics* <song>
+│ 🎧 ➾ *${p}shazam* _(reply to audio/video)_
 │ 🔮 ➾ *${p}zodiac* <sign>
 │ 🖼️ ➾ *${p}wallpaper* <theme>
 │ 🌸 ➾ *${p}waifu* <category>
 │ 👁️ ➾ *${p}vv* (reply to view once)
 │ 👁️ ➾ *${p}vvp* (reply to view once to private)
 │ 🔄 ➾ *${p}convert* <format>
+│ 🎵 ➾ *${p}tomp3* _(reply to audio/video)_
+│ 🎵 ➾ *${p}toaudio* _(reply to audio/video)_
+│ 🎬 ➾ *${p}tovideo* <link / reply>
+│ 🔊 ➾ *${p}volvideo* <percent> _(reply to video)_
 ╰──────────────────────────────╯
 
 ╭───『 🎵 *𝔸𝕌𝔻𝕀𝕆 𝔼𝔽𝔽𝔼ℂ𝕋𝕊* 』───╮
@@ -145,6 +160,7 @@ export const help = async (sock, m, args, ctx = {}) => {
 │ 💀 ➾ *${p}earrape* / *${p}blown* / *${p}cut*
 │ 🌊 ➾ *${p}smooth* / *${p}low* / *${p}histo*
 │ 🎹 ➾ *${p}avec* / *${p}black*
+│ 🔁 ➾ *${p}reverse* / *${p}toptt* / *${p}volaudio*
 ╰──────────────────────────────╯
 
 ╭───『 👤 *𝕊𝕋𝔸𝕋𝕌𝕊* 』───╮
@@ -157,18 +173,69 @@ export const help = async (sock, m, args, ctx = {}) => {
 │ 🔢 ➾ *${p}calc* <expression>
 │ 📱 ➾ *${p}qr* <text>
 │ 🌐 ➾ *${p}translate* <text>
+│ 🌐 ➾ *${p}translate2* <text>
 │ 🌤️ ➾ *${p}weather* <city>
 │ 📖 ➾ *${p}define* <word>
+│ 📖 ➾ *${p}define2* <word>
 │ ✨ ➾ *${p}aesthetic* <text>
+│ 🔄 ➾ *${p}fliptext* <text>
+│ 😄 ➾ *${p}emojimix* 😀 😂
 │ 🖼️ ➾ *${p}sticker*
+│ 🏷️ ➾ *${p}take* <packname> <author>
+│ 🖼️ ➾ *${p}toimage* _(reply to sticker)_
 │ 🐙 ➾ *${p}github* <user>
+│ 📦 ➾ *${p}download* <url>
+│ 📥 ➾ *${p}videodoc* <video url>
+│ 📂 ➾ *${p}gitclone* <repo url>
+│ ☁️ ➾ *${p}gdrive* <link>
+│ 📦 ➾ *${p}mediafire* <link>
+│ 🍎 ➾ *${p}itunes* <query>
+│ 📱 ➾ *${p}apk* <app name>
+│ 📌 ➾ *${p}pin* <query>
+│ 🖼️ ➾ *${p}image* <query>
+│ 📱 ➾ *${p}gsmarena* <phone model>
 │ 🔐 ➾ *${p}password* <length>
+│ 🔐 ➾ *${p}genpass* <length>
 │ 📚 ➾ *${p}wiki* <topic>
 │ 🔣 ➾ *${p}base64* encode/decode
+│ 📇 ➾ *${p}filtervcf* <prefix>
+│ 🕶️ ➾ *${p}obfuscate* <text>
 │ 🌐 ➾ *${p}ip* <address>
 │ 🤖 ➾ *${p}ai* <question>
+│ 🧠 ➾ *${p}analyze* <text>
+│ 📦 ➾ *${p}blackbox* <problem>
+│ 💻 ➾ *${p}code* <task>
+│ 🔍 ➾ *${p}deepseek* <question>
+│ ✨ ➾ *${p}gemini* <prompt>
+│ ⚡ ➾ *${p}generate* <prompt>
+│ 🤖 ➾ *${p}gpt* <prompt>
+│ 👨‍💻 ➾ *${p}programming* <task>
+│ 🍲 ➾ *${p}recipe* <ingredients/idea>
+│ 📝 ➾ *${p}summarize* <text>
+│ 📖 ➾ *${p}story* <idea>
+│ 🎓 ➾ *${p}teach* <topic>
+│ 🕵️ ➾ *${p}truthdetector* <statement>
 │ 📥 ➾ *${p}save* (reply/caption)
 │ 👤 ➾ *${p}profiled* <@user>
+│ 🌍 ➾ *${p}browse* <query>
+│ 🔢 ➾ *${p}calculate* <expression>
+│ 📱 ➾ *${p}qrcode* <text>
+│ 🔗 ➾ *${p}tinyurl* <url>
+│ 🔗 ➾ *${p}tourl* _(reply to media)_
+│ 📟 ➾ *${p}device* (or reply)
+│ 📸 ➾ *${p}getpp* <@user/num>
+│ 📝 ➾ *${p}getabout* <@user/num>
+│ 🗣️ ➾ *${p}say* <text>
+│ 📄 ➾ *${p}texttopdf* <text>
+│ 💳 ➾ *${p}vcc* <visa/mastercard/amex>
+│ 🌐 ➾ *${p}ssweb* <url>
+│ 🖥️ ➾ *${p}sswebpc* <url>
+│ 📱 ➾ *${p}sswebtab* <url>
+│ 📦 ➾ *${p}repo*
+│ ⏱️ ➾ *${p}runtime*
+│ 🕒 ➾ *${p}time*
+│ 🤝 ➾ *${p}helpers*
+│ ▶️ ➾ *${p}yts* <query>
 ╰──────────────────────────────╯
 
 ╭───『 ⚙️ *𝕊𝔼𝕋𝕋𝕀ℕ𝔾𝕊* 』───╮

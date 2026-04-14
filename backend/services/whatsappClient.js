@@ -1,4 +1,4 @@
-import { default as makeWASocket, DisconnectReason, Browsers, delay as baileysDelay, fetchLatestWaWebVersion, jidNormalizedUser, areJidsSameUser } from "@whiskeysockets/baileys";
+import { default as makeWASocket, DisconnectReason, Browsers, delay as baileysDelay, fetchLatestWaWebVersion, jidNormalizedUser, areJidsSameUser, normalizeMessageContent } from "@whiskeysockets/baileys";
 import pino from "pino";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -2161,19 +2161,13 @@ ${footer}`
                 this._touchSession(sessionId);
                 for (const m of messages) {
                     if (!m.message || m.message.protocolMessage || m.message.reactionMessage || m.message.pollUpdateMessage) continue;
-                    const msgType = Object.keys(m.message)[0];
-                    const validTypes = [
-                        'conversation', 'extendedTextMessage', 'imageMessage',
-                        'videoMessage', 'audioMessage', 'documentMessage',
-                        'stickerMessage', 'contactMessage', 'locationMessage',
-                        'viewOnceMessage', 'viewOnceMessageV2', 'ephemeralMessage'
-                    ];
-                    if (validTypes.includes(msgType)) {
-                        entry.messageCache.set(m.key.id, m);
-                        if (entry.messageCache.size > 200) {
-                            const firstKey = entry.messageCache.keys().next().value;
-                            entry.messageCache.delete(firstKey);
-                        }
+                    const normalized = normalizeMessageContent(m.message);
+                    if (!normalized || Object.keys(normalized).length === 0) continue;
+
+                    entry.messageCache.set(m.key.id, m);
+                    if (entry.messageCache.size > 200) {
+                        const firstKey = entry.messageCache.keys().next().value;
+                        entry.messageCache.delete(firstKey);
                     }
                 }
             });
@@ -2429,10 +2423,7 @@ Hi! Your WhatsApp is connected, but you need to deploy this node to use bot comm
                 hour: "2-digit", minute: "2-digit", hour12: true
             });
 
-            let msgContent = originalMsg.message;
-            if (msgContent?.viewOnceMessage) msgContent = msgContent.viewOnceMessage.message;
-            if (msgContent?.viewOnceMessageV2) msgContent = msgContent.viewOnceMessageV2.message;
-            if (msgContent?.ephemeralMessage) msgContent = msgContent.ephemeralMessage.message;
+            const msgContent = normalizeMessageContent(originalMsg.message) || originalMsg.message;
 
             const type = Object.keys(msgContent || {})[0];
             let text = "", msgTypeDisplay = "📝 Text";

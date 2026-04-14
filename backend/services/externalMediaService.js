@@ -1,7 +1,6 @@
 import axios from "axios";
+import { RAPID_API_HOST, RAPID_API_KEY } from "../env.js";
 
-const RAPID_API_HOST = "all-media-downloader4.p.rapidapi.com";
-const RAPID_API_KEY = "f160f62573msh7cb1e540682e181p173abbjsn11e7942a3439";
 const RAPID_API_URL = `https://${RAPID_API_HOST}/yt/v5/download.php`;
 const REQUEST_TIMEOUT = 120000;
 const DOWNLOAD_RETRIES = 3;
@@ -52,6 +51,10 @@ export const extractYouTubeId = (input = "") => {
 };
 
 export const fetchRapidYoutubeMedia = async (videoId) => {
+    if (!RAPID_API_KEY) {
+        throw new Error("YouTube download API is not configured. Add RAPID_API_KEY to backend/.env.");
+    }
+
     const response = await axios.get(RAPID_API_URL, {
         params: { id: videoId },
         timeout: REQUEST_TIMEOUT,

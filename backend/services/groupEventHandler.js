@@ -3,7 +3,7 @@ import { getGroupMetadata, getGroupParticipantContext, invalidateGroupMetadataCa
 import { getCachedConfig } from "./configService.js";
 import GroupMemberStats from "../models/GroupMemberStats.js";
 import SessionGroup from "../models/SessionGroup.js";
-import { downloadMediaMessage } from "@whiskeysockets/baileys";
+import { downloadMediaMessage, jidNormalizedUser } from "@whiskeysockets/baileys";
 import { sticker } from "../commands/tools/sticker.js";
 
 const enqueueLowPriority = (sock, label, fn) => {
@@ -29,6 +29,63 @@ const pendingGroupStatsTimers = new Map();
 const GROUP_STATS_FLUSH_DELAY_MS = Number(process.env.WA_GROUP_STATS_FLUSH_DELAY_MS || 8000);
 
 const normalizeJid = (jid) => String(jid || "").split(":")[0];
+const cleanJidUser = (jid) => normalizeJid(jid).split("@")[0];
+const extractParticipantJid = (participant) => {
+    if (!participant) return "";
+    if (typeof participant === "string") {
+        return jidNormalizedUser(participant);
+    }
+
+    const candidates = [
+        participant.id,
+        participant.jid,
+        participant.userJid,
+        participant.phoneNumber,
+        participant.phone_number,
+        participant?.content?.attrs?.phone_number,
+        participant?.content?.attrs?.jid,
+        participant?.attrs?.phone_number,
+        participant?.attrs?.jid
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        const normalized = jidNormalizedUser(String(candidate));
+        if (normalized && normalized !== "[object Object]") {
+            return normalized;
+        }
+    }
+
+    return "";
+};
+const resolveParticipantDisplay = (participantJid, metadata = {}) => {
+    const target = cleanJidUser(participantJid);
+    const participants = Array.isArray(metadata?.participants) ? metadata.participants : [];
+    const match = participants.find((entry) => {
+        const candidates = [
+            entry?.id,
+            entry?.jid,
+            entry?.userJid,
+            entry?.phoneNumber,
+            entry?.phone_number,
+            entry?.lid,
+            entry?.pn
+        ].filter(Boolean).map((value) => cleanJidUser(value));
+        return candidates.includes(target);
+    });
+
+    const preferred = [
+        match?.phoneNumber,
+        match?.phone_number,
+        match?.id,
+        match?.jid,
+        match?.userJid,
+        match?.lid,
+        match?.pn,
+        participantJid
+    ].filter(Boolean);
+
+    return cleanJidUser(preferred[0] || participantJid) || "member";
+};
 const getSelfJid = (sock) => {
     const raw = sock?.user?.id;
     if (!raw) return "";
@@ -287,7 +344,12 @@ function collectMentionSignals(content = {}, message = {}) {
             hasNativeGroupMention = true;
         }
 
-        if (node.statusMentionMessage || node.statusMentionMessageInfo) {
+        if (node.groupStatusMentionMessage) {
+            hasNativeGroupMention = true;
+            hasNativeStatusMention = true;
+        }
+
+        if (node.statusMentionMessage || node.statusMentionMessageInfo || node.groupStatusMessage || node.groupStatusMessageV2) {
             hasNativeStatusMention = true;
         }
 
@@ -616,7 +678,9 @@ export async function handleGroupParticipantsUpdate(sock, update) {
     if (action !== "add" && action !== "remove") return;
 
     // Normalize participants (some Baileys versions send objects instead of JIDs)
-    const normalizedParticipants = (update.participants || []).map(p => typeof p === "string" ? p : p.id).filter(Boolean);
+    const normalizedParticipants = (update.participants || [])
+        .map((participant) => extractParticipantJid(participant))
+        .filter(Boolean);
     const selfJid = getSelfJid(sock);
     const isSelfAffected = Boolean(
         selfJid &&
@@ -703,7 +767,7 @@ export async function handleGroupParticipantsUpdate(sock, update) {
 
             if (messageText) {
                 // Replace placeholders
-                const user = `@${participant.split("@")[0]}`;
+                    const user = `@${resolveParticipantDisplay(participant, metadata)}`;
                 const count = metadata?.participants?.length || "?";
 
                 messageText = messageText
