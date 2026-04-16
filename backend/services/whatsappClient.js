@@ -3707,6 +3707,9 @@ https://bot.tervux.com
             }
 
             try {
+                const participants = g.participants || [];
+                const mentions = participants.map((p) => p.id);
+
                 if (logo) {
                     await this._sendMessageWithTimeout(
                         sessionId,
@@ -3714,7 +3717,8 @@ https://bot.tervux.com
                         jid,
                         {
                             image: logo,
-                            caption: combinedCaption
+                            caption: combinedCaption,
+                            mentions
                         },
                         {},
                         { timeoutMs: 20_000, label: "group-broadcast" }
@@ -3725,7 +3729,8 @@ https://bot.tervux.com
                         sock,
                         jid,
                         {
-                            text: combinedCaption
+                            text: combinedCaption,
+                            mentions
                         },
                         {},
                         { timeoutMs: 20_000, label: "group-broadcast" }
