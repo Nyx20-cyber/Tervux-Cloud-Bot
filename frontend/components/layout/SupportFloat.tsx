@@ -7,7 +7,7 @@ import { MessageCircle } from "lucide-react";
 import { io } from "socket.io-client";
 import { useAuthStore } from "@/store/useAuthStore";
 
-export function WhatsAppFloat() {
+export function SupportFloat() {
     const [config, setConfig] = useState<{ supportPhone: string } | null>(null);
     const [isVisible, setIsVisible] = useState(false);
     const { token, authReady, isAuthenticated } = useAuthStore();
@@ -47,7 +47,7 @@ export function WhatsAppFloat() {
         };
     }, [token, authReady, isAuthenticated]);
 
-    const handleWhatsAppClick = () => {
+    const handleSupportClick = () => {
         if (!config?.supportPhone) return;
         const phone = config.supportPhone.replace(/[^0-9]/g, "");
         const url = `https://wa.me/${phone}`;
@@ -65,7 +65,7 @@ export function WhatsAppFloat() {
                     exit={{ scale: 0, opacity: 0, y: 20 }}
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.9 }}
-                    onClick={handleWhatsAppClick}
+                    onClick={handleSupportClick}
                     className="fixed bottom-6 right-6 z-50 p-4 rounded-full bg-[#25D366] text-white shadow-2xl shadow-[#25D366]/40 flex items-center justify-center border border-white/20 group"
                     title="Chat with Support"
                 >

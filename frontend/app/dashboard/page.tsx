@@ -14,7 +14,7 @@ import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 import { Loader2, TrendingUp, CreditCard, UserPlus, Bell, Settings, ArrowUpRight, History } from "lucide-react";
-import { FaWhatsapp } from "react-icons/fa";
+import { MessageCircle, Users, Radio } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useOnboardingUIStore } from "@/store/useOnboardingUIStore";
@@ -78,7 +78,7 @@ export default function DashboardPage() {
         ? {
             badge: "Anzia Hapa",
             title: "Tazama Video Hii Kwanza",
-            description: "Tumekuandalia tutorial fupi ya kukuonyesha jinsi ya kuconnect WhatsApp yako, kudeploy bot, na kuendelea na setup bila kubahatisha.",
+            description: "Tumekuandalia tutorial fupi ya kukuonyesha jinsi ya kuconnect akaunti yako, kudeploy bot, na kuendelea na setup bila kubahatisha.",
             primary: "Fungua Tutorials",
             secondary: "Nimeona",
             watchOnYoutube: "Tazama YouTube",
@@ -90,7 +90,7 @@ export default function DashboardPage() {
         : {
             badge: "Start Here",
             title: "Watch This Tutorial First",
-            description: "We prepared a short tutorial to show you how to connect your WhatsApp, deploy your bot, and continue setup without guessing.",
+            description: "We prepared a short tutorial to show you how to connect your account, deploy your bot, and continue setup without guessing.",
             primary: "Open Tutorials",
             secondary: "Got It",
             watchOnYoutube: "Watch on YouTube",
@@ -534,14 +534,14 @@ export default function DashboardPage() {
                             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                                 <div className="flex items-start gap-3">
                                     <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/12 p-2.5 text-emerald-300 shrink-0 shadow-[0_0_22px_rgba(34,197,94,0.16)]">
-                                        <FaWhatsapp className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
+                                        <MessageCircle className="h-4.5 w-4.5 sm:h-5 sm:w-5" />
                                     </div>
                                     <div className="min-w-0">
                                         <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
                                             <Radio className="h-3.5 w-3.5" />
                                             <span className="inline-flex items-center gap-1.5">
-                                                <FaWhatsapp className="h-3.5 w-3.5" />
-                                                WhatsApp
+                                                <MessageCircle className="h-3.5 w-3.5" />
+                                                Community
                                             </span>
                                             {t.community_badge_label}
                                         </div>
@@ -561,7 +561,7 @@ export default function DashboardPage() {
                                         rel="noreferrer"
                                         className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/12 px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-300 shadow-[0_0_18px_rgba(34,197,94,0.12)] hover:bg-emerald-400/18"
                                     >
-                                        <FaWhatsapp className="h-3.5 w-3.5" />
+                                        <Users className="h-3.5 w-3.5" />
                                         {t.join_whatsapp_group}
                                     </a>
                                     <a
@@ -570,7 +570,7 @@ export default function DashboardPage() {
                                         rel="noreferrer"
                                         className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-xl border border-emerald-400/25 bg-white/[0.03] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-white hover:bg-white/[0.06]"
                                     >
-                                        <FaWhatsapp className="h-3.5 w-3.5 text-emerald-300" />
+                                        <Radio className="h-3.5 w-3.5 text-emerald-300" />
                                         {t.follow_whatsapp_channel}
                                     </a>
                                 </div>

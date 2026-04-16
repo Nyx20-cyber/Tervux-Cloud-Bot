@@ -498,7 +498,7 @@ export default function PairPage() {
                                         {t.connect_your_device}
                                     </h2>
                                     <p className="text-[9px] sm:text-[10px] font-semibold text-gray-500 uppercase tracking-widest">
-                                        {t.link_whatsapp}
+                                        Link your account securely
                                     </p>
                                 </div>
                                 <div className="flex gap-1.5 opacity-30">
@@ -573,7 +573,7 @@ export default function PairPage() {
                                         <p className="text-[10px] font-bold uppercase tracking-[0.3em] animate-pulse text-center">
                                             {t.preparing_connection}
                                         </p>
-                                        <p className="text-[10px] text-primary/70 text-center">Securing encrypted channel to WhatsApp...</p>
+                                        <p className="text-[10px] text-primary/70 text-center">Securing encrypted channel to Cloud...</p>
                                         <Button
                                             variant="ghost"
                                             onClick={cancelCurrentPairing}

@@ -15,13 +15,37 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import LocaleBootstrap from "@/components/LocaleBootstrap";
 
 export const metadata: Metadata = {
-  title: translations.en.site_title,
-  description: translations.en.site_description,
+  title: {
+    default: "Tervux Cloud Bot | Easy Cloud Automation",
+    template: "%s | Tervux Cloud"
+  },
+  description: "Connect and automate your messaging with ease. Fast. Secure. Professional. Cloud-based automation platform.",
+  keywords: ["Tervux", "Cloud Bot", "Messenger Automation", "Chatbot SaaS", "Messaging API", "Cloud Automation"],
+  authors: [{ name: "Tervux Team" }],
+  creator: "Tervux",
   manifest: "/manifest.json",
+  metadataBase: new URL("https://bot.tervux.com"),
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    title: "Tervux Cloud Bot | Professional Messaging Automation",
+    description: "Connect and automate your messaging with ease. Fast. Secure. Professional.",
+    url: "https://bot.tervux.com",
+    siteName: "Tervux Cloud",
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Tervux Cloud Bot | Messaging Automation",
+    description: "Connect and automate your messaging with ease. Fast. Secure. Professional.",
+    creator: "@tervux",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Tervux Cloud Bot",
+    title: "Tervux Bot",
     startupImage: "/icons/icon-512x512.png",
   },
   icons: {

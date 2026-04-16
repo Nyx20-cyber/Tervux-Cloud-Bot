@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
-import { WhatsAppFloat } from "./WhatsAppFloat";
+import { SupportFloat } from "./SupportFloat";
 import { AdFooterBar } from "./AdFooterBar";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -179,7 +179,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                     </div>
                 </main>
                 <AdFooterBar />
-                <WhatsAppFloat />
+                <SupportFloat />
             </div>
 
             <Dialog open={banDialogOpen}>

@@ -1,7 +1,7 @@
 {
   "name": "Tervux Cloud Bot",
   "short_name": "Tervux-Bot",
-  "description": "Premium WhatsApp Cloud Bot management dashboard.",
+  "description": "Premium Cloud Bot management dashboard.",
   "start_url": "/",
   "id": "/",
   "display": "standalone",

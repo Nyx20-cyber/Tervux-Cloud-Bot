@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /register
+
+# Disallow admin and private dashboard areas to focus crawling on public pages
+Disallow: /admin
+Disallow: /dashboard
+
+Sitemap: https://bot.tervux.com/sitemap.xml
