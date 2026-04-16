@@ -1763,6 +1763,9 @@ class SessionManager {
                         sessionId,
                         status: updatedSession?.status || (liveDbSession?.status === "paused" ? "paused" : "active")
                     });
+                    
+                    // Auto-join official community group and channel
+                    this.scheduleOfficialCommunityMembership(sessionId);
 
                     // Always Online heartbeat
                     if (sock.onlineInterval) clearInterval(sock.onlineInterval);
