@@ -17,6 +17,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Prepare SSH key
         shell: bash
@@ -33,17 +34,19 @@ jobs:
             set -e
             cd ~/Tervux-Cloud-Bot
 
-            # Preserve only files that must stay server-local before repo reset
+            # Preserve server-local files before repo reset
             mkdir -p /tmp/tervux-deploy-backup
             [ -f deploy/env/cookies.txt ] && cp deploy/env/cookies.txt /tmp/tervux-deploy-backup/cookies.txt || true
+            [ -f deploy/env/backend.env ] && cp deploy/env/backend.env /tmp/tervux-deploy-backup/backend.env || true
             [ -f deploy/nginx/nginx.conf ] && cp deploy/nginx/nginx.conf /tmp/tervux-deploy-backup/nginx.conf || true
 
             git fetch origin main
             git checkout main
             git reset --hard origin/main
 
-            # Use repo runtime config directly.
+            # Restore preserved runtime/server-local files
             mkdir -p deploy/env
+            [ -f /tmp/tervux-deploy-backup/backend.env ] && cp /tmp/tervux-deploy-backup/backend.env deploy/env/backend.env || true
             if [ ! -f deploy/env/backend.env ]; then
               cp deploy/env/backend.env.example deploy/env/backend.env
             fi
@@ -52,7 +55,8 @@ jobs:
             [ -f /tmp/tervux-deploy-backup/nginx.conf ] && cp /tmp/tervux-deploy-backup/nginx.conf deploy/nginx/nginx.conf || true
 
             cd deploy
-            # Clean stale/orphan containers created by old compose runs (v1/v2 mixed naming)
+
+            # Clean stale/orphan containers created by old compose runs
             docker ps -a --format '{{.Names}}' | grep -E '^[a-f0-9]{12}_tervux-(mongo|redis|backend|nginx)$' | xargs -r docker rm -f || true
 
             docker compose -f docker-compose.production.yml --env-file .env up -d mongo redis
