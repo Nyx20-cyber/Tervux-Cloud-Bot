@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { WhatsAppFloat } from "./WhatsAppFloat";
+import { AdFooterBar } from "./AdFooterBar";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useLocaleStore } from "@/store/useLocaleStore";
@@ -177,6 +178,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                         )}
                     </div>
                 </main>
+                <AdFooterBar />
                 <WhatsAppFloat />
             </div>
 

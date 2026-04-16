@@ -1,0 +1,4 @@
+# Adsterra - Authorized Digital Sellers
+# This file verifies that bot.tervux.com authorizes Adsterra to sell ad inventory
+# Generated for publisher account pl29162491
+adsterra.com, 29162491, DIRECT

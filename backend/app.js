@@ -167,6 +167,7 @@ app.get("/api/config", async (req, res) => {
             registrationEnabled: !!settings.registrationEnabled,
             tutorialBannerEnabled: settings.tutorialBannerEnabled !== false,
             tutorialBannerTutorialId: settings.tutorialBannerTutorialId || null,
+            adScriptUrl: process.env.ADSTERRA_SCRIPT_URL || null,
             updatedAt: settings.updatedAt
         });
     } catch (error) {
