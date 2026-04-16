@@ -3598,7 +3598,7 @@ https://bot.tervux.com
             }).catch(() => {});
         }
 
-        const baselineFirstSeenAt = sessionDoc?.deployedAt || sessionDoc?.createdAt || now;
+        const baselineFirstSeenAt = now;
         const groupJids = baseGroupList.map((g) => String(g.id));
 
         let groupSeenDocs = [];
