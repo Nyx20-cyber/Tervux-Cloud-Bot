@@ -399,8 +399,8 @@ export const translations = {
         community_badge_label: "Official Community",
         community_badge_title: "Join our Tervux group and channel",
         community_badge_desc: "Get updates, tips, support, and bot news directly from Tervux.",
-        join_tervux_group: "Join Group",
-        follow_tervux_channel: "Follow Channel",
+        join_whatsapp_group: "Join Group",
+        follow_whatsapp_channel: "Follow Channel",
         auto_language_set: "🇺🇸 Language set automatically to English.",
 
         // Referrals
@@ -497,7 +497,7 @@ export const translations = {
 
         // Pair
         connect_your_device: "Connect Your Device",
-        link_tervux: "Link your Tervux account",
+        link_whatsapp: "Link your Tervux account",
         qr_code: "QR Code",
         pairing_code: "Pairing Code",
         phone_number: "Phone Number",
@@ -1262,8 +1262,8 @@ export const translations = {
         community_badge_label: "Community Rasmi",
         community_badge_title: "Jiunge na group na channel yetu ya Tervux",
         community_badge_desc: "Pata updates, tips, msaada, na habari za bot moja kwa moja kutoka Tervux.",
-        join_tervux_group: "Jiunge na Group",
-        follow_tervux_channel: "Follow Channel",
+        join_whatsapp_group: "Jiunge na Group",
+        follow_whatsapp_channel: "Follow Channel",
         auto_language_set: "🇹🇿 Lugha imewekwa kiotomatiki kuwa Kiswahili.",
 
         // Referrals
@@ -1360,7 +1360,7 @@ export const translations = {
 
         // Pair
         connect_your_device: "Unganisha namba yako ya simu",
-        link_tervux: "Unganisha Tervux yako",
+        link_whatsapp: "Unganisha Tervux yako",
         qr_code: "QR Code",
         pairing_code: "Kodi ya kuunganisha",
         phone_number: "Namba ya simu",

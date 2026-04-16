@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Activity, ShieldCheck, RefreshCcw, Network, Coins, Rocket, Megaphone, Info, AlertTriangle, Wrench, Sparkles, Tag, GraduationCap, PlayCircle, ExternalLink, CheckCircle2, Users, Radio } from "lucide-react";
+import { 
+    Activity, ShieldCheck, RefreshCcw, Network, Coins, Rocket, Megaphone, Info, 
+    AlertTriangle, Wrench, Sparkles, Tag, GraduationCap, PlayCircle, ExternalLink, 
+    CheckCircle2, Users, Radio, Loader2, TrendingUp, CreditCard, UserPlus, Bell, 
+    Settings, ArrowUpRight, History, MessageCircle 
+} from "lucide-react";
 import { useSessionStore } from "@/store/useSessionStore";
 import { useAuthStore } from "@/store/useAuthStore";
 import { io } from "socket.io-client";
@@ -13,8 +18,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocaleStore } from "@/store/useLocaleStore";
 import { translations } from "@/lib/translations";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
-import { Loader2, TrendingUp, CreditCard, UserPlus, Bell, Settings, ArrowUpRight, History } from "lucide-react";
-import { MessageCircle, Users, Radio } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useOnboardingUIStore } from "@/store/useOnboardingUIStore";
