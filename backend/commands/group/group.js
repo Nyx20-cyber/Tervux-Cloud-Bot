@@ -789,11 +789,10 @@ ${settings.welcome.enabled === true
  */
 export async function goodbye(sock, m, args) {
     const remoteJid = m.key.remoteJid;
+    const sender = m.key.participant || m.key.remoteJid;
 
-    if (!remoteJid.endsWith("@g.us")) {
-        return `⚠️ This command only works in groups.`;
-    }
-
+    const accessError = await ensureGroupProtectionAccess(sock, remoteJid, sender, "goodbye messages", { requireBotAdmin: false });
+    if (accessError) return accessError;
     const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const action = args[0]?.toLowerCase();
 
@@ -849,10 +848,10 @@ ${settings.goodbye.message}
  */
 export async function setgoodbye(sock, m, args) {
     const remoteJid = m.key.remoteJid;
+    const sender = m.key.participant || m.key.remoteJid;
 
-    if (!remoteJid.endsWith("@g.us")) {
-        return `⚠️ This command only works in groups.`;
-    }
+    const accessError = await ensureGroupProtectionAccess(sock, remoteJid, sender, "goodbye messages", { requireBotAdmin: false });
+    if (accessError) return accessError;
 
     const message = args.join(" ");
     if (!message) {
@@ -869,6 +868,8 @@ This command sets the custom message sent when members leave the group.
 *Placeholders:*
 • @user - Member's name
 • {group} - Group name
+• {count} - Member count after leave
+• {desc} - Group description
 
 *Example:*
 ${p}setgoodbye Goodbye @user! 👋

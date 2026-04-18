@@ -30,23 +30,32 @@ const GROUP_STATS_FLUSH_DELAY_MS = Number(process.env.WA_GROUP_STATS_FLUSH_DELAY
 
 const normalizeJid = (jid) => String(jid || "").split(":")[0];
 const cleanJidUser = (jid) => normalizeJid(jid).split("@")[0];
+const isUsableJid = (value) => {
+    const raw = String(value || "").trim();
+    return Boolean(raw) && raw !== "[object Object]";
+};
 const extractParticipantJid = (participant) => {
     if (!participant) return "";
     if (typeof participant === "string") {
-        return jidNormalizedUser(participant);
+        return isUsableJid(participant) ? jidNormalizedUser(participant) : "";
     }
 
     const candidates = [
         participant.id,
         participant.jid,
         participant.userJid,
+        participant.user,
         participant.phoneNumber,
         participant.phone_number,
+        participant.participantPn,
+        participant.participantAlt,
         participant?.content?.attrs?.phone_number,
         participant?.content?.attrs?.jid,
+        participant?.content?.attrs?.user,
         participant?.attrs?.phone_number,
-        participant?.attrs?.jid
-    ].filter(Boolean);
+        participant?.attrs?.jid,
+        participant?.attrs?.user
+    ].filter(isUsableJid);
 
     for (const candidate of candidates) {
         const normalized = jidNormalizedUser(String(candidate));
@@ -56,6 +65,19 @@ const extractParticipantJid = (participant) => {
     }
 
     return "";
+};
+const formatGroupParticipantMessage = (template = "", participantJid = "", metadata = {}) => {
+    const user = `@${resolveParticipantDisplay(participantJid, metadata)}`;
+    const groupName = metadata?.subject || "Group";
+    const desc = metadata?.desc?.toString() || "";
+    const count = metadata?.participants?.length || "?";
+
+    return String(template || "")
+        .replace(/{group}/g, groupName)
+        .replace(/{desc}/g, desc)
+        .replace(/{count}/g, count)
+        .replace(/{user}/g, user)
+        .replace(/@user/g, user);
 };
 const resolveParticipantDisplay = (participantJid, metadata = {}) => {
     const target = cleanJidUser(participantJid);
@@ -693,9 +715,9 @@ export async function handleGroupParticipantsUpdate(sock, update) {
     if (action !== "add" && action !== "remove") return;
 
     // Normalize participants (some Baileys versions send objects instead of JIDs)
-    const normalizedParticipants = (update.participants || [])
+    const normalizedParticipants = Array.from(new Set((update.participants || [])
         .map((participant) => extractParticipantJid(participant))
-        .filter(Boolean);
+        .filter(Boolean)));
     const selfJid = getSelfJid(sock);
     const isSelfAffected = Boolean(
         selfJid &&
@@ -781,15 +803,7 @@ export async function handleGroupParticipantsUpdate(sock, update) {
             }
 
             if (messageText) {
-                // Replace placeholders
-                    const user = `@${resolveParticipantDisplay(participant, metadata)}`;
-                const count = metadata?.participants?.length || "?";
-
-                messageText = messageText
-                    .replace(/{group}/g, groupName)
-                    .replace(/{desc}/g, desc)
-                    .replace(/{count}/g, count)
-                    .replace(/@user/g, user);
+                messageText = formatGroupParticipantMessage(messageText, participant, metadata);
 
                 // Send message
                 await sock.sendMessage(id, {
