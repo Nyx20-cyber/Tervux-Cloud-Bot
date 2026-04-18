@@ -3,7 +3,7 @@ import { getGroupMetadata, getGroupParticipantContext, invalidateGroupMetadataCa
 import { getCachedConfig } from "./configService.js";
 import GroupMemberStats from "../models/GroupMemberStats.js";
 import SessionGroup from "../models/SessionGroup.js";
-import { downloadMediaMessage, jidNormalizedUser } from "@whiskeysockets/baileys";
+import { downloadMediaMessage, jidNormalizedUser, normalizeMessageContent } from "@whiskeysockets/baileys";
 import { sticker } from "../commands/tools/sticker.js";
 
 const enqueueLowPriority = (sock, label, fn) => {
@@ -115,27 +115,47 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 function unwrapGroupMessageContent(message = {}) {
-    let content = message;
+    let content = normalizeMessageContent(message) || message;
     for (let i = 0; i < 8; i++) {
         if (content?.ephemeralMessage?.message) {
-            content = content.ephemeralMessage.message;
+            content = normalizeMessageContent(content.ephemeralMessage.message) || content.ephemeralMessage.message;
             continue;
         }
         if (content?.viewOnceMessage?.message) {
-            content = content.viewOnceMessage.message;
+            content = normalizeMessageContent(content.viewOnceMessage.message) || content.viewOnceMessage.message;
             continue;
         }
         if (content?.viewOnceMessageV2?.message) {
-            content = content.viewOnceMessageV2.message;
+            content = normalizeMessageContent(content.viewOnceMessageV2.message) || content.viewOnceMessageV2.message;
             continue;
         }
         if (content?.viewOnceMessageV2Extension?.message) {
-            content = content.viewOnceMessageV2Extension.message;
+            content = normalizeMessageContent(content.viewOnceMessageV2Extension.message) || content.viewOnceMessageV2Extension.message;
+            continue;
+        }
+        if (content?.documentWithCaptionMessage?.message) {
+            content = normalizeMessageContent(content.documentWithCaptionMessage.message) || content.documentWithCaptionMessage.message;
+            continue;
+        }
+        if (content?.editedMessage?.message) {
+            content = normalizeMessageContent(content.editedMessage.message) || content.editedMessage.message;
+            continue;
+        }
+        if (content?.protocolMessage?.editedMessage?.message) {
+            content = normalizeMessageContent(content.protocolMessage.editedMessage.message) || content.protocolMessage.editedMessage.message;
+            continue;
+        }
+        if (content?.associatedChildMessage?.message) {
+            content = normalizeMessageContent(content.associatedChildMessage.message) || content.associatedChildMessage.message;
+            continue;
+        }
+        if (content?.keepInChatMessage?.message) {
+            content = normalizeMessageContent(content.keepInChatMessage.message) || content.keepInChatMessage.message;
             continue;
         }
         break;
     }
-    return content || {};
+    return normalizeMessageContent(content) || content || {};
 }
 
 function extractGroupMessageText(content = {}) {
@@ -370,13 +390,8 @@ function collectMentionSignals(content = {}, message = {}) {
     };
 }
 
-const COMMON_LINK_TLDS = [
-    "com", "net", "org", "io", "co", "me", "app", "dev", "xyz", "ly", "gg", "tv",
-    "info", "biz", "edu", "gov", "us", "uk", "ke", "tz", "ug", "rw", "bi", "ae",
-    "in", "za", "de", "fr", "es", "it", "nl", "ca", "au"
-];
 const LINK_CANDIDATE_REGEX = new RegExp(
-    String.raw`\b(?:https?:\/\/[^\s<>()\[\]{}"']+|www\.[^\s<>()\[\]{}"']+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:${COMMON_LINK_TLDS.join("|")})(?:[/?#][^\s<>()\[\]{}"']*)?)`,
+    String.raw`\b(?:https?:\/\/[^\s<>()\[\]{}"']+|www\.[^\s<>()\[\]{}"']+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?:[/?#][^\s<>()\[\]{}"']*)?)`,
     "ig"
 );
 
@@ -1091,7 +1106,7 @@ export async function handleGroupMessage(sock, m) {
                     text: `🚫 *Link Detected!* @${sender.split("@")[0]} has been kicked for sharing links.`,
                     mentions: [sender]
                 });
-            } else {
+            } else if (settings.antilink.action !== "delete") {
                 await sock.sendMessage(remoteJid, {
                     text: `⚠️ @${sender.split("@")[0]}, *links are not allowed* in this group! Your message has been deleted.`,
                     mentions: [sender]

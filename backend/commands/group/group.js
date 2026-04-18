@@ -898,14 +898,14 @@ ${settings.goodbye.enabled === true
  */
 export async function antilink(sock, m, args) {
     const remoteJid = m.key.remoteJid;
+    const sender = m.key.participant || m.key.remoteJid;
 
     if (!remoteJid.endsWith("@g.us")) {
         return `⚠️ This command only works in groups.`;
     }
 
-    if (!await isBotAdmin(sock, remoteJid)) {
-        return `⚠️ Bot must be an admin to manage antilink.`;
-    }
+    const accessError = await ensureGroupProtectionAccess(sock, remoteJid, sender, "antilink");
+    if (accessError) return accessError;
 
     const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const action = args[0]?.toLowerCase();
@@ -921,6 +921,19 @@ export async function antilink(sock, m, args) {
 Anti-link is now *ON* (Warn mode)
 
 Links will be deleted and user will be warned.`;
+    }
+
+    if (action === "delete") {
+        settings.antilink.enabled = true;
+        settings.antilink.action = "delete";
+        await saveGroupSettings(sock.sessionId, remoteJid, settings);
+        return `╔══════════════════════════════════╗
+║  🔗 *𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 - 𝔻𝔼𝕃𝔼𝕋𝔼* 🔗  ║
+╚══════════════════════════════════╝
+
+Anti-link is now *ON* (Delete mode)
+
+Links will be deleted automatically.`;
     }
 
     if (action === "kick") {
@@ -957,6 +970,7 @@ Members can now share links freely.`;
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 *Commands:*
 • ${p}antilink on - Enable (warn mode)
+• ${p}antilink delete - Enable (delete only)
 • ${p}antilink kick - Enable (kick mode)
 • ${p}antilink off - Disable
 
