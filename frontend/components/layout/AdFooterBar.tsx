@@ -18,7 +18,7 @@ const DISMISS_KEY = "tervux_ad_dismissed";
  * - Dismissable with X button (persisted to sessionStorage)
  * - Animated entrance (slide up + fade in)
  * - Dark theme with glassmorphism to match existing UI
- * - Max 56px height on desktop, slim on mobile
+ * - Sized for a true embedded banner slot
  * - Never blocks main content
  */
 export function AdFooterBar() {
@@ -57,15 +57,14 @@ export function AdFooterBar() {
         <AnimatePresence>
             {visible && (
                 <motion.div
-                    initial={{ y: 56, opacity: 0 }}
+                    initial={{ y: 72, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
-                    exit={{ y: 56, opacity: 0 }}
+                    exit={{ y: 72, opacity: 0 }}
                     transition={{ type: "spring", damping: 22, stiffness: 260 }}
                     className="relative z-30 w-full border-t border-white/[0.06]
                                bg-black/50 backdrop-blur-xl"
-                    style={{ maxHeight: "56px" }}
                 >
-                    <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+                    <div className="flex items-center justify-between gap-2 px-3 py-2 min-h-[66px]">
                         {/* Ad content area */}
                         <div className="flex-1 min-w-0 overflow-hidden">
                             <AdsterraAdUnit />

@@ -167,7 +167,10 @@ app.get("/api/config", async (req, res) => {
             registrationEnabled: !!settings.registrationEnabled,
             tutorialBannerEnabled: settings.tutorialBannerEnabled !== false,
             tutorialBannerTutorialId: settings.tutorialBannerTutorialId || null,
-            adScriptUrl: process.env.ADSTERRA_SCRIPT_URL || null,
+            adBannerKey: process.env.ADSTERRA_BANNER_KEY || null,
+            adBannerHost: process.env.ADSTERRA_BANNER_HOST || null,
+            adBannerWidth: Number(process.env.ADSTERRA_BANNER_WIDTH || 320),
+            adBannerHeight: Number(process.env.ADSTERRA_BANNER_HEIGHT || 50),
             updatedAt: settings.updatedAt
         });
     } catch (error) {
@@ -194,6 +197,4 @@ app.use("/api/tutorials", tutorialRoutes);
 app.use("/api/admin", adminRoutes);
 
 export default app;
-
-
 

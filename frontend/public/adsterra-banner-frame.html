@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sponsored Banner</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #slot {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="slot"></div>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var key = (params.get("key") || "").trim();
+      var host = (params.get("host") || "").trim().replace(/\/$/, "");
+      var width = Number(params.get("width") || "320");
+      var height = Number(params.get("height") || "50");
+
+      if (!key || !/^https:\/\/[a-z0-9.-]+$/i.test(host)) {
+        return;
+      }
+
+      window.atOptions = {
+        key: key,
+        format: "iframe",
+        height: Number.isFinite(height) && height > 0 ? height : 50,
+        width: Number.isFinite(width) && width > 0 ? width : 320,
+        params: {}
+      };
+
+      var script = document.createElement("script");
+      script.type = "text/javascript";
+      script.async = true;
+      script.src = host + "/" + key + "/invoke.js";
+      document.getElementById("slot").appendChild(script);
+    })();
+  </script>
+</body>
+</html>

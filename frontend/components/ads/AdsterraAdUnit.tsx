@@ -1,36 +1,43 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/store/useAuthStore";
 
 /**
  * AdsterraAdUnit
  *
- * Safely injects the Adsterra Social Bar ad script into the DOM.
- * The script URL is fetched from the backend /api/config endpoint
- * (stored in backend .env, NOT hardcoded in frontend).
+ * Renders a real bottom-banner ad inside a fixed slot using
+ * Adsterra's iframe format loader.
  *
  * - Only loads in production environment
- * - Fetches script URL from backend at runtime
- * - Cleans up on unmount to prevent memory leaks
- * - Gracefully handles script loading errors
- * - Never blocks or breaks the host application
+ * - Uses Adsterra iframe banner format instead of floating social-bar scripts
+ * - Keeps ad placement inside the footer bar
+ * - Gracefully hides when no banner config is available
  */
 export function AdsterraAdUnit() {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const scriptRef = useRef<HTMLScriptElement | null>(null);
-    const [scriptUrl, setScriptUrl] = useState<string | null>(null);
+    const [bannerKey, setBannerKey] = useState<string | null>(null);
+    const [bannerHost, setBannerHost] = useState<string | null>(null);
+    const [bannerWidth, setBannerWidth] = useState(320);
+    const [bannerHeight, setBannerHeight] = useState(50);
+    const [loadFailed, setLoadFailed] = useState(false);
 
-    // Fetch the ad script URL from backend config
+    // Fetch the banner slot config from backend config
     useEffect(() => {
         if (process.env.NODE_ENV !== "production") return;
 
         const fetchAdConfig = async () => {
             try {
                 const res = await api.get("/config");
-                const url = res.data?.adScriptUrl;
-                if (url && typeof url === "string") {
-                    setScriptUrl(url);
+                const key = String(res.data?.adBannerKey || "").trim();
+                const host = String(res.data?.adBannerHost || "").trim();
+                const width = Number(res.data?.adBannerWidth || 320);
+                const height = Number(res.data?.adBannerHeight || 50);
+
+                if (key && host && /^https:\/\/[a-z0-9.-]+$/i.test(host)) {
+                    setBannerKey(key);
+                    setBannerHost(host);
+                    setBannerWidth(Number.isFinite(width) && width > 0 ? width : 320);
+                    setBannerHeight(Number.isFinite(height) && height > 0 ? height : 50);
                 }
             } catch {
                 // Backend unreachable or no ad config — fail silently
@@ -38,40 +45,6 @@ export function AdsterraAdUnit() {
         };
         fetchAdConfig();
     }, []);
-
-    // Inject the script once we have the URL
-    useEffect(() => {
-        if (process.env.NODE_ENV !== "production") return;
-        if (!scriptUrl || !containerRef.current) return;
-
-        // Prevent duplicate injection
-        if (scriptRef.current) return;
-
-        try {
-            const script = document.createElement("script");
-            script.type = "text/javascript";
-            script.src = scriptUrl;
-            script.async = true;
-            script.referrerPolicy = "no-referrer-when-downgrade";
-
-            script.onerror = () => {
-                // Ad script failed to load (likely ad blocker) — fail silently
-            };
-
-            containerRef.current.appendChild(script);
-            scriptRef.current = script;
-        } catch {
-            // Never let an ad error break the application
-        }
-
-        return () => {
-            // Cleanup on unmount
-            if (scriptRef.current && scriptRef.current.parentNode) {
-                scriptRef.current.parentNode.removeChild(scriptRef.current);
-                scriptRef.current = null;
-            }
-        };
-    }, [scriptUrl]);
 
     // In development, show a subtle placeholder
     if (process.env.NODE_ENV !== "production") {
@@ -85,5 +58,44 @@ export function AdsterraAdUnit() {
         );
     }
 
-    return <div ref={containerRef} className="w-full min-h-[1px]" />;
+    if (!bannerKey || !bannerHost || loadFailed) {
+        return null;
+    }
+
+    const frameSrc = useMemo(() => {
+        const params = new URLSearchParams({
+            key: bannerKey,
+            host: bannerHost,
+            width: String(bannerWidth),
+            height: String(bannerHeight)
+        });
+        return `/adsterra-banner-frame.html?${params.toString()}`;
+    }, [bannerHost, bannerHeight, bannerKey, bannerWidth]);
+
+    return (
+        <div
+            className="w-full flex items-center justify-center overflow-hidden"
+            style={{
+                minHeight: `${bannerHeight}px`
+            }}
+        >
+            <iframe
+                title="Sponsored banner"
+                src={frameSrc}
+                width={bannerWidth}
+                height={bannerHeight}
+                loading="lazy"
+                scrolling="no"
+                referrerPolicy="no-referrer-when-downgrade"
+                sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+                className="block max-w-full border-0 bg-transparent"
+                style={{
+                    width: "100%",
+                    maxWidth: `${bannerWidth}px`,
+                    height: `${bannerHeight}px`
+                }}
+                onError={() => setLoadFailed(true)}
+            />
+        </div>
+    );
 }
