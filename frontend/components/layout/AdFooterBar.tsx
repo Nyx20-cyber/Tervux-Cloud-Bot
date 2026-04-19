@@ -23,23 +23,21 @@ const DISMISS_KEY = "tervux_ad_dismissed";
  */
 export function AdFooterBar() {
     const [visible, setVisible] = useState(false);
-    const [dismissed, setDismissed] = useState(false);
+    const [dismissed, setDismissed] = useState(() => {
+        try {
+            return sessionStorage.getItem(DISMISS_KEY) === "1";
+        } catch {
+            return false;
+        }
+    });
 
     useEffect(() => {
-        // Check if user already dismissed in this session
-        try {
-            if (sessionStorage.getItem(DISMISS_KEY) === "1") {
-                setDismissed(true);
-                return;
-            }
-        } catch {
-            // sessionStorage may be unavailable in some contexts
-        }
+        if (dismissed) return;
 
         // Show ad bar after 3 seconds — user focuses on content first
         const timer = setTimeout(() => setVisible(true), 3000);
         return () => clearTimeout(timer);
-    }, []);
+    }, [dismissed]);
 
     const handleDismiss = () => {
         setDismissed(true);

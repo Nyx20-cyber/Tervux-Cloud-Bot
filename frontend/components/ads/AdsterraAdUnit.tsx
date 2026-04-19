@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/store/useAuthStore";
 
 /**
@@ -62,7 +62,7 @@ export function AdsterraAdUnit() {
         return null;
     }
 
-    const frameSrc = useMemo(() => {
+    const frameSrc = (() => {
         const params = new URLSearchParams({
             key: bannerKey,
             host: bannerHost,
@@ -70,7 +70,7 @@ export function AdsterraAdUnit() {
             height: String(bannerHeight)
         });
         return `/adsterra-banner-frame.html?${params.toString()}`;
-    }, [bannerHost, bannerHeight, bannerKey, bannerWidth]);
+    })();
 
     return (
         <div
