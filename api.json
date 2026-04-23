@@ -367,7 +367,7 @@
                   "$ref": "#/components/schemas/BalanceResponse"
                 },
                 "example": {
-                  "status": true,
+                  "status": "success",
                   "message": "Account info retrieved",
                   "data": {
                     "name": "johndoe",
@@ -428,7 +428,7 @@
                   "$ref": "#/components/schemas/CreateTransactionResponse"
                 },
                 "example": {
-                  "status": true,
+                  "status": "success",
                   "message": "Payment created",
                   "data": {
                     "tranID": "pay_aB3xYz9k",
@@ -460,7 +460,7 @@
                   "$ref": "#/components/schemas/ValidationErrorResponse"
                 },
                 "example": {
-                  "status": false,
+                  "status": "success",
                   "message": "Missing required",
                   "errors": {
                     "number": [
@@ -514,7 +514,7 @@
                   "$ref": "#/components/schemas/TransactionStatusResponse"
                 },
                 "example": {
-                  "status": true,
+                  "status": "success",
                   "message": "Payment status retrieved",
                   "data": {
                     "tranid": "pay_aB3xYz9k",
@@ -545,7 +545,7 @@
                   "$ref": "#/components/schemas/NotFoundResponse"
                 },
                 "example": {
-                  "status": false,
+                  "status": "success",
                   "message": "Transaction not found",
                   "errors": {
                     "tranid": [
@@ -564,7 +564,7 @@
                   "$ref": "#/components/schemas/ValidationErrorResponse"
                 },
                 "example": {
-                  "status": false,
+                  "status": "success",
                   "message": "Missing required",
                   "errors": {
                     "tranid": [
@@ -622,7 +622,7 @@
                   "$ref": "#/components/schemas/ListTransactionsResponse"
                 },
                 "example": {
-                  "status": true,
+                  "status": "success",
                   "message": "Transaction list retrieved",
                   "data": {
                     "count": 2,
@@ -667,7 +667,7 @@
                   "$ref": "#/components/schemas/ValidationErrorResponse"
                 },
                 "example": {
-                  "status": false,
+                  "status": "success",
                   "message": "Missing required",
                   "errors": {
                     "date_from": [

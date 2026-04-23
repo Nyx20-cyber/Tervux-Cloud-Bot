@@ -217,12 +217,23 @@ export async function getBalance() {
 
 /**
  * List transactions
+ * @param {string} dateFrom - Start date in YYYY-MM-DD format
+ * @param {string} dateTo - End date in YYYY-MM-DD format
  * @returns {object} Transaction history
  */
-export async function listTransactions() {
+export async function listTransactions(dateFrom, dateTo) {
     try {
+        if (!dateFrom || !dateTo) {
+            throw new Error("dateFrom and dateTo are required for FastLipa transaction listing");
+        }
+
+        const query = new URLSearchParams({
+            date_from: String(dateFrom),
+            date_to: String(dateTo)
+        });
+
         return await fastlipaFetchJson(
-            `${FASTLIPA_BASE_URL}/list-transactions`,
+            `${FASTLIPA_BASE_URL}/list-transaction?${query.toString()}`,
             { headers: getHeaders() },
             {
                 timeoutMs: FASTLIPA_REQUEST_TIMEOUT_MS,
