@@ -319,7 +319,9 @@ router.post("/checkout", authenticate, async (req, res) => {
             payment.status = "failed";
             payment.failureReason = gatewayError.message || "Payment gateway request failed";
             payment.gatewayResponse = {
-                gatewayError: payment.failureReason
+                gatewayError: payment.failureReason,
+                gatewayErrorCode: gatewayError.code || null,
+                gatewayErrorTransient: !!gatewayError.isTransient
             };
             await payment.save();
             emitUpdate("admin_payment_updated", {

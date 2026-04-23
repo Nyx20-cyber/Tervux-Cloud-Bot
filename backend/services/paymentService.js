@@ -3,24 +3,56 @@
  * Integration with https://api.fastlipa.com
  */
 
-const FASTLIPA_BASE_URL = "https://api.fastlipa.com/api";
+const FASTLIPA_BASE_URL = String(process.env.FASTLIPA_BASE_URL || "https://api.fastlipa.com/api").replace(/\/+$/, "");
 const FASTLIPA_REQUEST_TIMEOUT_MS = Number.parseInt(process.env.FASTLIPA_REQUEST_TIMEOUT_MS || "15000", 10);
 const FASTLIPA_STATUS_MAX_RETRIES = Number.parseInt(process.env.FASTLIPA_STATUS_MAX_RETRIES || "3", 10);
 const FASTLIPA_RETRY_BASE_MS = Number.parseInt(process.env.FASTLIPA_RETRY_BASE_MS || "1200", 10);
+const FASTLIPA_DEFAULT_MAX_RETRIES = Number.parseInt(process.env.FASTLIPA_MAX_RETRIES || "3", 10);
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function formatTransportError(error) {
+    const cause = error?.cause;
+    const causeCode = String(cause?.code || "").toUpperCase();
+    const code = String(error?.code || causeCode || "").toUpperCase();
+    const message = String(error?.message || cause?.message || "Request failed");
+
+    if (code === "EHOSTUNREACH" || code === "ENETUNREACH") {
+        return `${message} (FastLipa host is unreachable from this server: ${code})`;
+    }
+
+    if (code === "EAI_AGAIN" || code === "ENOTFOUND") {
+        return `${message} (DNS lookup for FastLipa failed: ${code})`;
+    }
+
+    if (code === "ECONNREFUSED") {
+        return `${message} (FastLipa refused the TCP connection: ${code})`;
+    }
+
+    if (code === "ECONNRESET") {
+        return `${message} (FastLipa connection was reset: ${code})`;
+    }
+
+    if (code === "ETIMEDOUT") {
+        return `${message} (FastLipa request timed out: ${code})`;
+    }
+
+    return message;
+}
+
 function isTransientFastlipaError(error) {
     const message = String(error?.message || "").toLowerCase();
-    const code = String(error?.code || "").toUpperCase();
+    const code = String(error?.code || error?.cause?.code || "").toUpperCase();
     if (error?.isTransient) return true;
     return (
         message.includes("fetch failed") ||
         message.includes("timed out") ||
         message.includes("timeout") ||
         message.includes("socket hang up") ||
+        code === "EHOSTUNREACH" ||
+        code === "ENETUNREACH" ||
         code === "ETIMEDOUT" ||
         code === "ECONNRESET" ||
         code === "EAI_AGAIN" ||
@@ -72,6 +104,7 @@ async function fastlipaFetchJson(url, options = {}, config = {}) {
                 if (isTransientFastlipaError(error)) {
                     error.isTransient = true;
                 }
+                error.code = error?.code || error?.cause?.code || error?.code;
                 lastError = error;
             }
 
@@ -97,6 +130,14 @@ function getHeaders() {
     };
 }
 
+function createGatewayError(prefix, error) {
+    const wrapped = new Error(`${prefix}: ${formatTransportError(error)}`);
+    wrapped.code = error?.code || error?.cause?.code || "FASTLIPA_REQUEST_FAILED";
+    wrapped.isTransient = !!error?.isTransient || isTransientFastlipaError(error);
+    wrapped.cause = error;
+    return wrapped;
+}
+
 /**
  * Create a payment transaction (send STK push to user's phone)
  * @param {string} phoneNumber - User's phone number (e.g., "0695123456")
@@ -106,27 +147,28 @@ function getHeaders() {
  */
 export async function createTransaction(phoneNumber, amount, name) {
     try {
-        const response = await fetch(`${FASTLIPA_BASE_URL}/create-transaction`, {
-            method: "POST",
-            headers: getHeaders(),
-            body: JSON.stringify({
-                number: phoneNumber.replace(/[^0-9]/g, ""),
-                amount: parseInt(amount),
-                name: name || "Tervux User"
-            })
-        });
-
-        const data = await response.json();
+        const data = await fastlipaFetchJson(
+            `${FASTLIPA_BASE_URL}/create-transaction`,
+            {
+                method: "POST",
+                headers: getHeaders(),
+                body: JSON.stringify({
+                    number: phoneNumber.replace(/[^0-9]/g, ""),
+                    amount: Number.parseInt(amount, 10),
+                    name: name || "Tervux User"
+                })
+            },
+            {
+                timeoutMs: FASTLIPA_REQUEST_TIMEOUT_MS,
+                maxRetries: Math.max(1, FASTLIPA_DEFAULT_MAX_RETRIES)
+            }
+        );
         console.log("💳 FastLipa create-transaction response:", JSON.stringify(data));
-
-        if (!response.ok) {
-            throw new Error(data?.message || "FastLipa rejected the transaction request");
-        }
 
         return data;
     } catch (error) {
         console.error("❌ FastLipa create-transaction error:", error);
-        throw new Error("Payment initiation failed: " + error.message);
+        throw createGatewayError("Payment initiation failed", error);
     }
 }
 
@@ -149,10 +191,7 @@ export async function checkTransactionStatus(tranId) {
         return data;
     } catch (error) {
         console.error("❌ FastLipa status check error:", error);
-        const wrapped = new Error("Payment status check failed: " + error.message);
-        wrapped.isTransient = !!error?.isTransient || isTransientFastlipaError(error);
-        wrapped.code = error?.code || (wrapped.isTransient ? "FASTLIPA_TRANSIENT" : "FASTLIPA_STATUS_FAILED");
-        throw wrapped;
+        throw createGatewayError("Payment status check failed", error);
     }
 }
 
@@ -162,15 +201,17 @@ export async function checkTransactionStatus(tranId) {
  */
 export async function getBalance() {
     try {
-        const response = await fetch(`${FASTLIPA_BASE_URL}/balance`, {
-            headers: getHeaders()
-        });
-
-        const data = await response.json();
-        return data;
+        return await fastlipaFetchJson(
+            `${FASTLIPA_BASE_URL}/balance`,
+            { headers: getHeaders() },
+            {
+                timeoutMs: FASTLIPA_REQUEST_TIMEOUT_MS,
+                maxRetries: Math.max(1, FASTLIPA_DEFAULT_MAX_RETRIES)
+            }
+        );
     } catch (error) {
         console.error("❌ FastLipa balance error:", error);
-        throw new Error("Balance check failed: " + error.message);
+        throw createGatewayError("Balance check failed", error);
     }
 }
 
@@ -180,14 +221,16 @@ export async function getBalance() {
  */
 export async function listTransactions() {
     try {
-        const response = await fetch(`${FASTLIPA_BASE_URL}/list-transactions`, {
-            headers: getHeaders()
-        });
-
-        const data = await response.json();
-        return data;
+        return await fastlipaFetchJson(
+            `${FASTLIPA_BASE_URL}/list-transactions`,
+            { headers: getHeaders() },
+            {
+                timeoutMs: FASTLIPA_REQUEST_TIMEOUT_MS,
+                maxRetries: Math.max(1, FASTLIPA_DEFAULT_MAX_RETRIES)
+            }
+        );
     } catch (error) {
         console.error("❌ FastLipa list error:", error);
-        throw new Error("Transaction list failed: " + error.message);
+        throw createGatewayError("Transaction list failed", error);
     }
 }

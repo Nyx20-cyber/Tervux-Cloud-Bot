@@ -1,0 +1,688 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "FastLipa API",
+    "description": "RESTful API for seamless payment integration. All requests require `Authorization: Bearer {api_token}` in the header.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "FastLipa Developer Support",
+      "url": "https://fastlipa.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.fastlipa.com",
+      "description": "Production Server"
+    }
+  ],
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "API Token",
+        "description": "Enter your API token. You can obtain it from your FastLipa dashboard."
+      }
+    },
+    "schemas": {
+      "BalanceResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "example": "Account info retrieved"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Account username",
+                "example": "johndoe"
+              },
+              "email": {
+                "type": "string",
+                "description": "Account email address",
+                "example": "john@example.com"
+              },
+              "balance": {
+                "type": "string",
+                "description": "Current account balance with currency appended",
+                "example": "50000 TZS"
+              }
+            }
+          }
+        }
+      },
+      "CreateTransactionRequest": {
+        "type": "object",
+        "required": [
+          "number",
+          "amount",
+          "name"
+        ],
+        "properties": {
+          "number": {
+            "type": "string",
+            "description": "Recipient's phone number. Accepts local format (`0XXXXXXXXX`) or international format (`255XXXXXXXXX`). Minimum 10 characters.",
+            "example": "0695123456"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Amount to transfer in TZS",
+            "example": 5000
+          },
+          "name": {
+            "type": "string",
+            "description": "Recipient's (customer) full name",
+            "example": "John Doe"
+          }
+        }
+      },
+      "CreateTransactionResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "example": "Payment created"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "tranID": {
+                "type": "string",
+                "description": "Unique transaction identifier — save this to check payment status",
+                "example": "pay_aB3xYz9k"
+              },
+              "amount": {
+                "type": "number",
+                "description": "Transaction amount in TZS",
+                "example": 5000
+              },
+              "number": {
+                "type": "string",
+                "description": "Recipient phone number converted to international format",
+                "example": "255695123456"
+              },
+              "network": {
+                "type": "string",
+                "description": "Auto-detected mobile network operator",
+                "enum": [
+                  "AIRTEL",
+                  "TIGO",
+                  "TTCL",
+                  "HALOTEL",
+                  "ZANTEL",
+                  "VODACOM",
+                  "Unknown"
+                ],
+                "example": "AIRTEL"
+              },
+              "status": {
+                "type": "string",
+                "description": "Initial transaction status — always PENDING on creation",
+                "example": "PENDING"
+              },
+              "time": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Transaction creation timestamp",
+                "example": "2025-09-01T10:30:00.000000Z"
+              }
+            }
+          }
+        }
+      },
+      "TransactionStatusResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "example": "Payment status retrieved"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "tranid": {
+                "type": "string",
+                "description": "Transaction identifier",
+                "example": "pay_aB3xYz9k"
+              },
+              "payment_status": {
+                "type": "string",
+                "description": "Current payment status",
+                "enum": [
+                  "PENDING",
+                  "COMPLETED",
+                  "CANCELLED"
+                ],
+                "example": "COMPLETED"
+              },
+              "amount": {
+                "type": "number",
+                "description": "Transaction amount in TZS",
+                "example": 5000
+              },
+              "network": {
+                "type": "string",
+                "description": "Mobile network operator",
+                "enum": [
+                  "AIRTEL",
+                  "TIGO",
+                  "TTCL",
+                  "HALOTEL",
+                  "ZANTEL",
+                  "VODACOM",
+                  "Unknown"
+                ],
+                "example": "AIRTEL"
+              },
+              "time": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Transaction creation timestamp",
+                "example": "2025-09-01T10:30:00.000000Z"
+              }
+            }
+          }
+        }
+      },
+      "ListTransactionsResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "example": "Transaction list retrieved"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "description": "Total number of transactions returned",
+                "example": 2
+              },
+              "transactions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "tranID": {
+                      "type": "string",
+                      "example": "pay_aB3xYz9k"
+                    },
+                    "number": {
+                      "type": "string",
+                      "description": "Recipient phone number in international format",
+                      "example": "255695123456"
+                    },
+                    "amount": {
+                      "type": "number",
+                      "example": 5000
+                    },
+                    "network": {
+                      "type": "string",
+                      "enum": [
+                        "AIRTEL",
+                        "TIGO",
+                        "TTCL",
+                        "HALOTEL",
+                        "ZANTEL",
+                        "VODACOM",
+                        "Unknown"
+                      ],
+                      "example": "VODACOM"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "COMPLETED",
+                        "CANCELLED"
+                      ],
+                      "example": "COMPLETED"
+                    },
+                    "created": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Transaction creation datetime",
+                      "example": "2025-09-01 10:30:00"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ValidationErrorResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": false
+          },
+          "message": {
+            "type": "string",
+            "example": "Missing required"
+          },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "NotFoundResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": false
+          },
+          "message": {
+            "type": "string",
+            "example": "Transaction not found"
+          },
+          "errors": {
+            "type": "object",
+            "example": {
+              "tranid": [
+                "Invalid tranid"
+              ]
+            }
+          }
+        }
+      },
+      "UnauthorizedResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": false
+          },
+          "message": {
+            "type": "string",
+            "example": "Unauthorized"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Account",
+      "description": "Account information and balance"
+    },
+    {
+      "name": "Transactions",
+      "description": "Create and manage payment transactions"
+    }
+  ],
+  "paths": {
+    "/api/balance": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Get Account Info",
+        "description": "Retrieve the authenticated user's account information including username, email, and current balance in TZS.",
+        "operationId": "getBalance",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account information retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceResponse"
+                },
+                "example": {
+                  "status": true,
+                  "message": "Account info retrieved",
+                  "data": {
+                    "name": "johndoe",
+                    "email": "john@example.com",
+                    "balance": "50000 TZS"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — invalid or missing API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/create-transaction": {
+      "post": {
+        "tags": [
+          "Transactions"
+        ],
+        "summary": "Create Transaction",
+        "description": "Initiate a new payment transaction to transfer funds to a recipient via mobile money.\n\nThe phone number is automatically converted from local format (`0XXXXXXXXX`) to international format (`255XXXXXXXXX`). \n\nThe API responds immediately with `PENDING` status while the payment is processed in the background. Use the returned `tranID` to poll for the final status.",
+        "operationId": "createTransaction",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTransactionRequest"
+              },
+              "example": {
+                "number": "0695123456",
+                "amount": 5000,
+                "name": "John Doe"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Transaction created successfully. Use `tranID` to check the payment status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTransactionResponse"
+                },
+                "example": {
+                  "status": true,
+                  "message": "Payment created",
+                  "data": {
+                    "tranID": "pay_aB3xYz9k",
+                    "amount": 5000,
+                    "number": "255695123456",
+                    "network": "AIRTEL",
+                    "status": "PENDING",
+                    "time": "2025-09-01T10:30:00.000000Z"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — invalid or missing API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error — missing or invalid request fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponse"
+                },
+                "example": {
+                  "status": false,
+                  "message": "Missing required",
+                  "errors": {
+                    "number": [
+                      "Phone number is required."
+                    ],
+                    "amount": [
+                      "Amount is required."
+                    ],
+                    "name": [
+                      "Customer name is required."
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/status-transaction": {
+      "get": {
+        "tags": [
+          "Transactions"
+        ],
+        "summary": "Check Transaction Status",
+        "description": "Check the current status of a transaction using its `tranID`. The `tranID` is returned when you create a transaction and follows the format `pay_xxxxxxxx`.\n\nThis endpoint only returns transactions belonging to the authenticated account.\n\n**Possible values for `payment_status`:** `PENDING`, `COMPLETED`, `CANCELLED`",
+        "operationId": "statusTransaction",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tranid",
+            "in": "query",
+            "required": true,
+            "description": "The unique transaction ID returned from the create transaction endpoint (e.g., `pay_aB3xYz9k`)",
+            "schema": {
+              "type": "string",
+              "example": "pay_aB3xYz9k"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transaction status retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionStatusResponse"
+                },
+                "example": {
+                  "status": true,
+                  "message": "Payment status retrieved",
+                  "data": {
+                    "tranid": "pay_aB3xYz9k",
+                    "payment_status": "COMPLETED",
+                    "amount": 5000,
+                    "network": "AIRTEL",
+                    "time": "2025-09-01T10:30:00.000000Z"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — invalid or missing API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transaction not found — `tranid` is invalid or does not belong to your account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundResponse"
+                },
+                "example": {
+                  "status": false,
+                  "message": "Transaction not found",
+                  "errors": {
+                    "tranid": [
+                      "Invalid tranid"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error — `tranid` parameter is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponse"
+                },
+                "example": {
+                  "status": false,
+                  "message": "Missing required",
+                  "errors": {
+                    "tranid": [
+                      "Transaction ID is required to fetch details."
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/list-transaction": {
+      "get": {
+        "tags": [
+          "Transactions"
+        ],
+        "summary": "List Transactions",
+        "description": "Retrieve all transactions within a specified date range for the authenticated account. Results are scoped to your account only — you cannot view other users' transactions.\n\nUseful for generating reports or reconciling transactions for accounting purposes.",
+        "operationId": "listTransactions",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": true,
+            "description": "Start date in `YYYY-MM-DD` format (inclusive)",
+            "schema": {
+              "type": "string",
+              "example": "2025-09-01"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": true,
+            "description": "End date in `YYYY-MM-DD` format (inclusive)",
+            "schema": {
+              "type": "string",
+              "example": "2025-09-05"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transaction list retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTransactionsResponse"
+                },
+                "example": {
+                  "status": true,
+                  "message": "Transaction list retrieved",
+                  "data": {
+                    "count": 2,
+                    "transactions": [
+                      {
+                        "tranID": "pay_aB3xYz9k",
+                        "number": "255695123456",
+                        "amount": 5000,
+                        "network": "AIRTEL",
+                        "status": "COMPLETED",
+                        "created": "2025-09-01 10:30:00"
+                      },
+                      {
+                        "tranID": "pay_mN7pQr2w",
+                        "number": "255712345678",
+                        "amount": 10000,
+                        "network": "VODACOM",
+                        "status": "PENDING",
+                        "created": "2025-09-02 14:00:00"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — invalid or missing API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error — missing date parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponse"
+                },
+                "example": {
+                  "status": false,
+                  "message": "Missing required",
+                  "errors": {
+                    "date_from": [
+                      "Please provide start date."
+                    ],
+                    "date_to": [
+                      "Please provide end date."
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
