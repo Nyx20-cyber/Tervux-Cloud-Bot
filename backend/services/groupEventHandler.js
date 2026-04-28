@@ -295,6 +295,35 @@ function collectContextInfos(node, depth = 0, bucket = []) {
     return bucket;
 }
 
+function isStickerMessage(node, depth = 0) {
+    if (!node || depth > 6) return false;
+
+    // Direct sticker
+    if (node.stickerMessage) return true;
+    
+    // Document acting as a sticker
+    if (node.documentMessage && String(node.documentMessage.mimetype || "").includes("image/webp")) {
+        return true;
+    }
+
+    if (Array.isArray(node)) {
+        for (const item of node) {
+            if (isStickerMessage(item, depth + 1)) return true;
+        }
+        return false;
+    }
+
+    if (typeof node === "object") {
+        // Exclude quoted messages from recursive search so we don't delete messages that simply reply to a sticker
+        for (const [key, value] of Object.entries(node)) {
+            if (key === "quotedMessage") continue;
+            if (isStickerMessage(value, depth + 1)) return true;
+        }
+    }
+
+    return false;
+}
+
 function isVoiceNote(content = {}) {
     const audio = content?.audioMessage;
     return Boolean(audio && (audio.ptt === true || String(audio.mimetype || "").includes("audio/ogg")));
@@ -556,11 +585,20 @@ function isAllowedHostPath(hostname = "", pathname = "") {
     return prefixes.some((prefix) => path.startsWith(prefix));
 }
 
-function isWhitelistedAntilink(candidate = "") {
+function isWhitelistedAntilink(candidate = "", settings = {}) {
     const sanitizedCandidate = sanitizeLinkCandidate(candidate).toLowerCase();
     if (!sanitizedCandidate) return false;
+    
+    // Exact match whitelist
     if (ANTILINK_ALLOWED_EXACT_MATCHES.has(sanitizedCandidate)) {
         return true;
+    }
+
+    // Check if it's the current group's invite link
+    if (settings.inviteCode && sanitizedCandidate.includes("chat.whatsapp.com/")) {
+        if (sanitizedCandidate.includes(`chat.whatsapp.com/${settings.inviteCode.toLowerCase()}`)) {
+            return true;
+        }
     }
 
     const normalized = normalizeLinkCandidate(sanitizedCandidate);
@@ -906,7 +944,7 @@ export async function handleGroupMessage(sock, m) {
         return true;
     }
 
-    const isSticker = !!content.stickerMessage;
+    const isSticker = isStickerMessage(content);
     const isImage = !!content.imageMessage;
     const hasVoiceNote = isVoiceNote(content);
     const hasVideo = !!content.videoMessage;
@@ -1087,7 +1125,7 @@ export async function handleGroupMessage(sock, m) {
 
     if (settings.antilink?.enabled && hasUrl) {
         triggerLabel = "antilink";
-        const blockedLinks = detectedLinks.filter((candidate) => !isWhitelistedAntilink(candidate));
+        const blockedLinks = detectedLinks.filter((candidate) => !isWhitelistedAntilink(candidate, settings));
         if (blockedLinks.length === 0) {
             console.log(`🛡️ [Antilink] Skipping whitelisted link in ${remoteJid}`);
             return false;

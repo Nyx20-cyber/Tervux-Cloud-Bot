@@ -911,43 +911,43 @@ export async function antilink(sock, m, args) {
     const settings = await loadGroupSettings(sock.sessionId, remoteJid);
     const action = args[0]?.toLowerCase();
 
-    if (action === "on" || action === "warn") {
+    if (action === "on" || action === "warn" || action === "delete" || action === "kick") {
+        const mode = (action === "on" || action === "warn") ? "warn" : action;
         settings.antilink.enabled = true;
-        settings.antilink.action = "warn";
+        settings.antilink.action = mode;
+        
+        // Try to fetch and save invite code so we can whitelist this group's link automatically
+        if (await isBotAdmin(sock, remoteJid)) {
+            try {
+                const code = await sock.groupInviteCode(remoteJid);
+                await saveInviteCode(sock.sessionId, remoteJid, code);
+                console.log(`✅ Saved invite code for antilink whitelisting in ${remoteJid}`);
+            } catch (e) {
+                console.warn(`⚠️ Could not fetch invite code for ${remoteJid}:`, e.message);
+            }
+        }
+
         await saveGroupSettings(sock.sessionId, remoteJid, settings);
+
+        const titles = {
+            warn: "𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 - 𝕎𝔸ℝℕ",
+            delete: "𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 - 𝔻𝔼𝕃𝔼𝕋𝔼",
+            kick: "𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 - 𝕂𝕀ℂ𝕂"
+        };
+
+        const texts = {
+            warn: "Links will be deleted and user will be warned.",
+            delete: "Links will be deleted automatically.",
+            kick: "Links will be deleted and user will be removed!"
+        };
+
         return `╔══════════════════════════════════╗
-║  🔗 *𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 - 𝕎𝔸ℝℕ* 🔗  ║
+║  🔗 *${titles[mode]}* 🔗  ║
 ╚══════════════════════════════════╝
 
-Anti-link is now *ON* (Warn mode)
+Anti-link is now *ON* (${mode} mode)
 
-Links will be deleted and user will be warned.`;
-    }
-
-    if (action === "delete") {
-        settings.antilink.enabled = true;
-        settings.antilink.action = "delete";
-        await saveGroupSettings(sock.sessionId, remoteJid, settings);
-        return `╔══════════════════════════════════╗
-║  🔗 *𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 - 𝔻𝔼𝕃𝔼𝕋𝔼* 🔗  ║
-╚══════════════════════════════════╝
-
-Anti-link is now *ON* (Delete mode)
-
-Links will be deleted automatically.`;
-    }
-
-    if (action === "kick") {
-        settings.antilink.enabled = true;
-        settings.antilink.action = "kick";
-        await saveGroupSettings(sock.sessionId, remoteJid, settings);
-        return `╔══════════════════════════════════╗
-║  🔗 *𝔸ℕ𝕋𝕀𝕃𝕀ℕ𝕂 - 𝕂𝕀ℂ𝕂* 🔗  ║
-╚══════════════════════════════════╝
-
-Anti-link is now *ON* (Kick mode)
-
-Links will be deleted and user will be removed!`;
+${texts[mode]}`;
     }
 
     if (action === "off") {
